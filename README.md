@@ -4,7 +4,7 @@ A motion-controlled, highly secure notes vault built with Flutter.
 
 I built this project to experiment with alternative, physical ways of authentication. Instead of typing a PIN or drawing a screen pattern (which can easily be shoulder-surfed by someone sitting next to you), SecretVault relies on a unique Two-Factor Authentication system:
 1. **Biometrics:** Scans your fingerprint to prove identity.
-2. **Spatial Gestures:** You must perform a secret sequence of 4 physical hand movements (e.g., Tilt Left, Shake, Tilt Up, Tilt Right) to unlock the app.
+2. **Spatial Gestures:** You must perform a secret sequence of 4 physical hand movements to unlock the app. The permitted movements are Tilt Left, Tilt Up, Tilt Down, Tilt Right, Shake.
 
 ## Features ✨
 * **Multi-Factor Auth:** Native Android fingerprint integration running sequentially before hardware accelerometer detection.
