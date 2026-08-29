@@ -269,7 +269,7 @@ class _SetupScreenState extends State<SetupScreen>
           const SizedBox(height: 32),
           if (!_isRecording && _recordedPattern.isEmpty)
             _buildPrimaryButton('Start Recording', _startRecording),
-          if (_isRecording)
+          if (_isRecording) ...[
             Text(
               'Listening for gestures... (${_recordedPattern.length}/$_patternLength)',
               style: TextStyle(
@@ -278,10 +278,17 @@ class _SetupScreenState extends State<SetupScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (_recordedPattern.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildSecondaryButton('Reset / Clear Gestures', () {
+                _startRecording();
+              }),
+            ],
+          ],
           if (!_isRecording && _recordedPattern.length == _patternLength) ...[
             _buildPrimaryButton('Continue', _nextStep),
             const SizedBox(height: 12),
-            _buildSecondaryButton('Re-record', () {
+            _buildSecondaryButton('Re-record Pattern', () {
               setState(() => _recordedPattern.clear());
             }),
           ],
@@ -344,7 +351,7 @@ class _SetupScreenState extends State<SetupScreen>
           const SizedBox(height: 32),
           if (!_isRecording && _confirmPattern.isEmpty)
             _buildPrimaryButton('Start Recording', _startRecording),
-          if (_isRecording)
+          if (_isRecording) ...[
             Text(
               'Listening for gestures... (${_confirmPattern.length}/$_patternLength)',
               style: TextStyle(
@@ -353,6 +360,13 @@ class _SetupScreenState extends State<SetupScreen>
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (_confirmPattern.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildSecondaryButton('Reset / Clear Confirm', () {
+                _startRecording();
+              }),
+            ],
+          ],
           if (matched) _buildPrimaryButton('Continue', _nextStep),
           if (failed)
             _buildSecondaryButton('Try Again', () {

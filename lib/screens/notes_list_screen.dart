@@ -20,6 +20,7 @@ class NotesListScreen extends StatefulWidget {
 class _NotesListScreenState extends State<NotesListScreen>
     with WidgetsBindingObserver {
   bool _isSearching = false;
+  bool _isNavigatingToLock = false;
   final _searchController = TextEditingController();
 
   @override
@@ -53,6 +54,8 @@ class _NotesListScreenState extends State<NotesListScreen>
   }
 
   void _navigateToLock() {
+    if (_isNavigatingToLock) return;
+    _isNavigatingToLock = true;
     context.read<NotesProvider>().clear();
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
@@ -69,6 +72,13 @@ class _NotesListScreenState extends State<NotesListScreen>
 
   @override
   Widget build(BuildContext context) {
+    final unlockProvider = context.watch<GestureUnlockProvider>();
+    if (unlockProvider.state != UnlockState.unlocked && !_isNavigatingToLock) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _navigateToLock();
+      });
+    }
+
     final notesProvider = context.watch<NotesProvider>();
 
     return Scaffold(
