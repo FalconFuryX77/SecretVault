@@ -1,10 +1,15 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/note.dart';
+import 'encryption_service.dart';
 
-/// SQLite database service for notes CRUD operations.
+/// SQLite database service with AES-256 encryption for notes CRUD operations.
 class DatabaseService {
   static Database? _database;
+  final EncryptionService _encryption;
+
+  DatabaseService({EncryptionService? encryption})
+      : _encryption = encryption ?? EncryptionService();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -34,22 +39,50 @@ class DatabaseService {
     );
   }
 
-  /// Insert a new note.
+  /// Helper to convert and decrypt a raw database map to a Note model.
+  Future<Note> _decryptNoteMap(Map<String, dynamic> map) async {
+    final decryptedTitle = await _encryption.decryptText(map['title'] as String);
+    final decryptedContent = await _encryption.decryptText(map['content'] as String);
+    return Note(
+      id: map['id'] as String,
+      title: decryptedTitle,
+      content: decryptedContent,
+      createdAt: DateTime.parse(map['createdAt'] as String),
+      updatedAt: DateTime.parse(map['updatedAt'] as String),
+      isPinned: (map['isPinned'] as int) == 1,
+    );
+  }
+
+  /// Insert a new note with AES-256 encrypted title and content.
   Future<void> insertNote(Note note) async {
     final db = await database;
+    final encryptedTitle = await _encryption.encryptText(note.title);
+    final encryptedContent = await _encryption.encryptText(note.content);
+
+    final map = note.toMap();
+    map['title'] = encryptedTitle;
+    map['content'] = encryptedContent;
+
     await db.insert(
       'notes',
-      note.toMap(),
+      map,
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
-  /// Update an existing note.
+  /// Update an existing note with AES-256 encrypted title and content.
   Future<void> updateNote(Note note) async {
     final db = await database;
+    final encryptedTitle = await _encryption.encryptText(note.title);
+    final encryptedContent = await _encryption.encryptText(note.content);
+
+    final map = note.toMap();
+    map['title'] = encryptedTitle;
+    map['content'] = encryptedContent;
+
     await db.update(
       'notes',
-      note.toMap(),
+      map,
       where: 'id = ?',
       whereArgs: [note.id],
     );
@@ -65,17 +98,17 @@ class DatabaseService {
     );
   }
 
-  /// Get all notes, sorted by pinned first, then by updatedAt descending.
+  /// Get all notes, decrypted and sorted by pinned first, then by updatedAt descending.
   Future<List<Note>> getAllNotes() async {
     final db = await database;
     final maps = await db.query(
       'notes',
       orderBy: 'isPinned DESC, updatedAt DESC',
     );
-    return maps.map((map) => Note.fromMap(map)).toList();
+    return Future.wait(maps.map((map) => _decryptNoteMap(map)));
   }
 
-  /// Get all notes sorted by createdAt ascending (oldest first).
+  /// Get all notes sorted by createdAt ascending or descending.
   Future<List<Note>> getNotesByCreationDate({bool ascending = true}) async {
     final db = await database;
     final order = ascending ? 'ASC' : 'DESC';
@@ -83,19 +116,19 @@ class DatabaseService {
       'notes',
       orderBy: 'isPinned DESC, createdAt $order',
     );
-    return maps.map((map) => Note.fromMap(map)).toList();
+    return Future.wait(maps.map((map) => _decryptNoteMap(map)));
   }
 
-  /// Search notes by title or content.
+  /// Search notes by query over decrypted titles and contents.
   Future<List<Note>> searchNotes(String query) async {
-    final db = await database;
-    final maps = await db.query(
-      'notes',
-      where: 'title LIKE ? OR content LIKE ?',
-      whereArgs: ['%$query%', '%$query%'],
-      orderBy: 'isPinned DESC, updatedAt DESC',
-    );
-    return maps.map((map) => Note.fromMap(map)).toList();
+    final allNotes = await getAllNotes();
+    if (query.isEmpty) return allNotes;
+    final lowerQuery = query.toLowerCase();
+    return allNotes
+        .where((n) =>
+            n.title.toLowerCase().contains(lowerQuery) ||
+            n.content.toLowerCase().contains(lowerQuery))
+        .toList();
   }
 
   /// Toggle the pinned state of a note.
@@ -109,7 +142,7 @@ class DatabaseService {
     );
   }
 
-  /// Get a single note by ID.
+  /// Get a single decrypted note by ID.
   Future<Note?> getNote(String id) async {
     final db = await database;
     final maps = await db.query(
@@ -118,7 +151,7 @@ class DatabaseService {
       whereArgs: [id],
     );
     if (maps.isEmpty) return null;
-    return Note.fromMap(maps.first);
+    return await _decryptNoteMap(maps.first);
   }
 
   /// Get total note count.

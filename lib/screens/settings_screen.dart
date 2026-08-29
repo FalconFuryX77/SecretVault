@@ -17,6 +17,15 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
+    final unlockProvider = context.watch<GestureUnlockProvider>();
+    if (unlockProvider.state != UnlockState.unlocked) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      });
+    }
+
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -546,8 +555,34 @@ class _ChangeGestureSheetState extends State<_ChangeGestureSheet> {
           _buildChips(gestures),
           const SizedBox(height: 24),
           if (!_isRecording && gestures.isEmpty) _actionBtn('Start Recording', _startRecording),
-          if (_isRecording) Text('Listening... (${gestures.length}/$_len)', style: TextStyle(color: const Color(0xFFFBBF24).withValues(alpha: 0.8), fontWeight: FontWeight.w600)),
-          if (!_isRecording && gestures.length == _len && _step == 0) _actionBtn('Confirm Pattern', () => setState(() => _step = 1)),
+          if (_isRecording) ...[
+            Text('Listening... (${gestures.length}/$_len)', style: TextStyle(color: const Color(0xFFFBBF24).withValues(alpha: 0.8), fontWeight: FontWeight.w600)),
+            if (gestures.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: _startRecording,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                  ),
+                  child: const Text('Reset / Retry', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ],
+          if (!_isRecording && gestures.length == _len && _step == 0) ...[
+            _actionBtn('Confirm Pattern', () => setState(() => _step = 1)),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () => setState(() => _newPattern.clear()),
+              child: const Center(
+                child: Text('Re-record Pattern', style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
           if (matched) _actionBtn('Save Pattern', _savePattern),
           if (failed) _actionBtn('Retry', () => setState(() => _confirmPattern.clear())),
         ],

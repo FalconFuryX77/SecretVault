@@ -22,7 +22,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   late Animation<double> _shakeAnimation;
   late Animation<double> _unlockAnimation;
 
-  UnlockState? _prevState;
+  UnlockState? _lastHandledState;
   bool _navigated = false;
   bool _hasPromptedBiometrics = false;
 
@@ -53,6 +53,23 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     _unlockAnimation = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _unlockController, curve: Curves.easeOutBack),
     );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _promptBiometricsInitial();
+    });
+  }
+
+  void _promptBiometricsInitial() {
+    if (!mounted) return;
+    final provider = context.read<GestureUnlockProvider>();
+    if (provider.state == UnlockState.locked &&
+        !provider.isBiometricVerified &&
+        !_hasPromptedBiometrics) {
+      _hasPromptedBiometrics = true;
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) provider.authenticateBiometrics();
+      });
+    }
   }
 
   @override
@@ -63,28 +80,21 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  void _onStateChange(GestureUnlockProvider provider) {
-    if (provider.state == UnlockState.locked && !provider.isBiometricVerified && !_hasPromptedBiometrics) {
-      _hasPromptedBiometrics = true;
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) provider.authenticateBiometrics();
-      });
-    }
-
-    final state = provider.state;
-    if (state == _prevState) return;
-    _prevState = state;
+  void _handleStateSideEffects(UnlockState state) {
+    if (state == _lastHandledState) return;
+    _lastHandledState = state;
 
     if (state == UnlockState.failed) {
       _shakeController.forward(from: 0);
     } else if (state == UnlockState.unlocked) {
-      _hasPromptedBiometrics = false; // Reset for next time app locks
       _pulseController.stop();
       _unlockController.forward(from: 0);
       if (!_navigated) {
         _navigated = true;
-        Future.delayed(const Duration(milliseconds: 600), () {
-          if (mounted) _navigateToNotes();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) _navigateToNotes();
+          });
         });
       }
     } else if (state == UnlockState.locked) {
@@ -237,7 +247,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<GestureUnlockProvider>();
-    _onStateChange(provider);
+    _handleStateSideEffects(provider.state);
 
     final isLockout = provider.state == UnlockState.lockout;
 
@@ -254,7 +264,7 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
               const Spacer(flex: 1),
               // App branding
               Text(
-                'SecretVault',
+                'SV Notes',
                 style: GoogleFonts.outfit(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -572,7 +582,6 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
             ],
           ),
           const SizedBox(height: 12),
-          // Fixed-size Row — no ListView, no overflow
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(total, (i) {
@@ -709,80 +718,39 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
   // ─── Bottom controls ─────────────────────────────────
 
   Widget _buildBottomControls(GestureUnlockProvider provider) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        // Manual retry (only when trail has items and not in lockout)
-        if (provider.inputTrail.isNotEmpty &&
-            provider.state != UnlockState.lockout) ...[
-          GestureDetector(
-            onTap: () => provider.retryManual(),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.refresh_rounded,
-                    size: 16,
-                    color: Colors.white.withValues(alpha: 0.4),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Retry',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.white.withValues(alpha: 0.4),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+    return Center(
+      child: GestureDetector(
+        onTap: _showPinDialog,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.08),
             ),
           ),
-          const SizedBox(width: 12),
-        ],
-        // PIN fallback (always visible)
-        GestureDetector(
-          onTap: _showPinDialog,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.08),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.pin_rounded,
+                size: 16,
+                color: Colors.white.withValues(alpha: 0.4),
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.pin_rounded,
-                  size: 16,
+              const SizedBox(width: 8),
+              Text(
+                'Use PIN Instead',
+                style: TextStyle(
+                  fontSize: 13,
                   color: Colors.white.withValues(alpha: 0.4),
+                  fontWeight: FontWeight.w500,
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  'Use PIN Instead',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.4),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 

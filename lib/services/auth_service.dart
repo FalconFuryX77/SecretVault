@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/gesture.dart';
 
-/// Handles storage and verification of gesture pattern and fallback PIN.
+/// Handles secure storage and verification of gesture patterns and fallback PINs.
+/// Uses cryptographically salted HMAC-SHA256 with constant-time verification.
 /// Also persists lockout state and user settings.
 class AuthService {
   static const _patternKey = 'gesture_pattern';
@@ -14,7 +16,10 @@ class AuthService {
   static const _autoLockOnSwitchKey = 'auto_lock_on_switch';
   static const _inactivityTimeoutKey = 'inactivity_timeout_seconds';
 
-  final _storage = const FlutterSecureStorage();
+  final FlutterSecureStorage _storage;
+
+  AuthService({FlutterSecureStorage? storage})
+      : _storage = storage ?? const FlutterSecureStorage();
 
   // ─── Setup ──────────────────────────────────────────────
 
@@ -28,7 +33,7 @@ class AuthService {
     required String pin,
   }) async {
     final patternHash = _hashPattern(pattern);
-    final pinHash = _hashString(pin);
+    final pinHash = _hashInput(pin);
     await _storage.write(key: _patternKey, value: patternHash);
     await _storage.write(key: _pinKey, value: pinHash);
     await _storage.write(key: _setupCompleteKey, value: 'true');
@@ -42,20 +47,31 @@ class AuthService {
   }
 
   Future<void> updatePin(String pin) async {
-    final pinHash = _hashString(pin);
+    final pinHash = _hashInput(pin);
     await _storage.write(key: _pinKey, value: pinHash);
   }
 
   Future<bool> verifyPattern(List<Gesture> pattern) async {
     final stored = await _storage.read(key: _patternKey);
     if (stored == null) return false;
-    return stored == _hashPattern(pattern);
+
+    final patternStr = pattern.map((g) => g.name).join('-');
+    return _verifySaltedHash(
+      input: patternStr,
+      storedHash: stored,
+      onUpgrade: (newHash) => _storage.write(key: _patternKey, value: newHash),
+    );
   }
 
   Future<bool> verifyPin(String pin) async {
     final stored = await _storage.read(key: _pinKey);
     if (stored == null) return false;
-    return stored == _hashString(pin);
+
+    return _verifySaltedHash(
+      input: pin,
+      storedHash: stored,
+      onUpgrade: (newHash) => _storage.write(key: _pinKey, value: newHash),
+    );
   }
 
   // ─── Lockout persistence ────────────────────────────────
@@ -119,15 +135,82 @@ class AuthService {
     await _storage.write(key: _inactivityTimeoutKey, value: seconds.toString());
   }
 
-  // ─── Hashing ────────────────────────────────────────────
+  // ─── Cryptographic Hashing & Salt ───────────────────────
 
   String _hashPattern(List<Gesture> pattern) {
     final patternStr = pattern.map((g) => g.name).join('-');
-    return _hashString(patternStr);
+    return _hashInput(patternStr);
   }
 
-  String _hashString(String input) {
-    final bytes = utf8.encode(input);
-    return sha256.convert(bytes).toString();
+  /// Hashes input with a cryptographically secure random 16-byte salt using HMAC-SHA256.
+  /// Formatted as 'saltHex:hashHex'.
+  String _hashInput(String input) {
+    final saltBytes = _generateSecureSalt(16);
+    final saltHex = saltBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+    final hmac = Hmac(sha256, saltBytes);
+    final digest = hmac.convert(utf8.encode(input));
+    final hashHex = digest.toString();
+
+    return '$saltHex:$hashHex';
+  }
+
+  /// Verifies input against stored hash using constant-time string comparison.
+  /// Handles both salted ('salt:hash') and legacy unsalted formats with transparent upgrade.
+  Future<bool> _verifySaltedHash({
+    required String input,
+    required String storedHash,
+    required Future<void> Function(String newHash) onUpgrade,
+  }) async {
+    if (storedHash.contains(':')) {
+      final parts = storedHash.split(':');
+      if (parts.length != 2) return false;
+
+      final saltHex = parts[0];
+      final expectedHashHex = parts[1];
+
+      final saltBytes = _hexToBytes(saltHex);
+      final hmac = Hmac(sha256, saltBytes);
+      final computedDigest = hmac.convert(utf8.encode(input));
+      final computedHashHex = computedDigest.toString();
+
+      return _constantTimeEquals(computedHashHex, expectedHashHex);
+    } else {
+      // Legacy unsalted SHA-256 fallback
+      final legacyDigest = sha256.convert(utf8.encode(input)).toString();
+      final isMatch = _constantTimeEquals(legacyDigest, storedHash);
+      if (isMatch) {
+        // Upgrade legacy hash to modern salted format
+        final upgradedHash = _hashInput(input);
+        await onUpgrade(upgradedHash);
+      }
+      return isMatch;
+    }
+  }
+
+  /// Generates cryptographically secure random bytes for salting.
+  List<int> _generateSecureSalt(int length) {
+    final random = Random.secure();
+    return List<int>.generate(length, (_) => random.nextInt(256));
+  }
+
+  List<int> _hexToBytes(String hex) {
+    final bytes = <int>[];
+    for (int i = 0; i < hex.length; i += 2) {
+      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    }
+    return bytes;
+  }
+
+  /// Constant-time comparison to prevent side-channel timing attacks.
+  bool _constantTimeEquals(String a, String b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    int result = 0;
+    for (int i = 0; i < a.length; i++) {
+      result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return result == 0;
   }
 }

@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../models/note.dart';
+import '../models/gesture.dart';
+import '../providers/gesture_unlock_provider.dart';
 import '../providers/notes_provider.dart';
 import '../services/database_service.dart';
+import 'lock_screen.dart';
 
 class NoteEditorScreen extends StatefulWidget {
   final String noteId;
@@ -15,7 +18,8 @@ class NoteEditorScreen extends StatefulWidget {
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
 }
 
-class _NoteEditorScreenState extends State<NoteEditorScreen> {
+class _NoteEditorScreenState extends State<NoteEditorScreen>
+    with WidgetsBindingObserver {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _db = DatabaseService();
@@ -28,7 +32,33 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadNote();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _saveCurrentState();
+      final unlockProvider = context.read<GestureUnlockProvider>();
+      unlockProvider.onAppPaused();
+      if (unlockProvider.state != UnlockState.unlocked) {
+        _forceNavigateToLock();
+      }
+    }
+  }
+
+  void _forceNavigateToLock() {
+    _saveTimer?.cancel();
+    context.read<NotesProvider>().clear();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LockScreen()),
+        (route) => false,
+      );
+    }
   }
 
   Future<void> _loadNote() async {
@@ -49,8 +79,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _saveTimer = Timer(const Duration(seconds: 2), _autoSave);
   }
 
-  Future<void> _autoSave() async {
-    if (!_hasChanges || _note == null) return;
+  Future<void> _saveCurrentState() async {
+    if (_note == null) return;
     _note = _note!.copyWith(
       title: _titleController.text,
       content: _contentController.text,
@@ -60,16 +90,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _hasChanges = false;
   }
 
+  Future<void> _autoSave() async {
+    if (!_hasChanges || _note == null) return;
+    await _saveCurrentState();
+  }
+
   Future<void> _saveAndPop() async {
     _saveTimer?.cancel();
-    if (_note != null) {
-      _note = _note!.copyWith(
-        title: _titleController.text,
-        content: _contentController.text,
-        updatedAt: DateTime.now(),
-      );
-      await _db.updateNote(_note!);
-    }
+    await _saveCurrentState();
     if (mounted) {
       context.read<NotesProvider>().loadNotes();
       Navigator.of(context).pop();
@@ -100,6 +128,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _titleController.dispose();
     _contentController.dispose();
@@ -108,6 +137,13 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final unlockProvider = context.watch<GestureUnlockProvider>();
+    if (unlockProvider.state != UnlockState.unlocked) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _forceNavigateToLock();
+      });
+    }
+
     if (_isLoading) {
       return Scaffold(
         body: Container(
