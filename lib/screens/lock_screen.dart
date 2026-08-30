@@ -6,6 +6,7 @@ import '../models/gesture.dart';
 import '../models/motion_point.dart';
 import '../providers/gesture_unlock_provider.dart';
 import '../providers/vault_provider.dart';
+import '../services/gesture_detector.dart';
 import 'vault_home_screen.dart';
 
 /// 3D Wand Spatial Unlock Screen.
@@ -378,21 +379,23 @@ class _MotionTrailPainter extends CustomPainter {
     final centerX = size.width / 2;
     final centerY = size.height / 2;
 
+    final offsets = GestureDetectorService.compute2DPath(trail, scale: 1.2);
+    if (offsets.isEmpty) return;
+
     final path = Path();
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    for (int i = 0; i < trail.length; i++) {
-      final point = trail[i];
-      // Convert angular velocity and tilt into canvas coordinates
-      final x = centerX + (point.gx * 45) + (point.ax * 8);
-      final y = centerY + (point.gy * 45) - (point.ay * 8);
+    for (int i = 0; i < offsets.length; i++) {
+      final off = offsets[i];
+      final x = (centerX + off.dx).clamp(20.0, size.width - 20.0);
+      final y = (centerY + off.dy).clamp(20.0, size.height - 20.0);
 
-      final progress = i / trail.length;
+      final progress = (i + 1) / offsets.length;
       paint
-        ..strokeWidth = 2.0 + (progress * 4.0)
+        ..strokeWidth = 3.0 + (progress * 4.5)
         ..color = isRecording
             ? Color.lerp(const Color(0xFF38BDF8), const Color(0xFFA78BFA), progress)!.withOpacity(progress)
             : Colors.white.withOpacity(progress * 0.4);
@@ -404,12 +407,12 @@ class _MotionTrailPainter extends CustomPainter {
       }
 
       // Draw particle dot at head
-      if (i == trail.length - 1) {
+      if (i == offsets.length - 1) {
         final glowPaint = Paint()
-          ..color = const Color(0xFFA78BFA).withOpacity(0.8)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-        canvas.drawCircle(Offset(x, y), 6, glowPaint);
-        canvas.drawCircle(Offset(x, y), 3.5, Paint()..color = Colors.white);
+          ..color = const Color(0xFFA78BFA).withOpacity(0.9)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+        canvas.drawCircle(Offset(x, y), 8, glowPaint);
+        canvas.drawCircle(Offset(x, y), 4.5, Paint()..color = Colors.white);
       }
     }
 

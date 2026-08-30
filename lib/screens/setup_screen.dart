@@ -447,17 +447,22 @@ class _CalibrationPainter extends CustomPainter {
 
     final centerX = size.width / 2;
     final centerY = size.height / 2;
+
+    final offsets = GestureDetectorService.compute2DPath(points, scale: 1.2);
+    if (offsets.isEmpty) return;
+
     final path = Path();
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5
+      ..strokeWidth = 4.0
       ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
       ..color = const Color(0xFFA78BFA);
 
-    for (int i = 0; i < points.length; i++) {
-      final p = points[i];
-      final x = centerX + (p.gx * 45) + (p.ax * 8);
-      final y = centerY + (p.gy * 45) - (p.ay * 8);
+    for (int i = 0; i < offsets.length; i++) {
+      final off = offsets[i];
+      final x = (centerX + off.dx).clamp(20.0, size.width - 20.0);
+      final y = (centerY + off.dy).clamp(20.0, size.height - 20.0);
 
       if (i == 0) {
         path.moveTo(x, y);
