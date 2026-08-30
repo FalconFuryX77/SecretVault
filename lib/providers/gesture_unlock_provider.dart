@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:vibration/vibration.dart';
 import 'package:local_auth/local_auth.dart';
 import '../models/gesture.dart';
+import '../models/motion_point.dart';
+import '../models/gesture_template.dart';
 import '../services/gesture_detector.dart';
 import '../services/auth_service.dart';
 import '../services/encryption_service.dart';
+import '../services/dtw_matcher.dart';
 
 class GestureUnlockProvider extends ChangeNotifier {
   final GestureDetectorService _detector;
@@ -14,9 +17,17 @@ class GestureUnlockProvider extends ChangeNotifier {
   final LocalAuthentication _localAuth;
 
   UnlockState state = UnlockState.locked;
-  List<Gesture> inputTrail = [];
+  VaultType activeVaultType = VaultType.primary;
+
+  // 3D Wand & Air Drawing State
   bool _isSetupComplete = false;
   bool get isSetupComplete => _isSetupComplete;
+
+  GestureTemplate? _masterTemplate;
+  GestureTemplate? _decoyTemplate;
+
+  final List<MotionPoint> _currentTrail = [];
+  List<MotionPoint> get currentTrail => List.unmodifiable(_currentTrail);
 
   bool _isBiometricVerified = false;
   bool get isBiometricVerified => _isBiometricVerified;
@@ -24,27 +35,28 @@ class GestureUnlockProvider extends ChangeNotifier {
   bool _isAuthenticatingBiometrics = false;
   bool get isAuthenticatingBiometrics => _isAuthenticatingBiometrics;
 
-  StreamSubscription? _gestureSub;
-  Timer? _trailResetTimer;
+  StreamSubscription? _motionSub;
+  StreamSubscription? _trajectorySub;
+  StreamSubscription? _panicSub;
+  StreamSubscription? _discreteSub;
 
-  /// Number of gestures required for a pattern.
+  // Legacy trail for discrete mode
+  List<Gesture> inputTrail = [];
+  Timer? _trailResetTimer;
   static const int patternLength = 4;
 
-  // ─── Lockout state ────────────────────────────────────
+  // Lockout State
   static const int maxFailedAttempts = 5;
   static const int lockoutDurationSeconds = 30;
-
   int _failedAttempts = 0;
   int get failedAttempts => _failedAttempts;
-
   int _lockoutRemaining = 0;
   int get lockoutRemaining => _lockoutRemaining;
   Timer? _lockoutTimer;
 
-  // ─── Inactivity state ─────────────────────────────────
+  // Inactivity & Auto-Lock State
   bool _autoLockOnSwitch = true;
   bool get autoLockOnSwitch => _autoLockOnSwitch;
-
   int _inactivityTimeoutSeconds = 30;
   int get inactivityTimeoutSeconds => _inactivityTimeoutSeconds;
   Timer? _inactivityTimer;
@@ -63,12 +75,12 @@ class GestureUnlockProvider extends ChangeNotifier {
 
   Future<void> _init() async {
     _isSetupComplete = await _authService.isSetupComplete();
+    _masterTemplate = await _authService.getMasterTemplate();
+    _decoyTemplate = await _authService.getDecoyTemplate();
 
-    // Load settings
     _autoLockOnSwitch = await _authService.getAutoLockOnSwitch();
     _inactivityTimeoutSeconds = await _authService.getInactivityTimeout();
 
-    // Check for persisted lockout
     _failedAttempts = await _authService.getFailedAttempts();
     final lockoutEnd = await _authService.getLockoutEndTime();
     if (lockoutEnd != null) {
@@ -88,307 +100,352 @@ class GestureUnlockProvider extends ChangeNotifier {
     }
   }
 
-  // ─── Setup ────────────────────────────────────────────
-
-  void onSetupComplete() {
-    _isSetupComplete = true;
-    _startListening();
-    notifyListeners();
-  }
-
-  // ─── Biometrics ─────────────────────────────────────────
-
-  Future<bool> authenticateBiometrics() async {
-    if (_isAuthenticatingBiometrics) return false;
-    _isAuthenticatingBiometrics = true;
-
-    try {
-      final isAvailable =
-          await _localAuth.canCheckBiometrics || await _localAuth.isDeviceSupported();
-      if (!isAvailable) {
-        _isBiometricVerified = true; // Fallback if device lacks hardware
-        notifyListeners();
-        return true;
-      }
-
-      final didAuthenticate = await _localAuth.authenticate(
-        localizedReason: 'Please authenticate to unlock SV Notes',
-        options: const AuthenticationOptions(
-          biometricOnly: false,
-          stickyAuth: true,
-        ),
-      );
-
-      if (didAuthenticate) {
-        _isBiometricVerified = true;
-        notifyListeners();
-      }
-      return didAuthenticate;
-    } catch (_) {
-      return false;
-    } finally {
-      _isAuthenticatingBiometrics = false;
-    }
-  }
-
-  // ─── Gesture Listening ────────────────────────────────
-
   void _startListening() {
-    _gestureSub?.cancel();
+    _stopListening();
     _detector.start();
 
-    _gestureSub = _detector.gestures.listen((g) {
-      if (state == UnlockState.unlocked) return;
-      if (state == UnlockState.lockout) return;
-      if (!_isBiometricVerified) return; // Block input until fingerprint scanned
-
-      _trailResetTimer?.cancel();
-      inputTrail.add(g);
+    // 1. Live motion trail for particle effects
+    _motionSub = _detector.motionPoints.listen((point) {
+      _currentTrail.add(point);
+      if (_currentTrail.length > 50) {
+        _currentTrail.removeAt(0);
+      }
       notifyListeners();
+    });
 
-      if (inputTrail.length >= patternLength) {
-        _verifyPattern();
-      } else {
-        // Auto-reset partial gesture trail after 5 seconds of inactivity
-        _trailResetTimer = Timer(const Duration(seconds: 5), () {
-          if (state == UnlockState.locked && inputTrail.isNotEmpty) {
-            inputTrail.clear();
-            notifyListeners();
-          }
-        });
+    // 2. Trajectory completion (Auto or Manual 3D Wand stroke)
+    _trajectorySub = _detector.trajectoryStream.listen((trajectory) {
+      if (state == UnlockState.locked || state == UnlockState.recording) {
+        _evaluateTrajectory(trajectory);
+      }
+    });
+
+    // 3. Instant Panic Drop / Double Chop trigger
+    _panicSub = _detector.onPanicTriggered.listen((_) {
+      triggerPanicLock();
+    });
+
+    // 4. Legacy discrete tilts
+    _discreteSub = _detector.gestures.listen((gesture) {
+      if (state == UnlockState.locked || state == UnlockState.recording) {
+        _onDiscreteGesture(gesture);
       }
     });
   }
 
-  // ─── Pattern Verification ─────────────────────────────
+  void _stopListening() {
+    _motionSub?.cancel();
+    _motionSub = null;
+    _trajectorySub?.cancel();
+    _trajectorySub = null;
+    _panicSub?.cancel();
+    _panicSub = null;
+    _discreteSub?.cancel();
+    _discreteSub = null;
+    _detector.stop();
+  }
 
-  Future<void> _verifyPattern() async {
-    _trailResetTimer?.cancel();
-    final verified = await _authService.verifyPattern(List.from(inputTrail));
-    if (verified) {
-      state = UnlockState.unlocked;
-      _triggerHaptic(success: true);
-      inputTrail.clear();
-      _failedAttempts = 0;
-      await _authService.clearLockout();
-      _startInactivityTimer();
-    } else {
-      state = UnlockState.failed;
-      _triggerHaptic(success: false);
-      inputTrail.clear();
-      _failedAttempts++;
-      await _authService.setFailedAttempts(_failedAttempts);
+  // ─── Trajectory & 3D Wand Evaluation ─────────────────────
 
-      if (_failedAttempts >= maxFailedAttempts) {
-        // Trigger persistent lockout
-        final endTime = DateTime.now().add(
-          const Duration(seconds: lockoutDurationSeconds),
-        );
-        await _authService.setLockoutEndTime(endTime);
-        _startLockoutCountdown(lockoutDurationSeconds);
-      } else {
-        // Auto-reset after 1.5 seconds
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          if (state == UnlockState.failed) {
-            state = UnlockState.locked;
-            notifyListeners();
-          }
-        });
+  Future<void> _evaluateTrajectory(List<MotionPoint> trajectory) async {
+    if (state == UnlockState.lockout) return;
+
+    // A. Check Master Template
+    if (_masterTemplate != null) {
+      final result = DtwMatcher.match(candidate: trajectory, template: _masterTemplate!);
+      if (result.isMatch) {
+        await _onSuccessfulUnlock(VaultType.primary);
+        return;
       }
     }
+
+    // B. Check Decoy Template
+    if (_decoyTemplate != null) {
+      final result = DtwMatcher.match(candidate: trajectory, template: _decoyTemplate!);
+      if (result.isMatch) {
+        await _onSuccessfulUnlock(VaultType.decoy);
+        return;
+      }
+    }
+
+    // If template exists but did not match, handle attempt
+    if (_masterTemplate != null) {
+      await _onFailedAttempt();
+    }
+  }
+
+  // ─── Manual Air Drawing Trigger ──────────────────────────
+
+  void startAirDrawing() {
+    if (state == UnlockState.lockout) return;
+    _detector.startRecording();
+    state = UnlockState.recording;
     notifyListeners();
   }
 
-  // ─── Lockout Countdown ────────────────────────────────
+  Future<void> stopAirDrawingAndEvaluate() async {
+    if (state == UnlockState.lockout) return;
+    final trajectory = _detector.stopRecording();
+    if (trajectory.length >= 6) {
+      await _evaluateTrajectory(trajectory);
+    } else {
+      state = UnlockState.locked;
+      notifyListeners();
+    }
+  }
+
+  // ─── Legacy Discrete Handler ─────────────────────────────
+
+  void _onDiscreteGesture(Gesture gesture) {
+    if (state == UnlockState.lockout) return;
+
+    _trailResetTimer?.cancel();
+    inputTrail.add(gesture);
+    _vibrateShort();
+
+    if (inputTrail.length == patternLength) {
+      _verifyDiscretePattern();
+    } else {
+      state = UnlockState.recording;
+      notifyListeners();
+      _trailResetTimer = Timer(const Duration(seconds: 4), () {
+        inputTrail.clear();
+        state = UnlockState.locked;
+        notifyListeners();
+      });
+    }
+  }
+
+  Future<void> _verifyDiscretePattern() async {
+    state = UnlockState.authenticating;
+    notifyListeners();
+
+    final isCorrect = await _authService.verifyPattern(inputTrail);
+    if (isCorrect) {
+      await _onSuccessfulUnlock(VaultType.primary);
+    } else {
+      await _onFailedAttempt();
+    }
+    inputTrail.clear();
+  }
+
+  // ─── Biometrics ──────────────────────────────────────────
+
+  Future<bool> authenticateBiometrics() async {
+    if (_isAuthenticatingBiometrics) return false;
+    try {
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isSupported = await _localAuth.isDeviceSupported();
+      if (!canCheck || !isSupported) return false;
+
+      _isAuthenticatingBiometrics = true;
+      notifyListeners();
+
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Authenticate with fingerprint for SecretVault',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+        ),
+      );
+
+      _isAuthenticatingBiometrics = false;
+      if (authenticated) {
+        _isBiometricVerified = true;
+        _vibrateShort();
+        notifyListeners();
+      }
+      return authenticated;
+    } catch (_) {
+      _isAuthenticatingBiometrics = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void resetBiometrics() {
+    _isBiometricVerified = false;
+    notifyListeners();
+  }
+
+  // ─── PIN Fallback ────────────────────────────────────────
+
+  Future<bool> verifyPin(String pin) async {
+    if (state == UnlockState.lockout) return false;
+
+    final vaultType = await _authService.verifyPinWithType(pin);
+    if (vaultType != null) {
+      await _onSuccessfulUnlock(vaultType);
+      return true;
+    } else {
+      await _onFailedAttempt();
+      return false;
+    }
+  }
+
+  // ─── Unlock Success / Failure ────────────────────────────
+
+  Future<void> _onSuccessfulUnlock(VaultType vaultType) async {
+    _failedAttempts = 0;
+    await _authService.clearLockout();
+    activeVaultType = vaultType;
+    state = UnlockState.unlocked;
+    _vibrateSuccess();
+    _resetInactivityTimer();
+    notifyListeners();
+  }
+
+  Future<void> _onFailedAttempt() async {
+    _failedAttempts++;
+    await _authService.setFailedAttempts(_failedAttempts);
+    _vibrateError();
+
+    if (_failedAttempts >= maxFailedAttempts) {
+      _triggerLockout();
+    } else {
+      state = UnlockState.failed;
+      notifyListeners();
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (state == UnlockState.failed) {
+        state = UnlockState.locked;
+        notifyListeners();
+      }
+    }
+  }
+
+  // ─── Panic RAM Wipe & Instant Lock ───────────────────────
+
+  void triggerPanicLock() {
+    _encryptionService.clearMemoryKey();
+    _inactivityTimer?.cancel();
+    _trailResetTimer?.cancel();
+    inputTrail.clear();
+    _currentTrail.clear();
+    _isBiometricVerified = false;
+    state = UnlockState.locked;
+    _vibratePanic();
+    notifyListeners();
+  }
+
+  void lockVault() {
+    _encryptionService.clearMemoryKey();
+    _inactivityTimer?.cancel();
+    _trailResetTimer?.cancel();
+    inputTrail.clear();
+    _isBiometricVerified = false;
+    state = UnlockState.locked;
+    notifyListeners();
+  }
+
+  // ─── Lockout Handling ────────────────────────────────────
+
+  void _triggerLockout() {
+    final endTime = DateTime.now().add(const Duration(seconds: lockoutDurationSeconds));
+    _authService.setLockoutEndTime(endTime);
+    _startLockoutCountdown(lockoutDurationSeconds);
+  }
 
   void _startLockoutCountdown(int seconds) {
     state = UnlockState.lockout;
     _lockoutRemaining = seconds;
-    _trailResetTimer?.cancel();
-    _gestureSub?.cancel();
-    _detector.stop();
+    _stopListening();
     notifyListeners();
 
     _lockoutTimer?.cancel();
-    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       _lockoutRemaining--;
       if (_lockoutRemaining <= 0) {
         timer.cancel();
-        _endLockout();
+        _lockoutTimer = null;
+        _failedAttempts = 0;
+        await _authService.clearLockout();
+        state = UnlockState.locked;
+        _startListening();
+        notifyListeners();
+      } else {
+        notifyListeners();
       }
-      notifyListeners();
     });
   }
 
-  Future<void> _endLockout() async {
-    _lockoutTimer?.cancel();
-    _failedAttempts = 0;
-    _lockoutRemaining = 0;
-    state = UnlockState.locked;
-    await _authService.clearLockout();
+  // ─── Inactivity Auto-Lock ────────────────────────────────
+
+  void onUserActivity() {
+    if (state == UnlockState.unlocked) {
+      _resetInactivityTimer();
+    }
+  }
+
+  void _resetInactivityTimer() {
+    _inactivityTimer?.cancel();
+    if (_inactivityTimeoutSeconds <= 0) return;
+
+    _inactivityTimer = Timer(Duration(seconds: _inactivityTimeoutSeconds), () {
+      if (state == UnlockState.unlocked) {
+        lockVault();
+      }
+    });
+  }
+
+  void onAppLifecycleState(AppLifecycleState appState) {
+    if (appState == AppLifecycleState.paused || appState == AppLifecycleState.inactive) {
+      if (_autoLockOnSwitch && state == UnlockState.unlocked) {
+        lockVault();
+      }
+    }
+  }
+
+  // ─── Setup Callback ──────────────────────────────────────
+
+  Future<void> onSetupComplete() async {
+    _isSetupComplete = true;
+    _masterTemplate = await _authService.getMasterTemplate();
+    _decoyTemplate = await _authService.getDecoyTemplate();
     _startListening();
     notifyListeners();
   }
 
-  // ─── PIN Verification ─────────────────────────────────
+  // ─── Haptics ─────────────────────────────────────────────
 
-  /// Verify fallback PIN with brute-force rate-limiting and lockout protection.
-  Future<bool> verifyPin(String pin) async {
-    final verified = await _authService.verifyPin(pin);
-    if (verified) {
-      state = UnlockState.unlocked;
-      _isBiometricVerified = true; // PIN bypasses biometrics
-      _triggerHaptic(success: true);
-      inputTrail.clear();
-      _failedAttempts = 0;
-      _lockoutTimer?.cancel();
-      _lockoutRemaining = 0;
-      await _authService.clearLockout();
-      _startInactivityTimer();
-      notifyListeners();
-      return true;
-    } else {
-      _triggerHaptic(success: false);
-      _failedAttempts++;
-      await _authService.setFailedAttempts(_failedAttempts);
-
-      if (_failedAttempts >= maxFailedAttempts) {
-        final endTime = DateTime.now().add(
-          const Duration(seconds: lockoutDurationSeconds),
-        );
-        await _authService.setLockoutEndTime(endTime);
-        _startLockoutCountdown(lockoutDurationSeconds);
-      }
-      notifyListeners();
-      return false;
-    }
-  }
-
-  // ─── Manual Retry ─────────────────────────────────────
-
-  /// Clear the current gesture input trail manually.
-  void retryManual() {
-    _trailResetTimer?.cancel();
-    inputTrail.clear();
-    if (state == UnlockState.failed) {
-      state = UnlockState.locked;
-    }
-    notifyListeners();
-  }
-
-  // ─── Inactivity Timer ─────────────────────────────────
-
-  void _startInactivityTimer() {
-    _inactivityTimer?.cancel();
-    if (_inactivityTimeoutSeconds <= 0) return;
-    _inactivityTimer = Timer(
-      Duration(seconds: _inactivityTimeoutSeconds),
-      () {
-        if (state == UnlockState.unlocked) {
-          lock();
-        }
-      },
-    );
-  }
-
-  /// Call this on any user interaction to reset the inactivity timer.
-  void onUserActivity() {
-    if (state == UnlockState.unlocked) {
-      _startInactivityTimer();
-    }
-  }
-
-  // ─── App Lifecycle ────────────────────────────────────
-
-  /// Called when app goes to background. Checks user setting.
-  void onAppPaused() {
-    // Crucial: Do not lock if app paused due to system biometric prompt dialog
-    if (_isAuthenticatingBiometrics) return;
-    if (state != UnlockState.unlocked) return;
-    if (_autoLockOnSwitch) {
-      lock();
-    }
-  }
-
-  /// Called when the app is removed from recents (or force-stopped).
-  /// Always locks regardless of settings.
-  void onAppDetached() {
-    lock();
-  }
-
-  // ─── Settings ─────────────────────────────────────────
-
-  Future<void> setAutoLockOnSwitch(bool value) async {
-    _autoLockOnSwitch = value;
-    await _authService.setAutoLockOnSwitch(value);
-    notifyListeners();
-  }
-
-  Future<void> setInactivityTimeout(int seconds) async {
-    _inactivityTimeoutSeconds = seconds;
-    await _authService.setInactivityTimeout(seconds);
-    if (state == UnlockState.unlocked) {
-      _startInactivityTimer();
-    }
-    notifyListeners();
-  }
-
-  // ─── Pattern/PIN Update ───────────────────────────────
-
-  Future<void> updatePattern(List<Gesture> pattern) async {
-    await _authService.updatePattern(pattern);
-  }
-
-  Future<void> updatePin(String pin) async {
-    await _authService.updatePin(pin);
-  }
-
-  AuthService get authService => _authService;
-
-  // ─── Lock / Reset ─────────────────────────────────────
-
-  Future<void> _triggerHaptic({required bool success}) async {
+  void _vibrateShort() async {
     try {
-      final hasVibrator = await Vibration.hasVibrator();
-      if (hasVibrator != true) return;
-      if (success) {
-        Vibration.vibrate(duration: 200);
-      } else {
-        Vibration.vibrate(pattern: [0, 100, 50, 100]);
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(duration: 40);
       }
     } catch (_) {}
   }
 
-  void lock() {
-    state = UnlockState.locked;
-    _isBiometricVerified = false; // Reset biometrics
-    _trailResetTimer?.cancel();
-    inputTrail.clear();
-    _inactivityTimer?.cancel();
-    _encryptionService.clearMemoryKey();
-
-    // Restart gesture listening
-    if (_isSetupComplete) {
-      _startListening();
-    }
-    notifyListeners();
+  void _vibrateSuccess() async {
+    try {
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(pattern: [0, 60, 40, 80]);
+      }
+    } catch (_) {}
   }
 
-  void reset() {
-    _trailResetTimer?.cancel();
-    inputTrail.clear();
-    _isBiometricVerified = false; // Reset biometrics
-    state = UnlockState.locked;
-    notifyListeners();
+  void _vibrateError() async {
+    try {
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(pattern: [0, 80, 50, 80, 50, 80]);
+      }
+    } catch (_) {}
+  }
+
+  void _vibratePanic() async {
+    try {
+      if (await Vibration.hasVibrator() ?? false) {
+        Vibration.vibrate(pattern: [0, 150, 80, 200]);
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _gestureSub?.cancel();
-    _trailResetTimer?.cancel();
+    _stopListening();
+    _detector.dispose();
     _lockoutTimer?.cancel();
     _inactivityTimer?.cancel();
-    _detector.dispose();
+    _trailResetTimer?.cancel();
     super.dispose();
   }
 }

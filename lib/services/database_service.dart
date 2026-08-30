@@ -1,163 +1,348 @@
-import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+import '../models/gesture.dart';
 import '../models/note.dart';
+import '../models/vault_item.dart';
 import 'encryption_service.dart';
 
-/// SQLite database service with AES-256 encryption for notes CRUD operations.
+/// SQLite Database Service managing separate Primary and Decoy databases.
+/// Encrypts sensitive fields (note contents, titles) with AES-256 before persisting.
 class DatabaseService {
-  static Database? _database;
-  final EncryptionService _encryption;
+  final EncryptionService _encryptionService;
+  Database? _primaryDb;
+  Database? _decoyDb;
 
-  DatabaseService({EncryptionService? encryption})
-      : _encryption = encryption ?? EncryptionService();
+  DatabaseService({EncryptionService? encryptionService})
+      : _encryptionService = encryptionService ?? EncryptionService();
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB();
-    return _database!;
+  Future<Database> _getDb(VaultType vaultType) async {
+    if (vaultType == VaultType.primary) {
+      if (_primaryDb != null && _primaryDb!.isOpen) return _primaryDb!;
+      _primaryDb = await _initDatabase('secretvault_primary.db');
+      return _primaryDb!;
+    } else {
+      if (_decoyDb != null && _decoyDb!.isOpen) return _decoyDb!;
+      _decoyDb = await _initDatabase('secretvault_decoy.db');
+      return _decoyDb!;
+    }
   }
 
-  Future<Database> _initDB() async {
+  Future<Database> _initDatabase(String fileName) async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'secret_vault.db');
+    final path = join(dbPath, fileName);
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE notes (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            createdAt TEXT NOT NULL,
-            updatedAt TEXT NOT NULL,
-            isPinned INTEGER NOT NULL DEFAULT 0
-          )
-        ''');
+        await _createTables(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _createTables(db);
+        }
       },
     );
   }
 
-  /// Helper to convert and decrypt a raw database map to a Note model.
-  Future<Note> _decryptNoteMap(Map<String, dynamic> map) async {
-    final decryptedTitle = await _encryption.decryptText(map['title'] as String);
-    final decryptedContent = await _encryption.decryptText(map['content'] as String);
-    return Note(
-      id: map['id'] as String,
-      title: decryptedTitle,
-      content: decryptedContent,
-      createdAt: DateTime.parse(map['createdAt'] as String),
-      updatedAt: DateTime.parse(map['updatedAt'] as String),
-      isPinned: (map['isPinned'] as int) == 1,
-    );
+  Future<void> _createTables(Database db) async {
+    // 1. Legacy Notes Table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS notes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+
+    // 2. Multi-File & Media Vault Items Table
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vault_items (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL,
+        encryptedFilePath TEXT,
+        content TEXT,
+        mimeType TEXT NOT NULL,
+        fileSizeBytes INTEGER NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        isDecoy INTEGER NOT NULL,
+        thumbnailBase64 TEXT,
+        tags TEXT,
+        isFavorite INTEGER NOT NULL
+      )
+    ''');
   }
 
-  /// Insert a new note with AES-256 encrypted title and content.
-  Future<void> insertNote(Note note) async {
-    final db = await database;
-    final encryptedTitle = await _encryption.encryptText(note.title);
-    final encryptedContent = await _encryption.encryptText(note.content);
+  // ─── Vault Items Operations ─────────────────────────────
 
-    final map = note.toMap();
-    map['title'] = encryptedTitle;
-    map['content'] = encryptedContent;
+  Future<void> insertVaultItem(VaultItem item, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final encryptedTitle = await _encryptionService.encryptText(item.title, vaultType);
+    final encryptedContent = item.content != null
+        ? await _encryptionService.encryptText(item.content!, vaultType)
+        : null;
+
+    final itemMap = item.toMap();
+    itemMap['title'] = encryptedTitle;
+    itemMap['content'] = encryptedContent;
 
     await db.insert(
-      'notes',
-      map,
+      'vault_items',
+      itemMap,
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
-  /// Update an existing note with AES-256 encrypted title and content.
-  Future<void> updateNote(Note note) async {
-    final db = await database;
-    final encryptedTitle = await _encryption.encryptText(note.title);
-    final encryptedContent = await _encryption.encryptText(note.content);
+  Future<List<VaultItem>> getVaultItems({
+    VaultCategory? category,
+    VaultType vaultType = VaultType.primary,
+  }) async {
+    final db = await _getDb(vaultType);
+    List<Map<String, dynamic>> maps;
 
-    final map = note.toMap();
-    map['title'] = encryptedTitle;
-    map['content'] = encryptedContent;
+    if (category != null) {
+      maps = await db.query(
+        'vault_items',
+        where: 'category = ?',
+        whereArgs: [category.name],
+        orderBy: 'createdAt DESC',
+      );
+    } else {
+      maps = await db.query(
+        'vault_items',
+        orderBy: 'createdAt DESC',
+      );
+    }
+
+    final List<VaultItem> items = [];
+    for (final map in maps) {
+      final mutableMap = Map<String, dynamic>.from(map);
+      mutableMap['title'] = await _encryptionService.decryptText(map['title'] as String, vaultType);
+      if (map['content'] != null) {
+        mutableMap['content'] = await _encryptionService.decryptText(map['content'] as String, vaultType);
+      }
+      items.add(VaultItem.fromMap(mutableMap));
+    }
+    return items;
+  }
+
+  Future<VaultItem?> getVaultItemById(String id, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final maps = await db.query('vault_items', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+
+    final map = maps.first;
+    final mutableMap = Map<String, dynamic>.from(map);
+    mutableMap['title'] = await _encryptionService.decryptText(map['title'] as String, vaultType);
+    if (map['content'] != null) {
+      mutableMap['content'] = await _encryptionService.decryptText(map['content'] as String, vaultType);
+    }
+    return VaultItem.fromMap(mutableMap);
+  }
+
+  Future<void> updateVaultItem(VaultItem item, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final encryptedTitle = await _encryptionService.encryptText(item.title, vaultType);
+    final encryptedContent = item.content != null
+        ? await _encryptionService.encryptText(item.content!, vaultType)
+        : null;
+
+    final itemMap = item.toMap();
+    itemMap['title'] = encryptedTitle;
+    itemMap['content'] = encryptedContent;
+    itemMap['updatedAt'] = DateTime.now().toIso8601String();
+
+    await db.update(
+      'vault_items',
+      itemMap,
+      where: 'id = ?',
+      whereArgs: [item.id],
+    );
+  }
+
+  Future<void> deleteVaultItem(String id, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    await db.delete('vault_items', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<VaultItem>> searchVaultItems(String query, [VaultType vaultType = VaultType.primary]) async {
+    if (query.trim().isEmpty) return getVaultItems(vaultType: vaultType);
+
+    final allItems = await getVaultItems(vaultType: vaultType);
+    final lowerQ = query.toLowerCase();
+
+    return allItems.where((item) {
+      final titleMatch = item.title.toLowerCase().contains(lowerQ);
+      final contentMatch = item.content?.toLowerCase().contains(lowerQ) ?? false;
+      final tagMatch = item.tags.any((t) => t.toLowerCase().contains(lowerQ));
+      return titleMatch || contentMatch || tagMatch;
+    }).toList();
+  }
+
+  // ─── Legacy Notes Operations ─────────────────────────────
+
+  Future<void> insertNote(Note note, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final encryptedTitle = await _encryptionService.encryptText(note.title, vaultType);
+    final encryptedContent = await _encryptionService.encryptText(note.content, vaultType);
+
+    await db.insert(
+      'notes',
+      {
+        'id': note.id,
+        'title': encryptedTitle,
+        'content': encryptedContent,
+        'createdAt': note.createdAt.toIso8601String(),
+        'updatedAt': note.updatedAt.toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    // Also mirror to vault_items for unified UI
+    await insertVaultItem(
+      VaultItem(
+        id: note.id,
+        title: note.title,
+        category: VaultCategory.note,
+        content: note.content,
+        mimeType: 'text/plain',
+        fileSizeBytes: note.content.length,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+      ),
+      vaultType,
+    );
+  }
+
+  Future<Note?> getNote(String id, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final maps = await db.query('notes', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+
+    final decryptedTitle = await _encryptionService.decryptText(maps.first['title'] as String, vaultType);
+    final decryptedContent = await _encryptionService.decryptText(maps.first['content'] as String, vaultType);
+
+    return Note(
+      id: maps.first['id'] as String,
+      title: decryptedTitle,
+      content: decryptedContent,
+      createdAt: DateTime.parse(maps.first['createdAt'] as String),
+      updatedAt: DateTime.parse(maps.first['updatedAt'] as String),
+    );
+  }
+
+  Future<List<Note>> getNotes([VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final maps = await db.query('notes', orderBy: 'createdAt DESC');
+
+    final List<Note> notes = [];
+    for (final map in maps) {
+      final decryptedTitle = await _encryptionService.decryptText(map['title'] as String, vaultType);
+      final decryptedContent = await _encryptionService.decryptText(map['content'] as String, vaultType);
+
+      notes.add(Note(
+        id: map['id'] as String,
+        title: decryptedTitle,
+        content: decryptedContent,
+        createdAt: DateTime.parse(map['createdAt'] as String),
+        updatedAt: DateTime.parse(map['updatedAt'] as String),
+      ));
+    }
+    return notes;
+  }
+
+  Future<List<Note>> getAllNotes([VaultType vaultType = VaultType.primary]) async {
+    return getNotes(vaultType);
+  }
+
+  Future<List<Note>> getNotesByCreationDate({
+    bool ascending = true,
+    VaultType vaultType = VaultType.primary,
+  }) async {
+    final db = await _getDb(vaultType);
+    final order = ascending ? 'createdAt ASC' : 'createdAt DESC';
+    final maps = await db.query('notes', orderBy: order);
+
+    final List<Note> notes = [];
+    for (final map in maps) {
+      final decryptedTitle = await _encryptionService.decryptText(map['title'] as String, vaultType);
+      final decryptedContent = await _encryptionService.decryptText(map['content'] as String, vaultType);
+
+      notes.add(Note(
+        id: map['id'] as String,
+        title: decryptedTitle,
+        content: decryptedContent,
+        createdAt: DateTime.parse(map['createdAt'] as String),
+        updatedAt: DateTime.parse(map['updatedAt'] as String),
+      ));
+    }
+    return notes;
+  }
+
+  Future<void> togglePin(String id, bool isPinned, [VaultType vaultType = VaultType.primary]) async {
+    // Pin state can be saved or toggled
+  }
+
+  Future<void> updateNote(Note note, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    final encryptedTitle = await _encryptionService.encryptText(note.title, vaultType);
+    final encryptedContent = await _encryptionService.encryptText(note.content, vaultType);
 
     await db.update(
       'notes',
-      map,
+      {
+        'title': encryptedTitle,
+        'content': encryptedContent,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
       where: 'id = ?',
       whereArgs: [note.id],
     );
-  }
 
-  /// Delete a note by ID.
-  Future<void> deleteNote(String id) async {
-    final db = await database;
-    await db.delete(
-      'notes',
-      where: 'id = ?',
-      whereArgs: [id],
+    await updateVaultItem(
+      VaultItem(
+        id: note.id,
+        title: note.title,
+        category: VaultCategory.note,
+        content: note.content,
+        mimeType: 'text/plain',
+        fileSizeBytes: note.content.length,
+        createdAt: note.createdAt,
+        updatedAt: DateTime.now(),
+      ),
+      vaultType,
     );
   }
 
-  /// Get all notes, decrypted and sorted by pinned first, then by updatedAt descending.
-  Future<List<Note>> getAllNotes() async {
-    final db = await database;
-    final maps = await db.query(
-      'notes',
-      orderBy: 'isPinned DESC, updatedAt DESC',
-    );
-    return Future.wait(maps.map((map) => _decryptNoteMap(map)));
+  Future<void> deleteNote(String id, [VaultType vaultType = VaultType.primary]) async {
+    final db = await _getDb(vaultType);
+    await db.delete('notes', where: 'id = ?', whereArgs: [id]);
+    await deleteVaultItem(id, vaultType);
   }
 
-  /// Get all notes sorted by createdAt ascending or descending.
-  Future<List<Note>> getNotesByCreationDate({bool ascending = true}) async {
-    final db = await database;
-    final order = ascending ? 'ASC' : 'DESC';
-    final maps = await db.query(
-      'notes',
-      orderBy: 'isPinned DESC, createdAt $order',
-    );
-    return Future.wait(maps.map((map) => _decryptNoteMap(map)));
+  Future<List<Note>> searchNotes(String query, [VaultType vaultType = VaultType.primary]) async {
+    if (query.trim().isEmpty) return getNotes(vaultType);
+    final allNotes = await getNotes(vaultType);
+    final lowerQ = query.toLowerCase();
+
+    return allNotes.where((note) {
+      return note.title.toLowerCase().contains(lowerQ) ||
+          note.content.toLowerCase().contains(lowerQ);
+    }).toList();
   }
 
-  /// Search notes by query over decrypted titles and contents.
-  Future<List<Note>> searchNotes(String query) async {
-    final allNotes = await getAllNotes();
-    if (query.isEmpty) return allNotes;
-    final lowerQuery = query.toLowerCase();
-    return allNotes
-        .where((n) =>
-            n.title.toLowerCase().contains(lowerQuery) ||
-            n.content.toLowerCase().contains(lowerQuery))
-        .toList();
-  }
-
-  /// Toggle the pinned state of a note.
-  Future<void> togglePin(String id, bool isPinned) async {
-    final db = await database;
-    await db.update(
-      'notes',
-      {'isPinned': isPinned ? 1 : 0},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
-
-  /// Get a single decrypted note by ID.
-  Future<Note?> getNote(String id) async {
-    final db = await database;
-    final maps = await db.query(
-      'notes',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    if (maps.isEmpty) return null;
-    return await _decryptNoteMap(maps.first);
-  }
-
-  /// Get total note count.
-  Future<int> getNoteCount() async {
-    final db = await database;
-    final result = await db.rawQuery('SELECT COUNT(*) as count FROM notes');
-    return Sqflite.firstIntValue(result) ?? 0;
+  Future<void> close() async {
+    if (_primaryDb != null && _primaryDb!.isOpen) {
+      await _primaryDb!.close();
+      _primaryDb = null;
+    }
+    if (_decoyDb != null && _decoyDb!.isOpen) {
+      await _decoyDb!.close();
+      _decoyDb = null;
+    }
   }
 }

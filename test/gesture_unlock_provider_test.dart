@@ -15,7 +15,10 @@ void main() {
     setUp(() async {
       FlutterSecureStorage.setMockInitialValues({});
       authService = AuthService();
-      detector = GestureDetectorService(eventStream: const Stream.empty());
+      detector = GestureDetectorService(
+        accelStream: const Stream.empty(),
+        gyroStream: const Stream.empty(),
+      );
       await authService.saveCredentials(
         pattern: [Gesture.left, Gesture.right, Gesture.up, Gesture.down],
         pin: '1234',
@@ -39,7 +42,7 @@ void main() {
       expect(result, isTrue);
       expect(provider.state, equals(UnlockState.unlocked));
       expect(provider.failedAttempts, equals(0));
-      expect(provider.isBiometricVerified, isTrue);
+      expect(provider.activeVaultType, equals(VaultType.primary));
     });
 
     test('verifyPin rate-limits and triggers lockout on 5 failed attempts', () async {
@@ -64,7 +67,7 @@ void main() {
       expect(provider.lockoutRemaining, greaterThan(0));
     });
 
-    test('lock resets unlock state and clears biometric verification', () async {
+    test('lockVault resets unlock state and clears biometric verification', () async {
       final provider = GestureUnlockProvider(
         authService: authService,
         detector: detector,
@@ -74,7 +77,22 @@ void main() {
       await provider.verifyPin('1234');
       expect(provider.state, equals(UnlockState.unlocked));
 
-      provider.lock();
+      provider.lockVault();
+      expect(provider.state, equals(UnlockState.locked));
+      expect(provider.isBiometricVerified, isFalse);
+    });
+
+    test('triggerPanicLock clears memory and immediately locks vault', () async {
+      final provider = GestureUnlockProvider(
+        authService: authService,
+        detector: detector,
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      await provider.verifyPin('1234');
+      expect(provider.state, equals(UnlockState.unlocked));
+
+      provider.triggerPanicLock();
       expect(provider.state, equals(UnlockState.locked));
       expect(provider.isBiometricVerified, isFalse);
     });

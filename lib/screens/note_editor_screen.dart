@@ -2,417 +2,150 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../models/note.dart';
-import '../models/gesture.dart';
-import '../providers/gesture_unlock_provider.dart';
-import '../providers/notes_provider.dart';
-import '../services/database_service.dart';
-import 'lock_screen.dart';
+import '../models/vault_item.dart';
+import '../providers/vault_provider.dart';
 
+/// Encrypted Note & Crypto Seed Editor.
 class NoteEditorScreen extends StatefulWidget {
-  final String noteId;
+  final VaultItem? existingItem;
+  final VaultCategory category;
 
-  const NoteEditorScreen({super.key, required this.noteId});
+  const NoteEditorScreen({
+    super.key,
+    this.existingItem,
+    this.category = VaultCategory.note,
+  });
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
 }
 
-class _NoteEditorScreenState extends State<NoteEditorScreen>
-    with WidgetsBindingObserver {
-  final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-  final _db = DatabaseService();
-
-  Note? _note;
-  bool _isLoading = true;
-  Timer? _saveTimer;
+class _NoteEditorScreenState extends State<NoteEditorScreen> {
+  late TextEditingController _titleController;
+  late TextEditingController _contentController;
+  Timer? _autoSaveTimer;
   bool _hasChanges = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _loadNote();
+    _titleController = TextEditingController(text: widget.existingItem?.title ?? '');
+    _contentController = TextEditingController(text: widget.existingItem?.content ?? '');
   }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.detached) {
-      _saveCurrentState();
-      final unlockProvider = context.read<GestureUnlockProvider>();
-      unlockProvider.onAppPaused();
-      if (unlockProvider.state != UnlockState.unlocked) {
-        _forceNavigateToLock();
-      }
-    }
-  }
-
-  void _forceNavigateToLock() {
-    _saveTimer?.cancel();
-    context.read<NotesProvider>().clear();
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LockScreen()),
-        (route) => false,
-      );
-    }
-  }
-
-  Future<void> _loadNote() async {
-    final note = await _db.getNote(widget.noteId);
-    if (note != null && mounted) {
-      setState(() {
-        _note = note;
-        _titleController.text = note.title;
-        _contentController.text = note.content;
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _onChanged() {
-    _hasChanges = true;
-    _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(seconds: 2), _autoSave);
-  }
-
-  Future<void> _saveCurrentState() async {
-    if (_note == null) return;
-    _note = _note!.copyWith(
-      title: _titleController.text,
-      content: _contentController.text,
-      updatedAt: DateTime.now(),
-    );
-    await _db.updateNote(_note!);
-    _hasChanges = false;
-  }
-
-  Future<void> _autoSave() async {
-    if (!_hasChanges || _note == null) return;
-    await _saveCurrentState();
-  }
-
-  Future<void> _saveAndPop() async {
-    _saveTimer?.cancel();
-    await _saveCurrentState();
-    if (mounted) {
-      context.read<NotesProvider>().loadNotes();
-      Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _deleteNote() async {
-    if (_note == null) return;
-    await context.read<NotesProvider>().deleteNote(_note!.id);
-    if (mounted) Navigator.of(context).pop();
-  }
-
-  Future<void> _togglePin() async {
-    if (_note == null) return;
-    await context.read<NotesProvider>().togglePin(_note!);
-    setState(() {
-      _note = _note!.copyWith(isPinned: !_note!.isPinned);
-    });
-  }
-
-  int get _wordCount {
-    final text = _contentController.text.trim();
-    if (text.isEmpty) return 0;
-    return text.split(RegExp(r'\s+')).length;
-  }
-
-  int get _charCount => _contentController.text.length;
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _saveTimer?.cancel();
+    _autoSaveTimer?.cancel();
     _titleController.dispose();
     _contentController.dispose();
     super.dispose();
   }
 
+  void _onChanged() {
+    _hasChanges = true;
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(seconds: 2), _saveNote);
+  }
+
+  Future<void> _saveNote() async {
+    final title = _titleController.text.trim();
+    final content = _contentController.text.trim();
+
+    if (title.isEmpty && content.isEmpty) return;
+
+    await context.read<VaultProvider>().saveNote(
+          id: widget.existingItem?.id,
+          title: title.isEmpty ? (widget.category == VaultCategory.keySecret ? 'Secret Key Seed' : 'Untitled Note') : title,
+          content: content,
+          category: widget.category,
+        );
+
+    _hasChanges = false;
+  }
+
+  Future<void> _saveAndPop() async {
+    _autoSaveTimer?.cancel();
+    await _saveNote();
+    if (mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final unlockProvider = context.watch<GestureUnlockProvider>();
-    if (unlockProvider.state != UnlockState.unlocked) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _forceNavigateToLock();
-      });
-    }
-
-    if (_isLoading) {
-      return Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF0F0C29),
-                Color(0xFF1A1744),
-                Color(0xFF24243E),
-              ],
-            ),
-          ),
-          child: const Center(
-            child: CircularProgressIndicator(color: Color(0xFFA78BFA)),
-          ),
-        ),
-      );
-    }
+    final isSeed = widget.category == VaultCategory.keySecret;
 
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F0C29), Color(0xFF1A1744), Color(0xFF24243E)],
-          ),
+      backgroundColor: const Color(0xFF090D16),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          onPressed: _saveAndPop,
         ),
-        child: SafeArea(
+        title: Row(
+          children: [
+            Icon(
+              isSeed ? Icons.key_rounded : Icons.description_rounded,
+              color: isSeed ? const Color(0xFF38BDF8) : const Color(0xFFA78BFA),
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isSeed ? 'Crypto Seed' : 'Encrypted Note',
+              style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.check_rounded, color: Color(0xFF34D399)),
+            onPressed: _saveAndPop,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           child: Column(
             children: [
-              // App bar
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back_rounded,
-                        color: Colors.white,
-                      ),
-                      onPressed: _saveAndPop,
-                    ),
-                    const Spacer(),
-                    if (_note?.isPinned == true)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Icon(
-                          Icons.push_pin_rounded,
-                          size: 18,
-                          color: const Color(0xFFFBBF24).withValues(alpha: 0.7),
-                        ),
-                      ),
-                    PopupMenuButton<String>(
-                      icon: Icon(
-                        Icons.more_vert_rounded,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                      color: const Color(0xFF1A1744),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.1),
-                        ),
-                      ),
-                      onSelected: (val) {
-                        if (val == 'pin') _togglePin();
-                        if (val == 'delete') _confirmDelete();
-                      },
-                      itemBuilder: (_) => [
-                        PopupMenuItem(
-                          value: 'pin',
-                          child: Row(
-                            children: [
-                              Icon(
-                                _note?.isPinned == true
-                                    ? Icons.push_pin_outlined
-                                    : Icons.push_pin_rounded,
-                                size: 18,
-                                color: Colors.white.withValues(alpha: 0.6),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                _note?.isPinned == true ? 'Unpin' : 'Pin Note',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.8),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.delete_rounded,
-                                size: 18,
-                                color: const Color(0xFFF87171)
-                                    .withValues(alpha: 0.8),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Delete',
-                                style: TextStyle(
-                                  color: const Color(0xFFF87171)
-                                      .withValues(alpha: 0.8),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+              TextField(
+                controller: _titleController,
+                onChanged: (_) => _onChanged(),
+                style: GoogleFonts.outfit(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+                decoration: InputDecoration(
+                  hintText: isSeed ? 'Wallet / Key Label (e.g. Ledger Main)' : 'Note Title...',
+                  hintStyle: GoogleFonts.outfit(fontSize: 22, color: Colors.white30, fontWeight: FontWeight.bold),
+                  border: InputBorder.none,
                 ),
               ),
-
-              // Title field
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              const Divider(color: Colors.white12, height: 24),
+              Expanded(
                 child: TextField(
-                  controller: _titleController,
-                  style: GoogleFonts.outfit(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
+                  controller: _contentController,
+                  onChanged: (_) => _onChanged(),
+                  maxLines: null,
+                  expands: true,
+                  style: GoogleFonts.firaCode(
+                    fontSize: 14,
+                    color: Colors.white.withOpacity(0.85),
+                    height: 1.6,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Note Title',
-                    hintStyle: GoogleFonts.outfit(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white.withValues(alpha: 0.15),
-                    ),
+                    hintText: isSeed
+                        ? 'Enter 12/24 recovery words (e.g. abandon ability able about...)'
+                        : 'Type confidential note here...',
+                    hintStyle: GoogleFonts.outfit(fontSize: 14, color: Colors.white24),
                     border: InputBorder.none,
                   ),
-                  maxLines: 1,
-                  onChanged: (_) => _onChanged(),
-                ),
-              ),
-
-              // Content field
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
-                  child: TextField(
-                    controller: _contentController,
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Colors.white.withValues(alpha: 0.75),
-                      height: 1.7,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Start writing...',
-                      hintStyle: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        fontSize: 15,
-                      ),
-                      border: InputBorder.none,
-                    ),
-                    maxLines: null,
-                    expands: true,
-                    textAlignVertical: TextAlignVertical.top,
-                    onChanged: (_) => _onChanged(),
-                  ),
-                ),
-              ),
-
-              // Bottom bar — word/char count
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  border: Border(
-                    top: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.06),
-                    ),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      '$_wordCount words',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withValues(alpha: 0.25),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Text(
-                      '$_charCount characters',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.white.withValues(alpha: 0.25),
-                      ),
-                    ),
-                    const Spacer(),
-                    if (_hasChanges)
-                      Text(
-                        'Auto-saving...',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: const Color(0xFFFBBF24)
-                              .withValues(alpha: 0.5),
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                  ],
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  void _confirmDelete() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1744),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        title: Text(
-          'Delete Note',
-          style: GoogleFonts.outfit(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        content: Text(
-          'This action cannot be undone.',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF87171),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              _deleteNote();
-            },
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
       ),
     );
   }
