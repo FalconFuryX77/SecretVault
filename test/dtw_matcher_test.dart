@@ -112,5 +112,44 @@ void main() {
       expect(result.isMatch, isTrue);
       expect(result.confidence, greaterThan(0.85));
     });
+
+    test('Pure translation circle (fixed phone orientation, zero gyro) matches spatial circle', () {
+      // User slides phone in a physical circle in space keeping the screen facing forward
+      List<MotionPoint> makeTranslationCircle(int count, double gravityZ) {
+        return List.generate(count, (i) {
+          final theta = (i / (count - 1)) * 2 * pi;
+          return MotionPoint(
+            timestampMs: i * 25,
+            gx: 0.0, // Zero rotation
+            gy: 0.0,
+            gz: 0.0,
+            ax: cos(theta) * 3.5,
+            ay: sin(theta) * 3.5,
+            az: gravityZ,
+          );
+        });
+      }
+
+      final tmplPoints = makeTranslationCircle(36, 9.81);
+      final translationTemplate = GestureTemplate(
+        id: 'trans-circle',
+        name: 'Slide Circle',
+        points: tmplPoints,
+        durationMs: 900,
+        createdAt: DateTime.now(),
+      );
+
+      // Candidate 1: Same circle drawn in front of chest
+      final candidateChest = makeTranslationCircle(36, 9.81);
+      final res1 = DtwMatcher.match(candidate: candidateChest, template: translationTemplate);
+      expect(res1.isMatch, isTrue);
+      expect(res1.confidence, greaterThan(0.90));
+
+      // Candidate 2: Same circle drawn above head (different gravity axis az = -9.81)
+      final candidateAboveHead = makeTranslationCircle(36, -9.81);
+      final res2 = DtwMatcher.match(candidate: candidateAboveHead, template: translationTemplate);
+      expect(res2.isMatch, isTrue);
+      expect(res2.confidence, greaterThan(0.85));
+    });
   });
 }

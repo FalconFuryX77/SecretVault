@@ -1,20 +1,22 @@
 import 'dart:math';
+import 'dart:ui';
 import '../models/motion_point.dart';
 import '../models/gesture_template.dart';
+import 'gesture_detector.dart';
 
-/// Pure Dart Dynamic Time Warping (DTW) matcher with Z-Score normalization,
-/// angular direction cosine alignment, and noise-robust morphological shape comparison.
+/// Pure Dart Dynamic Time Warping (DTW) matcher with 2D/3D relative spatial path integration,
+/// Z-Score normalization, orientation invariance, and shape/direction matching.
 class DtwMatcher {
   /// Standard resampled point count for trajectory comparison
   static const int resampledLength = 36;
 
   /// Sakoe-Chiba window radius to constrain warping path
-  static const int warpingWindow = 10;
+  static const int warpingWindow = 8;
 
   /// Default acceptance threshold for distance score (lower = stricter match)
-  static const double defaultMatchThreshold = 3.0;
+  static const double defaultMatchThreshold = 3.2;
 
-  /// Compares an input trajectory against a stored template using multi-dimensional DTW.
+  /// Compares an input trajectory against a stored template using spatial path + kinematic DTW.
   /// Returns a [DtwResult] containing the normalized distance score and match verdict.
   static DtwResult match({
     required List<MotionPoint> candidate,
@@ -33,24 +35,20 @@ class DtwMatcher {
     final List<MotionPoint> resampledCandidate = resample(candidate, resampledLength);
     final List<MotionPoint> resampledTemplate = resample(template.points, resampledLength);
 
-    // 2. Energy check: Validate movement dynamic energy
-    double candidateGyroEnergy = 0.0;
-    double candidateAccelEnergy = 0.0;
+    // 2. Energy check: Reject stationary candidates if template has deliberate motion
+    double candEnergy = 0.0;
     for (final p in resampledCandidate) {
-      candidateGyroEnergy += p.gyroMagnitude;
-      candidateAccelEnergy += p.dynamicAcceleration;
+      candEnergy += p.dynamicAcceleration + p.gyroMagnitude;
     }
-    candidateGyroEnergy /= resampledCandidate.length;
-    candidateAccelEnergy /= resampledCandidate.length;
+    candEnergy /= resampledCandidate.length;
 
-    double templateGyroEnergy = 0.0;
+    double tmplEnergy = 0.0;
     for (final p in resampledTemplate) {
-      templateGyroEnergy += p.gyroMagnitude;
+      tmplEnergy += p.dynamicAcceleration + p.gyroMagnitude;
     }
-    templateGyroEnergy /= resampledTemplate.length;
+    tmplEnergy /= resampledTemplate.length;
 
-    // Reject stationary or flat lines if template requires active rotation
-    if (candidateGyroEnergy < 0.35 && templateGyroEnergy >= 0.8 && candidateAccelEnergy < 2.0) {
+    if (candEnergy < 0.45 && tmplEnergy >= 1.0) {
       return const DtwResult(
         score: 99.0,
         confidence: 0.0,
@@ -58,20 +56,19 @@ class DtwMatcher {
       );
     }
 
-    // 3. Compute Z-Score normalized feature matrices
-    final List<List<double>> normCandidate = _zScoreNormalize(resampledCandidate);
-    final List<List<double>> normTemplate = _zScoreNormalize(resampledTemplate);
+    // 3. Compute 2D relative spatial paths for both trajectories
+    final List<Offset> candidatePath = GestureDetectorService.compute2DPath(resampledCandidate);
+    final List<Offset> templatePath = GestureDetectorService.compute2DPath(resampledTemplate);
 
-    // 4. Compute constrained DTW distance on normalized trajectories
-    final double cost = _computeDtwCost(
-      normCandidate,
-      normTemplate,
-      resampledCandidate,
-      resampledTemplate,
-    );
+    // 4. Compute Z-Score normalized feature matrices (combines spatial path + velocity + gyro)
+    final List<List<double>> normCandidate = _extractFeatureMatrix(resampledCandidate, candidatePath);
+    final List<List<double>> normTemplate = _extractFeatureMatrix(resampledTemplate, templatePath);
+
+    // 5. Compute constrained DTW distance on normalized trajectories
+    final double cost = _computeDtwCost(normCandidate, normTemplate);
     final double normalizedScore = cost / resampledLength;
 
-    // 5. Compute confidence percentage [0.0 - 1.0]
+    // 6. Compute confidence percentage [0.0 - 1.0]
     final double confidence = max(0.0, min(1.0, 1.0 - (normalizedScore / (threshold * 1.5))));
     final bool isMatch = normalizedScore <= threshold;
 
@@ -86,8 +83,6 @@ class DtwMatcher {
   static double _computeDtwCost(
     List<List<double>> norm1,
     List<List<double>> norm2,
-    List<MotionPoint> raw1,
-    List<MotionPoint> raw2,
   ) {
     final int n = norm1.length;
     final int m = norm2.length;
@@ -104,12 +99,7 @@ class DtwMatcher {
       final int endJ = min(m, i + warpingWindow);
 
       for (int j = startJ; j <= endJ; j++) {
-        final double dist = _pointDistance(
-          norm1[i - 1],
-          norm2[j - 1],
-          raw1[i - 1],
-          raw2[j - 1],
-        );
+        final double dist = _vectorDistance(norm1[i - 1], norm2[j - 1]);
         final double minPrev = min(
           dtw[i - 1][j], // Insertion
           min(
@@ -125,85 +115,86 @@ class DtwMatcher {
     return dtw[n][m];
   }
 
-  /// Multi-dimensional distance between normalized 6-channel state vectors
-  /// combined with angular velocity direction cosine alignment and raw acceleration shapes.
-  static double _pointDistance(
-    List<double> n1,
-    List<double> n2,
-    MotionPoint raw1,
-    MotionPoint raw2,
-  ) {
-    // 1. Normalized Gyro & Accel Euclidean distance
-    double normSumSq = 0.0;
-    for (int k = 0; k < 6; k++) {
-      final double diff = n1[k] - n2[k];
-      final double weight = (k < 3) ? 1.3 : 0.7; // Gyroscope channels have higher weight
-      normSumSq += diff * diff * weight;
-    }
-    final double normEuclidean = sqrt(normSumSq);
+  /// Multi-dimensional distance between normalized feature vectors
+  static double _vectorDistance(List<double> v1, List<double> v2) {
+    // Feature channels: [px, py, vx, vy, dax, day, gx, gy, gz]
+    const weights = [1.5, 1.5, 1.3, 1.3, 1.0, 1.0, 0.9, 0.9, 0.9];
+    double sumSq = 0.0;
 
-    // 2. Angular Direction Cosine alignment
-    final double mag1 = raw1.gyroMagnitude;
-    final double mag2 = raw2.gyroMagnitude;
-    double cosinePenalty = 0.0;
-
-    if (mag1 > 0.3 && mag2 > 0.3) {
-      final double dot = (raw1.gx * raw2.gx + raw1.gy * raw2.gy + raw1.gz * raw2.gz) / (mag1 * mag2);
-      final double clampedDot = max(-1.0, min(1.0, dot));
-      // Significant penalty for inverted directions (e.g. dot = -1 yields 2.0 penalty)
-      cosinePenalty = (1.0 - clampedDot) * 1.0;
-    } else if ((mag1 > 0.8 && mag2 < 0.2) || (mag2 > 0.8 && mag1 < 0.2)) {
-      // One has large rotation and the other has none
-      cosinePenalty = 1.5;
+    for (int k = 0; k < v1.length; k++) {
+      final double diff = v1[k] - v2[k];
+      final double w = k < weights.length ? weights[k] : 1.0;
+      sumSq += diff * diff * w;
     }
 
-    return normEuclidean + cosinePenalty;
+    return sqrt(sumSq);
   }
 
-  /// Z-Score normalizes each of the 6 sensor channels across the trajectory
-  /// to eliminate scale, velocity, and amplitude variations.
-  static List<List<double>> _zScoreNormalize(List<MotionPoint> points) {
+  /// Extracts a normalized feature matrix:
+  /// [px, py, vx, vy, dax, day, gx, gy, gz] with per-channel Z-score scaling.
+  static List<List<double>> _extractFeatureMatrix(
+    List<MotionPoint> points,
+    List<Offset> path,
+  ) {
     final int count = points.length;
     if (count == 0) return [];
 
-    final List<double> means = List.filled(6, 0.0);
-    final List<double> stdDevs = List.filled(6, 0.0);
+    final refAx = points.first.ax;
+    final refAy = points.first.ay;
 
-    // Compute channel means
-    for (final p in points) {
-      means[0] += p.gx;
-      means[1] += p.gy;
-      means[2] += p.gz;
-      means[3] += p.ax;
-      means[4] += p.ay;
-      means[5] += p.az;
+    final List<List<double>> rawRows = [];
+    for (int i = 0; i < count; i++) {
+      final p = points[i];
+      final off = i < path.length ? path[i] : Offset.zero;
+
+      // Velocity vectors for directionality
+      final double vx = (i > 0 && i < path.length) ? (path[i].dx - path[i - 1].dx) : 0.0;
+      final double vy = (i > 0 && i < path.length) ? (path[i].dy - path[i - 1].dy) : 0.0;
+
+      rawRows.add([
+        off.dx,
+        off.dy,
+        vx,
+        vy,
+        p.ax - refAx,
+        p.ay - refAy,
+        p.gx,
+        p.gy,
+        p.gz,
+      ]);
     }
-    for (int k = 0; k < 6; k++) {
+
+    final int numChannels = rawRows.first.length;
+    final List<double> means = List.filled(numChannels, 0.0);
+    final List<double> stdDevs = List.filled(numChannels, 0.0);
+
+    for (final row in rawRows) {
+      for (int k = 0; k < numChannels; k++) {
+        means[k] += row[k];
+      }
+    }
+    for (int k = 0; k < numChannels; k++) {
       means[k] /= count;
     }
 
-    // Compute channel standard deviations
-    for (final p in points) {
-      final vals = [p.gx, p.gy, p.gz, p.ax, p.ay, p.az];
-      for (int k = 0; k < 6; k++) {
-        final double diff = vals[k] - means[k];
+    for (final row in rawRows) {
+      for (int k = 0; k < numChannels; k++) {
+        final diff = row[k] - means[k];
         stdDevs[k] += diff * diff;
       }
     }
-    for (int k = 0; k < 6; k++) {
+    for (int k = 0; k < numChannels; k++) {
       stdDevs[k] = sqrt(stdDevs[k] / count);
-      if (stdDevs[k] < 0.1) stdDevs[k] = 1.0; // Avoid division by near-zero for constant channels
+      if (stdDevs[k] < 0.05) stdDevs[k] = 1.0;
     }
 
-    // Produce normalized matrix [count x 6]
     final List<List<double>> normalized = [];
-    for (final p in points) {
-      final vals = [p.gx, p.gy, p.gz, p.ax, p.ay, p.az];
-      final List<double> row = List.filled(6, 0.0);
-      for (int k = 0; k < 6; k++) {
-        row[k] = (vals[k] - means[k]) / stdDevs[k];
+    for (final row in rawRows) {
+      final List<double> normRow = List.filled(numChannels, 0.0);
+      for (int k = 0; k < numChannels; k++) {
+        normRow[k] = (row[k] - means[k]) / stdDevs[k];
       }
-      normalized.add(row);
+      normalized.add(normRow);
     }
 
     return normalized;
