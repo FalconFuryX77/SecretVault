@@ -90,15 +90,16 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   GestureTemplate _createTemplate(String name, List<List<MotionPoint>> samples) {
-    // Select the cleanest sample or resampled average
-    final primarySample = samples.first;
+    final fusedPoints = DtwMatcher.fuseTemplates(samples);
+    final avgDuration = samples.isNotEmpty
+        ? (samples.map((s) => s.isNotEmpty ? s.last.timestampMs - s.first.timestampMs : 1200).reduce((a, b) => a + b) ~/ samples.length)
+        : 1200;
+
     return GestureTemplate(
       id: const Uuid().v4(),
       name: name,
-      points: DtwMatcher.resample(primarySample, DtwMatcher.resampledLength),
-      durationMs: primarySample.isNotEmpty
-          ? primarySample.last.timestampMs - primarySample.first.timestampMs
-          : 1200,
+      points: fusedPoints,
+      durationMs: avgDuration,
       createdAt: DateTime.now(),
     );
   }

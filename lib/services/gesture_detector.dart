@@ -4,9 +4,8 @@ import 'package:sensors_plus/sensors_plus.dart';
 import '../models/gesture.dart';
 import '../models/motion_point.dart';
 
-/// 6-DOF Spatial Motion & 3D Wand Trajectory Service.
-/// Fuses Accelerometer (linear motion & gravity) and Gyroscope (rotation rates)
-/// to detect fluid continuous air strokes, discrete gestures, and instant panic drops.
+/// 6-DOF Spatial Motion & 3D Wand Trajectory Service with EMA low-pass filtering,
+/// deadzone trimming, and dynamic gesture stabilization.
 class GestureDetectorService {
   // Streams
   final _gestureController = StreamController<Gesture>.broadcast();
@@ -28,9 +27,11 @@ class GestureDetectorService {
   StreamSubscription? _accelSub;
   StreamSubscription? _gyroSub;
 
-  // Current reading buffers
-  double _lastGx = 0.0, _lastGy = 0.0, _lastGz = 0.0;
-  double _lastAx = 0.0, _lastAy = 0.0, _lastAz = 9.81;
+  // EMA Low-Pass Filter State (alpha = 0.35 balances response speed with tremor rejection)
+  static const double _filterAlpha = 0.35;
+  double _smoothGx = 0.0, _smoothGy = 0.0, _smoothGz = 0.0;
+  double _smoothAx = 0.0, _smoothAy = 0.0, _smoothAz = 9.81;
+  bool _filterInitialized = false;
 
   // Trajectory recording state
   bool _isManualRecording = false;
@@ -40,13 +41,13 @@ class GestureDetectorService {
   Timer? _quietPeriodTimer;
 
   // Panic detection parameters
-  static const double _panicDynamicThreshold = 24.0; // Rapid shake / throw / drop
+  static const double _panicDynamicThreshold = 24.0;
   DateTime _lastPanicTriggerTime = DateTime(0);
 
-  // Auto air-draw detection thresholds
-  static const double _motionStartGyro = 1.6; // rad/s rotation
-  static const double _motionStartAccel = 3.2; // dynamic m/s^2
-  static const double _motionStopThreshold = 0.8; // quiet threshold
+  // Auto air-draw detection thresholds (stabilized)
+  static const double _motionStartGyro = 1.4; // rad/s rotation
+  static const double _motionStartAccel = 2.8; // dynamic m/s^2
+  static const double _motionStopThreshold = 0.7; // quiet threshold
 
   // Backward compatibility discrete thresholds
   static const double _motionStartTilt = 4.2;
@@ -65,6 +66,7 @@ class GestureDetectorService {
   void start() {
     stop();
     _discreteArmed = true;
+    _filterInitialized = false;
     _activeTrajectory.clear();
     _discreteWindowSamples.clear();
 
@@ -102,11 +104,12 @@ class GestureDetectorService {
     _discreteWindowTimer = null;
     _isManualRecording = false;
     _isAutoRecording = false;
+    _filterInitialized = false;
     _activeTrajectory.clear();
     _discreteWindowSamples.clear();
   }
 
-  /// Manually starts recording a 3D wand trajectory (e.g. while user holds down the wand canvas)
+  /// Manually starts recording a 3D wand trajectory
   void startRecording() {
     _isManualRecording = true;
     _isAutoRecording = false;
@@ -115,28 +118,41 @@ class GestureDetectorService {
     _activeTrajectory.clear();
   }
 
-  /// Manually stops recording and emits the gathered trajectory
+  /// Manually stops recording, trims deadzone noise, and emits the stabilized trajectory
   List<MotionPoint> stopRecording() {
     _isManualRecording = false;
-    final trajectory = List<MotionPoint>.from(_activeTrajectory);
+    final trimmed = trimDeadzone(List<MotionPoint>.from(_activeTrajectory));
     _activeTrajectory.clear();
-    if (trajectory.length >= 6) {
-      _trajectoryController.add(trajectory);
+    if (trimmed.length >= 6) {
+      _trajectoryController.add(trimmed);
     }
-    return trajectory;
+    return trimmed;
   }
 
   void _onGyroEvent(GyroscopeEvent e) {
-    _lastGx = e.x;
-    _lastGy = e.y;
-    _lastGz = e.z;
+    if (!_filterInitialized) {
+      _smoothGx = e.x;
+      _smoothGy = e.y;
+      _smoothGz = e.z;
+    } else {
+      _smoothGx = _smoothGx * (1.0 - _filterAlpha) + e.x * _filterAlpha;
+      _smoothGy = _smoothGy * (1.0 - _filterAlpha) + e.y * _filterAlpha;
+      _smoothGz = _smoothGz * (1.0 - _filterAlpha) + e.z * _filterAlpha;
+    }
     _processFusedSample();
   }
 
   void _onAccelEvent(AccelerometerEvent e) {
-    _lastAx = e.x;
-    _lastAy = e.y;
-    _lastAz = e.z;
+    if (!_filterInitialized) {
+      _smoothAx = e.x;
+      _smoothAy = e.y;
+      _smoothAz = e.z;
+      _filterInitialized = true;
+    } else {
+      _smoothAx = _smoothAx * (1.0 - _filterAlpha) + e.x * _filterAlpha;
+      _smoothAy = _smoothAy * (1.0 - _filterAlpha) + e.y * _filterAlpha;
+      _smoothAz = _smoothAz * (1.0 - _filterAlpha) + e.z * _filterAlpha;
+    }
 
     _checkPanicMotion(e);
     _checkDiscreteMotion(e);
@@ -147,12 +163,12 @@ class GestureDetectorService {
     final now = DateTime.now();
     final point = MotionPoint(
       timestampMs: now.millisecondsSinceEpoch,
-      gx: _lastGx,
-      gy: _lastGy,
-      gz: _lastGz,
-      ax: _lastAx,
-      ay: _lastAy,
-      az: _lastAz,
+      gx: _smoothGx,
+      gy: _smoothGy,
+      gz: _smoothGz,
+      ax: _smoothAx,
+      ay: _smoothAy,
+      az: _smoothAz,
     );
 
     if (!_motionPointController.isClosed) {
@@ -176,16 +192,14 @@ class GestureDetectorService {
         _activeTrajectory.clear();
         _activeTrajectory.add(point);
 
-        // Maximum recording window safety limit (2.2 seconds)
         _autoRecordTimeoutTimer?.cancel();
         _autoRecordTimeoutTimer = Timer(const Duration(milliseconds: 2200), _finishAutoRecording);
       }
     } else {
       _activeTrajectory.add(point);
 
-      if (gyroMag < _motionStopThreshold && dynAccel < 1.0) {
-        // Hand is settling down — start quiet timer
-        _quietPeriodTimer ??= Timer(const Duration(milliseconds: 320), _finishAutoRecording);
+      if (gyroMag < _motionStopThreshold && dynAccel < 0.9) {
+        _quietPeriodTimer ??= Timer(const Duration(milliseconds: 300), _finishAutoRecording);
       } else {
         _quietPeriodTimer?.cancel();
         _quietPeriodTimer = null;
@@ -202,11 +216,40 @@ class GestureDetectorService {
     if (!_isAutoRecording) return;
     _isAutoRecording = false;
 
-    if (_activeTrajectory.length >= 10) {
-      final trajectory = List<MotionPoint>.from(_activeTrajectory);
-      _trajectoryController.add(trajectory);
-    }
+    final trimmed = trimDeadzone(List<MotionPoint>.from(_activeTrajectory));
     _activeTrajectory.clear();
+
+    if (trimmed.length >= 8) {
+      _trajectoryController.add(trimmed);
+    }
+  }
+
+  /// Trims stationary leading and trailing deadzone points from a recorded stroke.
+  static List<MotionPoint> trimDeadzone(List<MotionPoint> points) {
+    if (points.length < 8) return points;
+
+    const double minGyroCutoff = 0.5; // rad/s
+    const double minAccelCutoff = 0.8; // m/s^2 dynamic
+
+    int startIdx = 0;
+    while (startIdx < points.length - 4) {
+      final p = points[startIdx];
+      if (p.gyroMagnitude >= minGyroCutoff || p.dynamicAcceleration >= minAccelCutoff) {
+        break;
+      }
+      startIdx++;
+    }
+
+    int endIdx = points.length - 1;
+    while (endIdx > startIdx + 4) {
+      final p = points[endIdx];
+      if (p.gyroMagnitude >= minGyroCutoff || p.dynamicAcceleration >= minAccelCutoff) {
+        break;
+      }
+      endIdx--;
+    }
+
+    return points.sublist(startIdx, endIdx + 1);
   }
 
   void _checkPanicMotion(AccelerometerEvent e) {
