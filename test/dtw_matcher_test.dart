@@ -90,5 +90,27 @@ void main() {
       expect(resampled.first.gx, closeTo(shortSequence.first.gx, 0.01));
       expect(resampled.last.gx, closeTo(shortSequence.last.gx, 0.01));
     });
+
+    test('Multi-sample template fusion averages multiple strokes into clean baseline', () {
+      final sample1 = generateCircleTrajectory(sampleCount: 30, speedFactor: 1.0);
+      final sample2 = generateCircleTrajectory(sampleCount: 45, speedFactor: 1.2);
+      final sample3 = generateCircleTrajectory(sampleCount: 25, speedFactor: 0.9);
+
+      final fused = DtwMatcher.fuseTemplates([sample1, sample2, sample3]);
+
+      expect(fused.length, equals(36));
+      final result = DtwMatcher.match(
+        candidate: sample1,
+        template: GestureTemplate(
+          id: 'fused-id',
+          name: 'Fused',
+          points: fused,
+          durationMs: 1000,
+          createdAt: DateTime.now(),
+        ),
+      );
+      expect(result.isMatch, isTrue);
+      expect(result.confidence, greaterThan(0.85));
+    });
   });
 }
