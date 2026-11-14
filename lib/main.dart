@@ -1,44 +1,56 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'providers/device_files_provider.dart';
 import 'providers/gesture_unlock_provider.dart';
-import 'providers/notes_provider.dart';
-import 'services/auth_service.dart';
-import 'screens/lock_screen.dart';
+import 'providers/vault_provider.dart';
+import 'services/vault_service.dart';
+import 'screens/normal_files_screen.dart';
 import 'screens/setup_screen.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Check if first-time setup is needed
-  final authService = AuthService();
-  final isSetup = await authService.isSetupComplete();
+  // cryptography_flutter registers itself, routing AES-GCM to native code.
+  final vaultService = VaultService();
+  final isSetup = await vaultService.isSetUp();
 
-  runApp(GestureUnlockApp(isSetupComplete: isSetup));
+  runApp(SecretVaultApp(isSetupComplete: isSetup, vaultService: vaultService));
 }
 
-class GestureUnlockApp extends StatelessWidget {
+class SecretVaultApp extends StatelessWidget {
   final bool isSetupComplete;
+  final VaultService vaultService;
 
-  const GestureUnlockApp({super.key, required this.isSetupComplete});
+  const SecretVaultApp({
+    super.key,
+    required this.isSetupComplete,
+    required this.vaultService,
+  });
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => GestureUnlockProvider()),
-        ChangeNotifierProvider(create: (_) => NotesProvider()),
+        Provider<VaultService>.value(value: vaultService),
+        ChangeNotifierProvider(
+          create: (_) => GestureUnlockProvider(vaultService: vaultService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => VaultProvider(vaultService: vaultService),
+        ),
+        ChangeNotifierProvider(create: (_) => DeviceFilesProvider()),
       ],
       child: Builder(
         builder: (context) {
           return MaterialApp(
             navigatorKey: rootNavigatorKey,
-            title: 'SV Notes',
+            title: 'Files',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
               brightness: Brightness.dark,
-              scaffoldBackgroundColor: const Color(0xFF0F0C29),
+              scaffoldBackgroundColor: const Color(0xFF090D16),
               textTheme: GoogleFonts.outfitTextTheme(
                 ThemeData.dark().textTheme,
               ),
@@ -46,19 +58,63 @@ class GestureUnlockApp extends StatelessWidget {
               colorSchemeSeed: const Color(0xFFA78BFA),
             ),
             builder: (ctx, child) {
-              return Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: (_) {
-                  // Any user touch activity resets the auto-lock inactivity timer
-                  ctx.read<GestureUnlockProvider>().onUserActivity();
-                },
-                child: child ?? const SizedBox(),
+              return AppLifecycleScope(
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (_) {
+                    ctx.read<GestureUnlockProvider>().onUserActivity();
+                  },
+                  child: child ?? const SizedBox(),
+                ),
               );
             },
-            home: isSetupComplete ? const LockScreen() : const SetupScreen(),
+            home: isSetupComplete
+                ? const NormalFilesScreen()
+                : const SetupScreen(),
           );
         },
       ),
     );
   }
+}
+
+class AppLifecycleScope extends StatefulWidget {
+  final Widget child;
+  const AppLifecycleScope({super.key, required this.child});
+
+  @override
+  State<AppLifecycleScope> createState() => _AppLifecycleScopeState();
+}
+
+class _AppLifecycleScopeState extends State<AppLifecycleScope>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final unlock = context.read<GestureUnlockProvider>();
+    // Only lock when the app is really backgrounded. `inactive` also fires
+    // for the fingerprint dialog and the notification shade, and locking
+    // there would cut off biometric enrolment mid-way. FLAG_SECURE keeps the
+    // vault out of the recent-apps thumbnail in the meantime.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      unlock.onAppPaused();
+    } else if (state == AppLifecycleState.resumed) {
+      unlock.onAppResumed();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

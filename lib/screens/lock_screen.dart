@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../config/features.dart';
 import '../models/gesture.dart';
 import '../providers/gesture_unlock_provider.dart';
-import '../providers/notes_provider.dart';
-import 'notes_list_screen.dart';
+import '../services/security_channel_service.dart';
 
+/// Clean, discrete 4-step motion gesture & biometric unlock portal.
 class LockScreen extends StatefulWidget {
   const LockScreen({super.key});
 
@@ -14,624 +14,379 @@ class LockScreen extends StatefulWidget {
   State<LockScreen> createState() => _LockScreenState();
 }
 
-class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
+class _LockScreenState extends State<LockScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
-  late AnimationController _shakeController;
-  late AnimationController _unlockController;
   late Animation<double> _pulseAnimation;
-  late Animation<double> _shakeAnimation;
-  late Animation<double> _unlockAnimation;
-
-  UnlockState? _lastHandledState;
-  bool _navigated = false;
-  bool _hasPromptedBiometrics = false;
+  final TextEditingController _pinController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-
+    SecurityChannelService.setSecureFlag(true);
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2000),
+      duration: const Duration(milliseconds: 1600),
     )..repeat(reverse: true);
-    _pulseAnimation = Tween<double>(begin: 0.95, end: 1.05).animate(
+
+    _pulseAnimation = Tween<double>(begin: 0.96, end: 1.04).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-
-    _shakeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _shakeAnimation = Tween<double>(begin: 0, end: 24).animate(
-      CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn),
-    );
-
-    _unlockController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
-    _unlockAnimation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _unlockController, curve: Curves.easeOutBack),
-    );
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _promptBiometricsInitial();
-    });
-  }
-
-  void _promptBiometricsInitial() {
-    if (!mounted) return;
-    final provider = context.read<GestureUnlockProvider>();
-    if (provider.state == UnlockState.locked &&
-        !provider.isBiometricVerified &&
-        !_hasPromptedBiometrics) {
-      _hasPromptedBiometrics = true;
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) provider.authenticateBiometrics();
-      });
-    }
   }
 
   @override
   void dispose() {
     _pulseController.dispose();
-    _shakeController.dispose();
-    _unlockController.dispose();
+    _pinController.dispose();
+    SecurityChannelService.setSecureFlag(false);
     super.dispose();
   }
 
-  void _handleStateSideEffects(UnlockState state) {
-    if (state == _lastHandledState) return;
-    _lastHandledState = state;
-
-    if (state == UnlockState.failed) {
-      _shakeController.forward(from: 0);
-    } else if (state == UnlockState.unlocked) {
-      _pulseController.stop();
-      _unlockController.forward(from: 0);
-      if (!_navigated) {
-        _navigated = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) _navigateToNotes();
-          });
-        });
-      }
-    } else if (state == UnlockState.locked) {
-      _navigated = false;
-      _unlockController.reset();
-      if (!_pulseController.isAnimating) {
-        _pulseController.repeat(reverse: true);
-      }
-    } else if (state == UnlockState.lockout) {
-      _pulseController.stop();
-    }
-  }
-
-  void _navigateToNotes() {
-    context.read<NotesProvider>().loadNotes();
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const NotesListScreen(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.05),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOut,
-              )),
-              child: child,
+  void _showPinDialog() {
+    _pinController.clear();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.pin_rounded, color: Color(0xFFA78BFA), size: 22),
+            const SizedBox(width: 8),
+            Text(
+              'Security PIN',
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 400),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Enter your PIN.',
+              style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _pinController,
+              keyboardType: TextInputType.visiblePassword,
+              obscureText: true,
+              maxLength: 64,
+              autofocus: true,
+              style: GoogleFonts.outfit(
+                fontSize: 22,
+                letterSpacing: 8,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+              textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                counterText: '',
+                filled: true,
+                fillColor: const Color(0xFF21262D),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onSubmitted: (_) {
+                Navigator.pop(ctx);
+                _verifyEnteredPin();
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.outfit(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFA78BFA),
+              foregroundColor: const Color(0xFF090D16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _verifyEnteredPin();
+            },
+            child: Text(
+              'Unlock',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  void _showPinDialog() {
-    final pinController = TextEditingController();
-    String? error;
-
-    showDialog(
-      context: context,
-      barrierColor: Colors.black87,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1A1744),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.1),
-                ),
-              ),
-              title: Text(
-                'Enter Fallback PIN',
-                style: GoogleFonts.outfit(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: TextField(
-                      controller: pinController,
-                      obscureText: true,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                      ],
-                      autofocus: true,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        letterSpacing: 8,
-                      ),
-                      textAlign: TextAlign.center,
-                      decoration: InputDecoration(
-                        hintText: '••••',
-                        hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          letterSpacing: 8,
-                        ),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.all(16),
-                      ),
-                    ),
-                  ),
-                  if (error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      error!,
-                      style: const TextStyle(
-                        color: Color(0xFFF87171),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text(
-                    'Cancel',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                    ),
-                  ),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFA78BFA),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () async {
-                    final provider = context.read<GestureUnlockProvider>();
-                    final verified =
-                        await provider.verifyPin(pinController.text);
-                    if (verified) {
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    } else {
-                      setDialogState(() => error = 'Incorrect PIN');
-                    }
-                  },
-                  child: const Text(
-                    'Unlock',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+  void _verifyEnteredPin() async {
+    // No trimming: setup stores exactly what was typed, so a passphrase with
+    // a leading/trailing space must be accepted exactly as typed.
+    final pin = _pinController.text;
+    _pinController.clear();
+    if (pin.isEmpty) return;
+    // Failure feedback is the status line ("Not recognised."), not a
+    // SnackBar: a SnackBar would sit over the PIN button for seconds.
+    await context.read<GestureUnlockProvider>().verifyPin(pin);
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<GestureUnlockProvider>();
-    _handleStateSideEffects(provider.state);
 
+    // Navigation into the vault is handled by NormalFilesScreen, which
+    // listens for unlock events.
     final isLockout = provider.state == UnlockState.lockout;
+    final isFailed = provider.state == UnlockState.failed;
+    final isPanic = provider.state == UnlockState.panicLocked;
+    final inputTrail = provider.inputTrail;
 
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: _backgroundGradient(provider.state),
+      backgroundColor: const Color(0xFF090D16),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white70,
+            size: 20,
+          ),
+          onPressed: () => Navigator.pop(context),
         ),
-        child: SafeArea(
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Spacer(flex: 1),
-              // App branding
-              Text(
-                'SV Notes',
-                style: GoogleFonts.outfit(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white.withValues(alpha: 0.3),
-                  letterSpacing: 4,
-                ),
-              ),
-              const Spacer(flex: 1),
-              // Lock icon
-              _buildLockIcon(provider.state),
-              const SizedBox(height: 32),
-              // Status text
-              _buildStatusText(provider),
-              const SizedBox(height: 12),
-              // Subtitle
-              _buildSubtitle(provider),
-              const Spacer(flex: 1),
-              // Biometric or Gesture block (hidden during lockout)
-              if (!isLockout && !provider.isBiometricVerified) _buildBiometricPrompt(provider),
-              if (!isLockout && provider.isBiometricVerified) _buildGestureTrail(provider),
-              if (isLockout) _buildLockoutCountdown(provider),
-              const Spacer(flex: 1),
-              // Bottom controls
-              _buildBottomControls(provider),
-              const SizedBox(height: 48),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  LinearGradient _backgroundGradient(UnlockState state) {
-    switch (state) {
-      case UnlockState.unlocked:
-        return const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0D4D2B), Color(0xFF0A3D22), Color(0xFF072E19)],
-        );
-      case UnlockState.failed:
-        return const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF4D0D0D), Color(0xFF3D0A0A), Color(0xFF2E0707)],
-        );
-      case UnlockState.lockout:
-        return const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF3D1A0A), Color(0xFF2E1007), Color(0xFF1A0C04)],
-        );
-      default:
-        return const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF0F0C29), Color(0xFF302B63), Color(0xFF24243E)],
-        );
-    }
-  }
-
-  Widget _buildLockIcon(UnlockState state) {
-    final IconData icon;
-    final Color color;
-    const double size = 80;
-
-    switch (state) {
-      case UnlockState.unlocked:
-        icon = Icons.lock_open_rounded;
-        color = const Color(0xFF4ADE80);
-        break;
-      case UnlockState.failed:
-        icon = Icons.lock_rounded;
-        color = const Color(0xFFF87171);
-        break;
-      case UnlockState.lockout:
-        icon = Icons.timer_rounded;
-        color = const Color(0xFFFB923C);
-        break;
-      default:
-        icon = Icons.lock_outline_rounded;
-        color = const Color(0xFFA78BFA);
-    }
-
-    return AnimatedBuilder(
-      animation: Listenable.merge([
-        _pulseAnimation,
-        _shakeAnimation,
-        _unlockAnimation,
-      ]),
-      builder: (context, child) {
-        double dx = 0;
-        if (state == UnlockState.failed) {
-          dx = _shakeAnimation.value *
-              ((_shakeController.value * 10).toInt().isEven ? 1 : -1);
-        }
-        double scale = 1.0;
-        if (state == UnlockState.locked || state == UnlockState.recording) {
-          scale = _pulseAnimation.value;
-        } else if (state == UnlockState.unlocked) {
-          scale = 0.8 + (_unlockAnimation.value * 0.4);
-        }
-        return Transform.translate(
-          offset: Offset(dx, 0),
-          child: Transform.scale(
-            scale: scale,
-            child: child,
-          ),
-        );
-      },
-      child: Container(
-        width: size + 40,
-        height: size + 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color.withValues(alpha: 0.1),
-          border: Border.all(color: color.withValues(alpha: 0.3), width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.2),
-              blurRadius: 40,
-              spreadRadius: 10,
-            ),
-          ],
-        ),
-        child: Icon(icon, size: size, color: color),
-      ),
-    );
-  }
-
-  Widget _buildStatusText(GestureUnlockProvider provider) {
-    final String text;
-    final Color color;
-
-    switch (provider.state) {
-      case UnlockState.unlocked:
-        text = 'UNLOCKED';
-        color = const Color(0xFF4ADE80);
-        break;
-      case UnlockState.failed:
-        text = 'WRONG PATTERN';
-        color = const Color(0xFFF87171);
-        break;
-      case UnlockState.lockout:
-        text = 'TOO MANY ATTEMPTS';
-        color = const Color(0xFFFB923C);
-        break;
-      case UnlockState.recording:
-        text = 'RECORDING...';
-        color = const Color(0xFFFBBF24);
-        break;
-      default:
-        text = 'LOCKED';
-        color = const Color(0xFFA78BFA);
-    }
-
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: Text(
-        text,
-        key: ValueKey(text),
-        style: TextStyle(
-          fontSize: 24,
-          fontWeight: FontWeight.w800,
-          color: color,
-          letterSpacing: 4,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSubtitle(GestureUnlockProvider provider) {
-    final String text;
-    switch (provider.state) {
-      case UnlockState.unlocked:
-        text = 'Access granted — welcome back!';
-        break;
-      case UnlockState.failed:
-        text = 'Attempt ${provider.failedAttempts}/5 — ${5 - provider.failedAttempts} remaining';
-        break;
-      case UnlockState.lockout:
-        text = 'Gesture input disabled. Use PIN to bypass.';
-        break;
-      default:
-        text = !provider.isBiometricVerified 
-            ? 'Step 1: Authenticate with Fingerprint'
-            : 'Step 2: Perform 4-gesture pattern';
-    }
-
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: Text(
-        text,
-        key: ValueKey(text),
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 13,
-          color: Colors.white.withValues(alpha: 0.5),
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
-
-  // ─── Biometrics UI ────────────────────────────────────
-  
-  Widget _buildBiometricPrompt(GestureUnlockProvider provider) {
-    return GestureDetector(
-      onTap: () => provider.authenticateBiometrics(),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 24),
-        padding: const EdgeInsets.symmetric(vertical: 32),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Center(
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF60A5FA).withValues(alpha: 0.15),
-                  border: Border.all(color: const Color(0xFF60A5FA).withValues(alpha: 0.3)),
-                ),
-                child: const Icon(
-                  Icons.fingerprint_rounded,
-                  size: 48,
-                  color: Color(0xFF60A5FA),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'TAP TO SCAN FINGERPRINT',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white.withValues(alpha: 0.4),
-                  letterSpacing: 2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Fixed Gesture Trail (Row-based, no overflow) ─────
-
-  Widget _buildGestureTrail(GestureUnlockProvider provider) {
-    final trail = provider.inputTrail;
-    const total = GestureUnlockProvider.patternLength;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'GESTURE TRAIL',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white.withValues(alpha: 0.3),
-                  letterSpacing: 3,
-                ),
-              ),
-              if (trail.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () => provider.retryManual(),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.refresh_rounded,
-                          size: 12,
-                          color: Colors.white.withValues(alpha: 0.4),
+              // Top Safe Shield Badge
+              Column(
+                children: [
+                  ScaleTransition(
+                    scale: _pulseAnimation,
+                    child: Container(
+                      width: 88,
+                      height: 88,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isPanic
+                            ? const Color(0xFFE11D48).withValues(alpha: 0.2)
+                            : isFailed
+                            ? const Color(0xFFFB7185).withValues(alpha: 0.15)
+                            : const Color(0xFFA78BFA).withValues(alpha: 0.12),
+                        border: Border.all(
+                          color: isPanic
+                              ? const Color(0xFFE11D48)
+                              : isFailed
+                              ? const Color(0xFFFB7185)
+                              : const Color(0xFFA78BFA),
+                          width: 2,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'RETRY',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white.withValues(alpha: 0.4),
-                            letterSpacing: 1,
+                        boxShadow: [
+                          BoxShadow(
+                            color: isPanic
+                                ? const Color(0xFFE11D48).withValues(alpha: 0.3)
+                                : const Color(
+                                    0xFFA78BFA,
+                                  ).withValues(alpha: 0.15),
+                            blurRadius: 24,
+                            spreadRadius: 4,
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                      child: Icon(
+                        isPanic
+                            ? Icons.lock_clock_rounded
+                            : isLockout
+                            ? Icons.lock_outline_rounded
+                            : Icons.lock_outline_rounded,
+                        size: 38,
+                        color: isPanic
+                            ? const Color(0xFFFB7185)
+                            : isFailed
+                            ? const Color(0xFFFB7185)
+                            : const Color(0xFFA78BFA),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(total, (i) {
-              if (i < trail.length) {
-                return _buildFilledSlot(trail[i], i);
-              }
-              return _buildEmptySlot(i);
-            }),
-          ),
-        ],
-      ),
-    );
-  }
+                  const SizedBox(height: 16),
+                  Text(
+                    isPanic
+                        ? 'Locked'
+                        : isLockout
+                        ? 'Temporarily Locked'
+                        : 'Locked',
+                    style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isPanic ? const Color(0xFFFB7185) : Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    isPanic
+                        ? 'Keys cleared from memory.'
+                        : isLockout
+                        ? 'Too many failed attempts. Try again in ${_formatSeconds(provider.lockoutRemaining)}'
+                        : isFailed
+                        ? 'Not recognised.'
+                        : provider.state == UnlockState.authenticating
+                        ? 'Checking…'
+                        : Features.gestures
+                        ? 'Perform your gesture, then confirm with your fingerprint.'
+                        : 'Enter your PIN.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      color: isFailed || isPanic
+                          ? const Color(0xFFFB7185)
+                          : Colors.white60,
+                    ),
+                  ),
+                ],
+              ),
 
-  Widget _buildFilledSlot(Gesture gesture, int index) {
-    final data = _gestureVisual(gesture);
+              // Gesture progress dots (never the directions themselves)
+              if (Features.gestures) Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      GestureUnlockProvider.maxPatternLength,
+                      (index) {
+                        final hasItem = index < inputTrail.length;
+                        return Container(
+                          width: 14,
+                          height: 14,
+                          margin: const EdgeInsets.symmetric(horizontal: 5),
+                          decoration: BoxDecoration(
+                            color: isFailed
+                                ? const Color(0xFFE11D48).withValues(alpha: 0.2)
+                                : hasItem
+                                ? const Color(0xFFA78BFA)
+                                : const Color(0xFF161B22),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isFailed
+                                  ? const Color(0xFFFB7185)
+                                  : hasItem
+                                  ? const Color(0xFFA78BFA)
+                                  : Colors.white12,
+                              width: hasItem || isFailed ? 2 : 1,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (inputTrail.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () => provider.clearInputTrail(),
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        size: 16,
+                        color: Colors.white38,
+                      ),
+                      label: Text(
+                        'Reset',
+                        style: GoogleFonts.outfit(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: Duration(milliseconds: 300 + index * 80),
-        curve: Curves.easeOut,
-        builder: (context, value, child) {
-          return Transform.scale(
-            scale: 0.5 + (value * 0.5),
-            child: Opacity(opacity: value, child: child),
-          );
-        },
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: data.color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: data.color.withValues(alpha: 0.4)),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(data.icon, color: data.color, size: 20),
-              const SizedBox(height: 2),
-              Text(
-                data.label,
-                style: TextStyle(
-                  color: data.color,
-                  fontSize: 8,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
+              // Bottom Actions: Tap gestures + Biometrics
+              Column(
+                children: [
+                  // Quick Tilt Buttons (Accessibility / Fallback)
+                  if (Features.gestures) Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _buildQuickAction(
+                        Gesture.left,
+                        'Left',
+                        Icons.arrow_back_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.up,
+                        'Up',
+                        Icons.arrow_upward_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.down,
+                        'Down',
+                        Icons.arrow_downward_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.right,
+                        'Right',
+                        Icons.arrow_forward_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.shake,
+                        'Shake',
+                        Icons.vibration_rounded,
+                        provider,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Biometrics & PIN Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF161B22),
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: isLockout ? null : _showPinDialog,
+                        icon: const Icon(
+                          Icons.pin_rounded,
+                          color: Color(0xFFA78BFA),
+                          size: 18,
+                        ),
+                        label: Text(
+                          'PIN Code',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ],
           ),
@@ -640,144 +395,30 @@ class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildEmptySlot(int index) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      child: Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Center(
-          child: Text(
-            '${index + 1}',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.1),
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
+  Widget _buildQuickAction(
+    Gesture gesture,
+    String label,
+    IconData icon,
+    GestureUnlockProvider provider,
+  ) {
+    return ActionChip(
+      backgroundColor: const Color(0xFF161B22),
+      side: const BorderSide(color: Colors.white12),
+      avatar: Icon(icon, size: 15, color: const Color(0xFFA78BFA)),
+      label: Text(
+        label,
+        style: GoogleFonts.outfit(color: Colors.white70, fontSize: 12),
       ),
+      onPressed: provider.state == UnlockState.lockout
+          ? null
+          : () => provider.addManualGesture(gesture),
     );
   }
 
-  // ─── Lockout countdown ───────────────────────────────
-
-  Widget _buildLockoutCountdown(GestureUnlockProvider provider) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFB923C).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFFFB923C).withValues(alpha: 0.2),
-        ),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.hourglass_top_rounded,
-            size: 32,
-            color: const Color(0xFFFB923C).withValues(alpha: 0.6),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Try again in',
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.white.withValues(alpha: 0.4),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${provider.lockoutRemaining}s',
-            style: GoogleFonts.outfit(
-              fontSize: 40,
-              fontWeight: FontWeight.w800,
-              color: const Color(0xFFFB923C),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'You can still use your PIN to unlock',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white.withValues(alpha: 0.3),
-            ),
-          ),
-        ],
-      ),
-    );
+  String _formatSeconds(int s) {
+    if (s < 60) return '${s}s';
+    final m = s ~/ 60;
+    final r = s % 60;
+    return r == 0 ? '${m}m' : '${m}m ${r}s';
   }
-
-  // ─── Bottom controls ─────────────────────────────────
-
-  Widget _buildBottomControls(GestureUnlockProvider provider) {
-    return Center(
-      child: GestureDetector(
-        onTap: _showPinDialog,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.08),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.pin_rounded,
-                size: 16,
-                color: Colors.white.withValues(alpha: 0.4),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Use PIN Instead',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.white.withValues(alpha: 0.4),
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  _GestureVisual _gestureVisual(Gesture g) {
-    switch (g) {
-      case Gesture.shake:
-        return _GestureVisual(
-            Icons.vibration, 'SHAKE', const Color(0xFFFBBF24));
-      case Gesture.left:
-        return _GestureVisual(
-            Icons.arrow_back_rounded, 'LEFT', const Color(0xFF60A5FA));
-      case Gesture.right:
-        return _GestureVisual(
-            Icons.arrow_forward_rounded, 'RIGHT', const Color(0xFF34D399));
-      case Gesture.up:
-        return _GestureVisual(
-            Icons.arrow_upward_rounded, 'UP', const Color(0xFFC084FC));
-      case Gesture.down:
-        return _GestureVisual(
-            Icons.arrow_downward_rounded, 'DOWN', const Color(0xFFFB923C));
-    }
-  }
-}
-
-class _GestureVisual {
-  final IconData icon;
-  final String label;
-  final Color color;
-  _GestureVisual(this.icon, this.label, this.color);
 }
