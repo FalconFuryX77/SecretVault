@@ -1,18 +1,29 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models/gesture.dart';
 import '../models/vault_item.dart';
-import '../models/note.dart';
-import '../services/database_service.dart';
-import '../services/file_vault_service.dart';
+import '../services/vault_service.dart';
+import '../vault/vault_container.dart';
 
-/// Reactive provider managing files, documents, media, and notes for the active vault session.
+/// Thrown when a file is too large to decrypt into memory for preview.
+class PreviewTooLargeException implements Exception {
+  final int bytes;
+  PreviewTooLargeException(this.bytes);
+}
+
+/// Reactive view over the unlocked vault session.
 class VaultProvider extends ChangeNotifier {
-  final DatabaseService _dbService;
-  final FileVaultService _fileVaultService;
+  final VaultService _vault;
   final Uuid _uuid;
+  StreamSubscription<void>? _lockedSub;
+  bool _disposed = false;
+
+  /// Files above this are exported rather than decrypted into RAM.
+  static const int maxPreviewBytes = 64 * 1024 * 1024;
 
   VaultType _activeVaultType = VaultType.primary;
   VaultType get activeVaultType => _activeVaultType;
@@ -23,19 +34,27 @@ class VaultProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 
+  /// Progress of the current import (0..1), or null when idle.
+  double? _importProgress;
+  double? get importProgress => _importProgress;
+
   String _searchQuery = '';
   String get searchQuery => _searchQuery;
 
   VaultCategory? _selectedCategory;
   VaultCategory? get selectedCategory => _selectedCategory;
 
-  VaultProvider({
-    DatabaseService? dbService,
-    FileVaultService? fileVaultService,
-    Uuid? uuid,
-  })  : _dbService = dbService ?? DatabaseService(),
-        _fileVaultService = fileVaultService ?? FileVaultService(),
-        _uuid = uuid ?? const Uuid();
+  VaultProvider({required VaultService vaultService, Uuid? uuid})
+    : _vault = vaultService,
+      _uuid = uuid ?? const Uuid() {
+    _lockedSub = _vault.onLocked.listen((_) => clearVaultSession());
+  }
+
+  VaultSession get _session {
+    final s = _vault.session;
+    if (s == null) throw StateError('vault is locked');
+    return s;
+  }
 
   // ─── Filtered Getters ───────────────────────────────────
 
@@ -59,8 +78,13 @@ class VaultProvider extends ChangeNotifier {
   List<VaultItem> get documents =>
       _allItems.where((i) => i.category == VaultCategory.document).toList();
 
-  List<VaultItem> get media =>
-      _allItems.where((i) => i.category == VaultCategory.image || i.category == VaultCategory.video).toList();
+  List<VaultItem> get media => _allItems
+      .where(
+        (i) =>
+            i.category == VaultCategory.image ||
+            i.category == VaultCategory.video,
+      )
+      .toList();
 
   List<VaultItem> get notes =>
       _allItems.where((i) => i.category == VaultCategory.note).toList();
@@ -68,70 +92,33 @@ class VaultProvider extends ChangeNotifier {
   List<VaultItem> get keySecrets =>
       _allItems.where((i) => i.category == VaultCategory.keySecret).toList();
 
-  // ─── Vault Session Loading ──────────────────────────────
+  // ─── Session ────────────────────────────────────────────
 
   Future<void> loadVault(VaultType vaultType) async {
     _activeVaultType = vaultType;
-    _isLoading = true;
+    _refreshFromSession();
+  }
+
+  void _refreshFromSession() {
+    final s = _vault.session;
+    _allItems = s == null ? [] : s.entries.map((e) => e.item).toList();
+    _allItems.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     notifyListeners();
+  }
 
-    _allItems = await _dbService.getVaultItems(vaultType: vaultType);
-
-    // If decoy vault is empty, seed realistic plausible sample items
-    if (vaultType == VaultType.decoy && _allItems.isEmpty) {
-      await _seedDecoyData();
-      _allItems = await _dbService.getVaultItems(vaultType: vaultType);
-    }
-
+  void clearVaultSession() {
+    _allItems = [];
+    _searchQuery = '';
+    _selectedCategory = null;
     _isLoading = false;
+    _importProgress = null;
     notifyListeners();
   }
 
-  Future<void> _seedDecoyData() async {
-    final now = DateTime.now();
-    final sampleNotes = [
-      VaultItem(
-        id: _uuid.v4(),
-        title: 'Weekly Grocery List',
-        category: VaultCategory.note,
-        content: '• Almond milk\n• Whole grain oats\n• Greek yogurt\n• Avocados\n• Olive oil',
-        mimeType: 'text/plain',
-        fileSizeBytes: 65,
-        createdAt: now.subtract(const Duration(days: 2)),
-        updatedAt: now.subtract(const Duration(days: 2)),
-        isDecoy: true,
-      ),
-      VaultItem(
-        id: _uuid.v4(),
-        title: 'Apartment Maintenance Contact',
-        category: VaultCategory.note,
-        content: 'Plumber: (555) 019-2834\nElectrician: (555) 012-9841\nLeasing Office: 9am - 5pm Mon-Fri',
-        mimeType: 'text/plain',
-        fileSizeBytes: 85,
-        createdAt: now.subtract(const Duration(days: 5)),
-        updatedAt: now.subtract(const Duration(days: 5)),
-        isDecoy: true,
-      ),
-      VaultItem(
-        id: _uuid.v4(),
-        title: 'Book Recommendations',
-        category: VaultCategory.note,
-        content: '1. Designing Data-Intensive Applications\n2. Clean Architecture\n3. The Pragmatic Programmer',
-        mimeType: 'text/plain',
-        fileSizeBytes: 95,
-        createdAt: now.subtract(const Duration(days: 8)),
-        updatedAt: now.subtract(const Duration(days: 8)),
-        isDecoy: true,
-      ),
-    ];
+  // ─── Files ──────────────────────────────────────────────
 
-    for (final item in sampleNotes) {
-      await _dbService.insertVaultItem(item, VaultType.decoy);
-    }
-  }
-
-  // ─── File Ingestion & Management ─────────────────────────
-
+  /// Streams the file into the vault. If [deleteOriginal] is set, the
+  /// plaintext original is removed only after the vault has committed it.
   Future<VaultItem> importFile({
     required File sourceFile,
     required String title,
@@ -140,44 +127,84 @@ class VaultProvider extends ChangeNotifier {
     bool deleteOriginal = false,
     List<String> tags = const [],
   }) async {
-    final item = await _fileVaultService.importFile(
-      sourceFile: sourceFile,
+    final now = DateTime.now();
+    final meta = VaultItem(
+      id: _uuid.v4(),
       title: title,
       category: category,
       mimeType: mimeType,
-      vaultType: _activeVaultType,
-      deleteOriginal: deleteOriginal,
+      fileSizeBytes: 0,
+      createdAt: now,
+      updatedAt: now,
       tags: tags,
     );
-
-    await _dbService.insertVaultItem(item, _activeVaultType);
-    _allItems.insert(0, item);
+    _importProgress = 0;
     notifyListeners();
-    return item;
+    try {
+      final session = _session;
+      final entry = await _vault.whileBusy(
+        () => session.importFile(
+          sourceFile,
+          meta,
+          onProgress: (p) {
+            _importProgress = p;
+            notifyListeners();
+          },
+        ),
+      );
+      if (deleteOriginal) {
+        try {
+          await sourceFile.delete();
+        } catch (_) {}
+      }
+      _refreshFromSession();
+      return entry.item;
+    } finally {
+      _importProgress = null;
+      notifyListeners();
+    }
   }
 
+  /// Decrypts a file into memory for in-app viewing. Throws
+  /// [PreviewTooLargeException] for big files (export those instead), and
+  /// `TamperedDataException` if the ciphertext was modified.
   Future<Uint8List?> readDecryptedBytes(VaultItem item) async {
-    return await _fileVaultService.readDecryptedFileBytes(item, _activeVaultType);
+    final entry = _session.entryById(item.id);
+    if (entry == null || entry.fileKey == null) return null;
+    if (entry.byteLength > maxPreviewBytes) {
+      throw PreviewTooLargeException(entry.byteLength);
+    }
+    return _session.readAll(entry);
   }
 
+  /// Writes a decrypted copy to [destinationDir]. This deliberately leaves
+  /// plaintext outside the vault, so only call it on explicit user request.
   Future<File?> exportFile(VaultItem item, Directory destinationDir) async {
-    return await _fileVaultService.exportFile(
-      item: item,
-      destinationDir: destinationDir,
-      vaultType: _activeVaultType,
-    );
+    final entry = _session.entryById(item.id);
+    if (entry == null || entry.fileKey == null) return null;
+    final out = File(p.join(destinationDir.path, p.basename(item.title)));
+    await _session.exportTo(entry, out);
+    return out;
   }
 
   Future<void> deleteItem(VaultItem item) async {
-    if (item.encryptedFilePath != null) {
-      await _fileVaultService.deleteEncryptedFile(item, _activeVaultType);
-    }
-    await _dbService.deleteVaultItem(item.id, _activeVaultType);
-    _allItems.removeWhere((i) => i.id == item.id);
-    notifyListeners();
+    await _session.delete(item.id);
+    _refreshFromSession();
   }
 
-  // ─── Notes Operations ───────────────────────────────────
+  Future<void> toggleFavorite(VaultItem item) async {
+    await _session.upsertItem(item.copyWith(isFavorite: !item.isFavorite));
+    _refreshFromSession();
+  }
+
+  Future<void> renameItem(VaultItem item, String newTitle) async {
+    await _session.upsertItem(
+      item.copyWith(title: newTitle, updatedAt: DateTime.now()),
+    );
+    _refreshFromSession();
+  }
+
+  // ─── Notes ──────────────────────────────────────────────
 
   Future<void> saveNote({
     String? id,
@@ -187,30 +214,21 @@ class VaultProvider extends ChangeNotifier {
     List<String> tags = const [],
   }) async {
     final now = DateTime.now();
-    final noteId = id ?? _uuid.v4();
-
+    final existing = id == null ? null : _session.entryById(id)?.item;
     final item = VaultItem(
-      id: noteId,
+      id: id ?? _uuid.v4(),
       title: title.trim().isEmpty ? 'Untitled Note' : title.trim(),
       category: category,
       content: content,
       mimeType: 'text/plain',
       fileSizeBytes: content.length,
-      createdAt: now,
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-      isDecoy: _activeVaultType == VaultType.decoy,
       tags: tags,
+      isFavorite: existing?.isFavorite ?? false,
     );
-
-    await _dbService.insertVaultItem(item, _activeVaultType);
-
-    final existingIndex = _allItems.indexWhere((i) => i.id == noteId);
-    if (existingIndex >= 0) {
-      _allItems[existingIndex] = item;
-    } else {
-      _allItems.insert(0, item);
-    }
-    notifyListeners();
+    await _session.upsertItem(item);
+    _refreshFromSession();
   }
 
   // ─── Search & Category Filter ───────────────────────────
@@ -229,5 +247,17 @@ class VaultProvider extends ChangeNotifier {
     _searchQuery = '';
     _selectedCategory = null;
     notifyListeners();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _lockedSub?.cancel();
+    super.dispose();
   }
 }
