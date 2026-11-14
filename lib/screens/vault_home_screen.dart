@@ -9,10 +9,10 @@ import '../models/gesture.dart';
 import '../models/vault_item.dart';
 import '../providers/gesture_unlock_provider.dart';
 import '../providers/vault_provider.dart';
+import '../services/device_file_service.dart';
 import 'file_viewer_screen.dart';
 import 'note_editor_screen.dart';
 import 'settings_screen.dart';
-import '../services/security_channel_service.dart';
 
 /// SecretVault Unlocked File Safe Dashboard Screen.
 /// Provides a native Android file safe experience (Documents, Media, Audio, Archives, Notes).
@@ -33,7 +33,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   @override
   void initState() {
     super.initState();
-    SecurityChannelService.setSecureFlag(true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<VaultProvider>().loadVault(widget.vaultType);
     });
@@ -41,7 +40,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   @override
   void dispose() {
-    SecurityChannelService.setSecureFlag(false);
     _searchController.dispose();
     _panicSub?.cancel();
     super.dispose();
@@ -275,9 +273,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       0,
       (sum, item) => sum + item.fileSizeBytes,
     );
-    final sizeFormatted = totalBytes > 1024 * 1024
-        ? '${(totalBytes / (1024 * 1024)).toStringAsFixed(1)} MB'
-        : '${(totalBytes / 1024).toStringAsFixed(1)} KB';
+    final sizeFormatted = DeviceFileService.formatBytes(totalBytes);
+    final count = vault.allItems.length;
 
     return Scaffold(
       backgroundColor: const Color(0xFF090D16),
@@ -396,7 +393,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${vault.allItems.length} Protected Items ($sizeFormatted)',
+                        '$count protected ${count == 1 ? 'item' : 'items'} ($sizeFormatted)',
                         style: GoogleFonts.outfit(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -685,7 +682,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 Text(
                   item.content != null
                       ? '${item.content!.length} chars'
-                      : '${(item.fileSizeBytes / 1024).toStringAsFixed(1)} KB',
+                      : DeviceFileService.formatBytes(item.fileSizeBytes),
                   style: GoogleFonts.outfit(
                     fontSize: 11,
                     color: Colors.white54,
@@ -731,7 +728,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         subtitle: Text(
           item.content != null
               ? (item.content!.split('\n').first)
-              : '${(item.fileSizeBytes / 1024).toStringAsFixed(1)} KB • Encrypted Safe',
+              : '${DeviceFileService.formatBytes(item.fileSizeBytes)} • Encrypted',
           style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

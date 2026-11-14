@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 import '../models/vault_item.dart';
+import '../providers/gesture_unlock_provider.dart';
 import '../providers/vault_provider.dart';
 
 /// Encrypted Note & Crypto Seed Editor.
@@ -25,11 +27,20 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late TextEditingController _contentController;
   Timer? _autoSaveTimer;
 
+  /// Fixed for the editor's lifetime, so autosaves of a *new* note update
+  /// one note instead of creating a fresh copy on every pause in typing.
+  late final String _noteId;
+
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: widget.existingItem?.title ?? '');
-    _contentController = TextEditingController(text: widget.existingItem?.content ?? '');
+    _noteId = widget.existingItem?.id ?? const Uuid().v4();
+    _titleController = TextEditingController(
+      text: widget.existingItem?.title ?? '',
+    );
+    _contentController = TextEditingController(
+      text: widget.existingItem?.content ?? '',
+    );
   }
 
   @override
@@ -41,25 +52,36 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   }
 
   void _onChanged() {
+    // Typing is activity too: the inactivity auto-lock only sees taps, and
+    // must not lock the vault in the middle of writing a note.
+    context.read<GestureUnlockProvider>().onUserActivity();
     _autoSaveTimer?.cancel();
     _autoSaveTimer = Timer(const Duration(seconds: 2), _saveNote);
   }
-
 
   Future<void> _saveNote() async {
     final title = _titleController.text.trim();
     final content = _contentController.text.trim();
 
     if (title.isEmpty && content.isEmpty) return;
+    if (!mounted) return;
 
-    await context.read<VaultProvider>().saveNote(
-          id: widget.existingItem?.id,
-          title: title.isEmpty ? (widget.category == VaultCategory.keySecret ? 'Secret Key Seed' : 'Untitled Note') : title,
-          content: content,
-          category: widget.category,
-        );
+    try {
+      await context.read<VaultProvider>().saveNote(
+        id: _noteId,
+        title: title.isEmpty
+            ? (widget.category == VaultCategory.keySecret
+                  ? 'Secret Key Seed'
+                  : 'Untitled Note')
+            : title,
+        content: content,
+        category: widget.category,
+      );
+    } on StateError {
+      // The vault locked (timeout / panic) before the autosave ran. The
+      // keys are gone, so there is nothing to save to; drop it.
+    }
   }
-
 
   Future<void> _saveAndPop() async {
     _autoSaveTimer?.cancel();
@@ -77,7 +99,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white70,
+            size: 18,
+          ),
           onPressed: _saveAndPop,
         ),
         title: Row(
@@ -90,7 +116,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
             const SizedBox(width: 8),
             Text(
               isSeed ? 'Crypto Seed' : 'Encrypted Note',
-              style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              style: GoogleFonts.outfit(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
           ],
         ),
@@ -115,8 +145,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                   color: Colors.white,
                 ),
                 decoration: InputDecoration(
-                  hintText: isSeed ? 'Wallet / Key Label (e.g. Ledger Main)' : 'Note Title...',
-                  hintStyle: GoogleFonts.outfit(fontSize: 22, color: Colors.white30, fontWeight: FontWeight.bold),
+                  hintText: isSeed
+                      ? 'Wallet / Key Label (e.g. Ledger Main)'
+                      : 'Note Title...',
+                  hintStyle: GoogleFonts.outfit(
+                    fontSize: 22,
+                    color: Colors.white30,
+                    fontWeight: FontWeight.bold,
+                  ),
                   border: InputBorder.none,
                 ),
               ),
@@ -136,7 +172,10 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                     hintText: isSeed
                         ? 'Enter 12/24 recovery words (e.g. abandon ability able about...)'
                         : 'Type confidential note here...',
-                    hintStyle: GoogleFonts.outfit(fontSize: 14, color: Colors.white24),
+                    hintStyle: GoogleFonts.outfit(
+                      fontSize: 14,
+                      color: Colors.white24,
+                    ),
                     border: InputBorder.none,
                   ),
                 ),

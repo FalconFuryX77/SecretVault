@@ -1,6 +1,6 @@
 # Sync Design
 
-**Status:** design draft, nothing built yet. Threat model: [THREAT_MODEL.md](THREAT_MODEL.md).
+**Status:** M1 server and the M2 sync engine core are built and tested ([server/](../server/README.md), [packages/sync_core](../packages/sync_core)); not yet wired into the app. Threat model: [THREAT_MODEL.md](THREAT_MODEL.md).
 On-device format: [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md).
 
 **Problem:** get material off a phone and onto a server the user trusts, over
@@ -90,9 +90,18 @@ append-only mode.
 4. **Padding.** Plaintext = `codec(1) ‖ length(4) ‖ data ‖ zeros`, padded to
    the Padmé size for its length. This costs at most ~12% and leaves sizes
    that carry very little information.
-5. **Encryption.** `seal(K_piece, padded, aad = "piece" ‖ id)`, using AES-256-GCM
-   with a random nonce. The AAD binds each ciphertext to its name, so the
-   server can't serve one piece under another's name.
+5. **Encryption.** `seal(K_piece, padded, aad = "piece" ‖ id)`, using AES-256-GCM.
+   The AAD binds each ciphertext to its name, so the server can't serve one
+   piece under another's name. The nonce is **deterministic, SIV-style**:
+   `HMAC(K_nonce, aad ‖ SHA-256(padded))[0:12]`. Sealing the same bytes
+   again gives identical ciphertext, so an interrupted upload can resume
+   byte-for-byte even after an app restart, and every device produces the
+   same digest for the same piece. A nonce can only repeat for byte-identical
+   input, so it's never reused for different plaintext. (It reveals that
+   two pieces are equal, which content naming already reveals.)
+6. **Verification on read.** After decrypting, the client recomputes the
+   name from the plaintext and checks it matches, so a valid ciphertext of
+   *other* content stored under this name is still refused.
 
 Pieces are **immutable** and **named by content**. That one property gives us
 resumability, safe retries and deduplication without per-upload server state.
@@ -170,6 +179,7 @@ device key.
 | `GET/PUT /v1/escrow` | 4 fixed escrow slots holding SRKs wrapped under each vault's RS (writes need a recovery-key signature) |
 | `POST /v1/pieces/missing` | Body: up to 500 ids. Returns the ones the server doesn't have |
 | `PUT /v1/pieces/{id}` | Upload one piece. Idempotent: `201` new, `200` already stored. Request carries `Content-Digest: sha-256=…`; the server verifies it and echoes the stored digest |
+| `GET /v1/uploads/{id}` · `PATCH /v1/uploads/{id}` | Resume *within* a piece: the server reports how many bytes it holds; `PATCH` appends a part at `Upload-Offset` (409 with the right offset if wrong). Once `Upload-Length` is reached, the whole piece must match `Piece-Digest` (else 422 and the partial data is discarded) before it is committed |
 | `GET /v1/pieces/{id}` | Download, with `Range` support for resuming |
 | `GET /v1/pieces?after=…` | Paged listing (id, size, created), used for pruning |
 | `POST /v1/pieces/delete` | Delete unreferenced pieces. Refused for device tokens in append-only mode |
@@ -205,7 +215,8 @@ few hundred bytes and nothing is re-sent.
 | Wake on connectivity | `ConnectivityManager` callback starts work the moment a network appears; WorkManager with a network constraint is the backstop, with exponential backoff from 30 s to 15 min |
 | Priority queue | Log records and manifests → previews → small originals → large originals. "Send now" moves an item to the front |
 | Metered data | Previews go on any network; originals wait for unmetered by default (configurable) |
-| Small units | A 256 KiB piece takes ~33 s at 64 kbit/s, ~5.5 s at 384 kbit/s and ~1 s at 2 Mbit/s. A drop costs at most the pieces in flight |
+| Small units | A 256 KiB piece takes ~33 s at 64 kbit/s, ~5.5 s at 384 kbit/s and ~1 s at 2 Mbit/s. A drop costs at most the part in flight |
+| Adaptive parts | A piece larger than the current part size goes up in parts appended at the server's offset. Every drop halves the part size (to 16 KiB); four quick successes double it (to 1 MiB). **Measured necessity:** with 2 s pockets at 64 kB/s, whole-piece uploads never completed (a piece needs ~4 s); with adaptive parts, 1 MiB arrived in 62 s against a 41 s theoretical minimum |
 | Adaptive concurrency | Start with 1 piece in flight; add one (up to 4) after each run of quick successes; drop back to 1 on any failure |
 | Connection reuse | One kept-alive HTTP/2 connection with TLS 1.3 session resumption, so a pocket doesn't spend its first seconds on handshakes |
 
@@ -216,6 +227,9 @@ existing secure delete) only after:
 
 1. The log record is acknowledged.
 2. Every piece's stored SHA-256, as echoed by the server, matches what was sent.
+   A piece that was *already* on the server (uploaded earlier, or by another
+   device) was sealed with a different random nonce, so its digest won't match;
+   those pieces are verified by downloading and decrypting them instead.
 3. The manifest has been downloaded back, decrypted and compared.
 
 If the vault is locked when this completes, the deletion is applied the next
@@ -304,7 +318,7 @@ This mirrors the container's "4 records, can't tell how many are used":
 | Alternative | Why not (for now) |
 |---|---|
 | Upload the container file | Gigabytes, mostly random filler, device-bound by design, and any change rewrites chunks all over the file |
-| tus (offset-based resumable uploads) | Built for one large object with per-upload server state. Small immutable content-named pieces give resume, idempotency and dedup for free. **Kept as a measurement baseline** (via `tusd`) |
+| tus for whole files | Built for one large object with per-upload server state. Small immutable content-named pieces give resume, idempotency and dedup for free. A tus-like offset protocol is used only *within* a piece (`/v1/uploads`), where measurements showed it's needed |
 | Pack files (as in restic) | Fewer requests and hidden piece sizes, but a drop loses a bigger unit, and pruning needs repacking. Revisit if per-request overhead dominates the measurements |
 | Plain SHA-256 piece ids / convergent encryption | Lets the server confirm you hold a known file |
 | Unkeyed content-defined chunking | Piece sizes fingerprint known files |
@@ -342,9 +356,9 @@ No number goes in the README or a résumé until the harness has produced it.
 
 | # | Deliverable |
 |---|---|
-| M0 | Commit the container work; test it on a real phone (biometrics, keystore, decoy) |
-| M1 | Server skeleton (Compose: FastAPI, Postgres, MinIO), piece + log API, Toxiproxy harness, CLI client that backs up a folder |
-| M2 | `sync_core`: keyed chunking, piece encoding, journal, scheduler logic; integrated into the app in mode A |
+| M0 | Commit the container work; test it on a real phone (biometrics, keystore, decoy). **PIN path verified on an Android 16 emulator by automated tests; gesture + fingerprint still need a real phone** |
+| M1 | Server skeleton (Compose: FastAPI, Postgres, MinIO), piece + log API, Toxiproxy harness, CLI client that backs up a folder. **Server + API + 21 tests done; Compose file written but not yet run; harness and CLI client pending** |
+| M2 | `sync_core`: keyed chunking, piece encoding, journal, scheduler logic; integrated into the app in mode A. **Engine done and tested end to end against the server through a failure-injecting proxy; app integration and the Android scheduler pending** |
 | M3 | Restore, recovery phrase, pairing, revocation, SRK rotation |
 | M4 | Previews (Media3 Transformer for video, image downscale, audio) |
 | M5 | Locked outbox (mode B) and offload |
@@ -353,7 +367,7 @@ No number goes in the README or a résumé until the harness has produced it.
 ## 16. Open questions
 
 1. Piece size: measure 128 / 256 / 512 KiB averages on each profile before fixing a default.
-2. Below ~50 kbit/s, do drops inside a piece dominate? If so, add `Range`-style resume *within* a piece.
+2. ~~Below ~50 kbit/s, do drops inside a piece dominate?~~ **Answered: yes.** Short pockets never fit a whole piece; resume within a piece was added (§7, §8.1).
 3. Is HTTP/3 (QUIC) worth it on lossy links? Measure before adopting.
 4. Tor / onion-service support for the server connection.
 5. How to show offloaded items: a placeholder reveals they existed, while showing nothing is cleaner for deniability. Probably a setting.

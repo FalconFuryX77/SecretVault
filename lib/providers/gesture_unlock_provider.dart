@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:vibration/vibration.dart';
+import '../config/features.dart';
 import '../models/gesture.dart';
 import '../services/gesture_detector.dart';
 import '../services/auth_service.dart';
@@ -129,6 +130,7 @@ class GestureUnlockProvider extends ChangeNotifier {
 
   void _startListening() {
     _stopListening();
+    if (!Features.gestures) return; // motion module switched off at build time
     _detector.start();
 
     _panicSub = _detector.onPanicTriggered.listen((_) {
@@ -265,7 +267,7 @@ class GestureUnlockProvider extends ChangeNotifier {
     } else {
       state = UnlockState.failed;
       notifyListeners();
-      await Future.delayed(const Duration(milliseconds: 1200));
+      await Future.delayed(const Duration(milliseconds: 2000));
       if (state == UnlockState.failed) {
         state = UnlockState.locked;
         notifyListeners();

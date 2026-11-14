@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../main.dart' show rootNavigatorKey;
+import '../config/features.dart';
 import '../models/gesture.dart';
 import '../services/gesture_detector.dart';
 import '../services/vault_service.dart';
@@ -63,12 +64,15 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   void initState() {
     super.initState();
-    _detector.start();
-    _gestureSub = _detector.gestures.listen((gesture) {
-      if (!mounted) return;
-      _addGesture(gesture);
-    });
-    context.read<VaultService>().biometricsAvailable().then((ok) {
+    if (Features.gestures) {
+      _detector.start();
+      _gestureSub = _detector.gestures.listen((gesture) {
+        if (!mounted) return;
+        _addGesture(gesture);
+      });
+    }
+    final bio = Features.gestures ? context.read<VaultService>().biometricsAvailable() : Future.value(false);
+    bio.then((ok) {
       if (!mounted) return;
       setState(() {
         _biometricsAvailable = ok;
@@ -610,7 +614,10 @@ class _SetupScreenState extends State<SetupScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          _biometricsAvailable == false
+          !Features.gestures
+              ? 'The vault opens with this PIN. It encrypts your files: there is no reset. '
+                    'Use 6+ characters; a passphrase is best.'
+              : _biometricsAvailable == false
               ? 'This device has no fingerprint unlock set up, so the vault opens with this PIN only. '
                     'It encrypts your files: there is no reset. Use 6+ characters; a passphrase is best.'
               : 'Your PIN works when the gesture or fingerprint cannot. It encrypts your files: '
