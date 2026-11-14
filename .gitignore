@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Sync server local state
+server/blobs/
+server/*.db
+server/**/__pycache__/
+server/.pytest_cache/
+server/staging/

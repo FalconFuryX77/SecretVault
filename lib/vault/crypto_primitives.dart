@@ -178,6 +178,11 @@ class CryptoPrimitives {
   /// but this removes the long-lived ones we own.
   static void wipe(Uint8List? bytes) {
     if (bytes == null) return;
-    bytes.fillRange(0, bytes.length, 0);
+    try {
+      bytes.fillRange(0, bytes.length, 0);
+    } on UnsupportedError {
+      // Read-only view (e.g. bytes handed back by a platform channel).
+      // Nothing we own to clear; never let cleanup crash the caller.
+    }
   }
 }

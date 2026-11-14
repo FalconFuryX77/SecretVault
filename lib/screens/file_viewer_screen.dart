@@ -10,7 +10,6 @@ import 'package:provider/provider.dart';
 import '../models/vault_item.dart';
 import '../providers/vault_provider.dart';
 import '../services/device_file_service.dart';
-import '../services/security_channel_service.dart';
 import '../vault/crypto_primitives.dart';
 
 /// Secure In-Memory File Viewer.
@@ -53,7 +52,6 @@ class _FileViewerScreenState extends State<FileViewerScreen>
   void initState() {
     super.initState();
     _currentItem = widget.item;
-    SecurityChannelService.setSecureFlag(true);
 
     _waveController = AnimationController(
       vsync: this,
@@ -72,7 +70,6 @@ class _FileViewerScreenState extends State<FileViewerScreen>
       _decryptedBytes!.fillRange(0, _decryptedBytes!.length, 0);
       _decryptedBytes = null;
     }
-    SecurityChannelService.setSecureFlag(false);
     super.dispose();
   }
 

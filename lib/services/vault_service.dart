@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/gesture.dart';
 import '../vault/platform_keys.dart';
+import 'security_channel_service.dart';
 import '../vault/vault_container.dart';
 
 /// App-wide owner of the vault container and the currently unlocked session.
@@ -77,6 +78,7 @@ class VaultService {
       onProgress: onProgress,
     );
     _session = s;
+    await SecurityChannelService.setVaultOpen(true);
     return s;
   }
 
@@ -84,6 +86,7 @@ class VaultService {
     await lock();
     final s = await (await _container()).unlockWithPin(pin);
     _session = s;
+    if (s != null) await SecurityChannelService.setVaultOpen(true);
     return s;
   }
 
@@ -97,12 +100,14 @@ class VaultService {
       reason: reason,
     );
     _session = s;
+    if (s != null) await SecurityChannelService.setVaultOpen(true);
     return s;
   }
 
   Future<void> lock() async {
     final s = _session;
     _session = null;
+    await SecurityChannelService.setVaultOpen(false);
     if (s != null) {
       await s.close();
       if (!_lockEvents.isClosed) _lockEvents.add(null);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../config/features.dart';
 import '../providers/gesture_unlock_provider.dart';
 import '../services/auth_service.dart';
 import '../services/vault_service.dart';
@@ -39,7 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _autoLockOnSwitch = autoLock;
         _inactivityTimeout = timeout;
-        _biometrics = bio;
+        _biometrics = bio && Features.gestures;
       });
     }
   }
@@ -59,113 +60,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   /// Asks for a new PIN twice. Returns null if cancelled.
-  Future<String?> _askNewPin(String title, String hint) async {
-    final a = TextEditingController();
-    final b = TextEditingController();
-    String? error;
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          backgroundColor: const Color(0xFF161B22),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Text(
-            title,
-            style: GoogleFonts.outfit(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                hint,
-                style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70),
-              ),
-              const SizedBox(height: 16),
-              _pinField(a, 'New PIN'),
-              const SizedBox(height: 10),
-              _pinField(b, 'Confirm'),
-              if (error != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  error!,
-                  style: GoogleFonts.outfit(
-                    fontSize: 12,
-                    color: const Color(0xFFFB7185),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.outfit(color: Colors.white54),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFA78BFA),
-                foregroundColor: const Color(0xFF090D16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onPressed: () {
-                if (a.text.length < 6) {
-                  setLocal(() => error = 'Use at least 6 characters.');
-                } else if (a.text != b.text) {
-                  setLocal(() => error = 'PINs do not match.');
-                } else {
-                  Navigator.pop(ctx, a.text);
-                }
-              },
-              child: Text(
-                'Save',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    a.dispose();
-    b.dispose();
-    return result;
-  }
-
-  Widget _pinField(TextEditingController c, String hint) => TextField(
-    controller: c,
-    keyboardType: TextInputType.visiblePassword,
-    obscureText: true,
-    maxLength: 64,
-    style: GoogleFonts.outfit(
-      fontSize: 18,
-      color: Colors.white,
-      letterSpacing: 4,
-    ),
-    textAlign: TextAlign.center,
-    decoration: InputDecoration(
-      counterText: '',
-      hintText: hint,
-      hintStyle: GoogleFonts.outfit(
-        fontSize: 13,
-        letterSpacing: 0,
-        color: Colors.white24,
-      ),
-      filled: true,
-      fillColor: const Color(0xFF21262D),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
-      ),
-    ),
+  Future<String?> _askNewPin(String title, String hint) => showDialog<String>(
+    context: context,
+    builder: (_) => _NewPinDialog(title: title, hint: hint),
   );
 
   Future<void> _runPinChange({required bool decoy}) async {
@@ -574,6 +471,132 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Enter a new PIN twice" dialog. It owns its text controllers so they are
+/// disposed only when the dialog itself is gone. Disposing them as soon as
+/// `showDialog` returns breaks the fields during the closing animation.
+class _NewPinDialog extends StatefulWidget {
+  final String title;
+  final String hint;
+  const _NewPinDialog({required this.title, required this.hint});
+
+  @override
+  State<_NewPinDialog> createState() => _NewPinDialogState();
+}
+
+class _NewPinDialogState extends State<_NewPinDialog> {
+  final _a = TextEditingController();
+  final _b = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _a.dispose();
+    _b.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_a.text.length < 6) {
+      setState(() => _error = 'Use at least 6 characters.');
+    } else if (_a.text != _b.text) {
+      setState(() => _error = 'PINs do not match.');
+    } else {
+      Navigator.pop(context, _a.text);
+    }
+  }
+
+  Widget _field(TextEditingController c, String hint) => TextField(
+    controller: c,
+    keyboardType: TextInputType.visiblePassword,
+    obscureText: true,
+    maxLength: 64,
+    style: GoogleFonts.outfit(
+      fontSize: 18,
+      color: Colors.white,
+      letterSpacing: 4,
+    ),
+    textAlign: TextAlign.center,
+    decoration: InputDecoration(
+      counterText: '',
+      hintText: hint,
+      hintStyle: GoogleFonts.outfit(
+        fontSize: 13,
+        letterSpacing: 0,
+        color: Colors.white24,
+      ),
+      filled: true,
+      fillColor: const Color(0xFF21262D),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF161B22),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(
+        widget.title,
+        style: GoogleFonts.outfit(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.hint,
+              style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            _field(_a, 'New PIN'),
+            const SizedBox(height: 10),
+            _field(_b, 'Confirm'),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  color: const Color(0xFFFB7185),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.outfit(color: Colors.white54),
+          ),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFA78BFA),
+            foregroundColor: const Color(0xFF090D16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onPressed: _submit,
+          child: Text(
+            'Save',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
           ),
         ),
       ],

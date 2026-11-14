@@ -37,9 +37,12 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
   @override
   void initState() {
     super.initState();
-    SecurityChannelService.setSecureFlag(false);
+    SecurityChannelService.clearAll();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<DeviceFilesProvider>().init();
+      // Permission prompts open system screens, which pause the app. Right
+      // after setup the vault is open, and that pause must not lock it.
+      final files = context.read<DeviceFilesProvider>();
+      context.read<GestureUnlockProvider>().withoutAutoLock(files.init);
     });
 
     _unlockSub = context.read<GestureUnlockProvider>().onVaultUnlocked.listen((

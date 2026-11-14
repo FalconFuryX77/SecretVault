@@ -29,12 +29,33 @@ I built this project to experiment with alternative, physical ways of authentica
 * [Sync design](docs/SYNC_DESIGN.md): end-to-end encrypted, resumable sync for slow and intermittent connections (draft).
 
 ## How to run it 🚀
-You'll need a standard Flutter development environment setup. Wait – **connect a physical Android device!** Gestures don't work reliably on Android Emulators since they lack real-world hardware accelerometers.
+You'll need a standard Flutter development environment. **Use a physical Android device** for the full experience: gestures need real motion sensors, and gesture unlock needs a fingerprint.
 
 ```bash
 flutter pub get
 flutter run
 ```
+
+PIN-only build (no motion sensors, no biometric prompts), for emulators and automated testing:
+
+```bash
+flutter run --dart-define=GESTURES=false
+```
+
+## Tests 🧪
+
+| Suite | Command | What it covers |
+|---|---|---|
+| Unit / widget (desktop) | `flutter test` | Container format, crypto, decoy isolation, tamper detection, unlock flow, lockout, providers |
+| On-device core | `flutter test integration_test/vault_device_test.dart -d <device> --dart-define=GESTURES=false` | Real Android Keystore binding, native AES-GCM, production Argon2id, timings |
+| On-device UI flow | `bash tool/device_test.sh integration_test/app_flow_test.dart <device>` | Setup → note → lock → covert reopen → wrong PIN → decoy → file viewer, FLAG_SECURE state |
+| Per-chunk benchmarks | `flutter test integration_test/bench_test.dart -d <device>` | Channel/IO/crypto costs |
+| Sync server | `cd server && python -m pytest -q -s` | API, auth, append-only, log ordering, resumability under a flaky link |
+
+For realistic timings, run the device tests in profile mode:
+`flutter drive --driver=test_driver/integration_test.dart --target=integration_test/vault_device_test.dart -d <device> --profile --dart-define=GESTURES=false`
+
+Measured on an Android 16 emulator (profile mode): PIN unlock ~2.0 s, creating the 256 MiB container ~5.3 s, reading or exporting 20 MB ~0.7 s, importing ~25 MB/s.
 
 ## Tech Stack 🛠️
 * **Dart / Flutter**, `provider`

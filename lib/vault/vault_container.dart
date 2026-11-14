@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import '../models/gesture.dart';
 import '../models/vault_item.dart';
+import 'bulk_crypto.dart';
 import 'crypto_primitives.dart';
 import 'platform_keys.dart';
 import 'vault_index.dart';
@@ -83,13 +84,17 @@ class VaultCrypto {
   final KdfParams gestureParams;
   final int growChunks;
 
+  /// Batched chunk sealing/opening and random fill (native on Android).
+  final BulkCrypto bulk;
+
   VaultCrypto({
     required this.binding,
     required this.biometrics,
+    BulkCrypto? bulk,
     this.pinParams = KdfParams.pin,
     this.gestureParams = KdfParams.gesture,
     this.growChunks = ContainerLayout.defaultGrowChunks,
-  });
+  }) : bulk = bulk ?? defaultBulkCrypto();
 
   Future<Uint8List> pinKek(String pin, Uint8List salt) =>
       _kek(utf8.encode('p:$pin'), salt, pinParams, 'sv/pin-kek');
@@ -159,8 +164,9 @@ class VaultContainer {
     await file.parent.create(recursive: true);
     final raf = await file.open(mode: FileMode.write);
     try {
-      await _writeRandom(
+      await crypto.bulk.fillRandom(
         raf,
+        file,
         0,
         initialChunks * ContainerLayout.chunkSize,
         onProgress: onProgress,
@@ -257,7 +263,7 @@ class VaultContainer {
 
   Future<VaultSession> _openSession() async {
     final raf = await file.open(mode: FileMode.append);
-    final salt = await _readAt(raf, 0, ContainerLayout.saltLen);
+    final salt = _readAt(raf, 0, ContainerLayout.saltLen);
     return VaultSession._(this, raf, salt);
   }
 }
@@ -398,17 +404,24 @@ class VaultSession {
       final fileKey = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
       final src = await source.open();
       try {
-        final buf = Uint8List(ContainerLayout.chunkPayload);
-        for (var seq = 0; seq < n; seq++) {
-          final read = await src.readInto(buf);
-          final last = seq == n - 1;
-          final sealed = await CryptoPrimitives.seal(
+        for (var start = 0; start < n; start += _batch) {
+          final end = min(n, start + _batch);
+          final plains = <Uint8List>[];
+          final aads = <List<int>>[];
+          for (var seq = start; seq < end; seq++) {
+            plains.add(_readUpTo(src, ContainerLayout.chunkPayload));
+            aads.add(_aadFile(meta.id, seq, seq == n - 1));
+          }
+          final fulls = await _crypto.bulk.sealChunks(
             fileKey,
-            Uint8List.sublistView(buf, 0, read),
-            _aadFile(meta.id, seq, last),
+            plains,
+            aads,
+            ContainerLayout.chunkSize,
           );
-          await _writeChunk(chunks[seq], sealed);
-          onProgress?.call((seq + 1) / n);
+          for (var k = 0; k < fulls.length; k++) {
+            _writeAt(ContainerLayout.chunkOffset(chunks[start + k]), fulls[k]);
+          }
+          onProgress?.call(end / n);
         }
       } finally {
         await src.close();
@@ -437,26 +450,34 @@ class VaultSession {
     final key = entry.fileKey;
     if (key == null) return;
     final chunks = entry.extents.expand((e) => e.chunks).toList();
-    for (var seq = 0; seq < chunks.length; seq++) {
-      final last = seq == chunks.length - 1;
-      final plainLen = last
-          ? entry.byteLength - seq * ContainerLayout.chunkPayload
-          : ContainerLayout.chunkPayload;
-      if (plainLen < 0 || plainLen > ContainerLayout.chunkPayload) {
-        throw TamperedDataException('index length mismatch');
+    final n = chunks.length;
+    for (var start = 0; start < n; start += _batch) {
+      final end = min(n, start + _batch);
+      final aads = <List<int>>[];
+      final sealed = await _locked(() async {
+        final out = <Uint8List>[];
+        for (var seq = start; seq < end; seq++) {
+          final last = seq == n - 1;
+          final plainLen = last
+              ? entry.byteLength - seq * ContainerLayout.chunkPayload
+              : ContainerLayout.chunkPayload;
+          if (plainLen < 0 || plainLen > ContainerLayout.chunkPayload) {
+            throw TamperedDataException('index length mismatch');
+          }
+          out.add(
+            _readAt(
+              _raf,
+              ContainerLayout.chunkOffset(chunks[seq]),
+              plainLen + ContainerLayout.sealOverhead,
+            ),
+          );
+          aads.add(_aadFile(entry.item.id, seq, last));
+        }
+        return out;
+      });
+      for (final part in await _crypto.bulk.openChunks(key, sealed, aads)) {
+        yield part;
       }
-      final sealed = await _locked(
-        () => _readAt(
-          _raf,
-          ContainerLayout.chunkOffset(chunks[seq]),
-          plainLen + ContainerLayout.sealOverhead,
-        ),
-      );
-      yield await CryptoPrimitives.open(
-        key,
-        sealed,
-        _aadFile(entry.item.id, seq, last),
-      );
     }
   }
 
@@ -469,14 +490,16 @@ class VaultSession {
   }
 
   Future<void> exportTo(IndexEntry entry, File destination) async {
-    final sink = destination.openWrite();
+    // Synchronous writes for the same reason as the container IO: one cheap
+    // call per chunk instead of an event-loop round trip per chunk.
+    final out = await destination.open(mode: FileMode.write);
     try {
       await for (final part in read(entry)) {
-        sink.add(part);
+        out.writeFromSync(part);
       }
-      await sink.flush();
+      await out.flush();
     } finally {
-      await sink.close();
+      await out.close();
     }
   }
 
@@ -537,8 +560,7 @@ class VaultSession {
   }) => _locked(() => _setGesture(_r, gestures, reason));
 
   Future<void> removeGesture() => _locked(() async {
-    await _writeRandom(
-      _raf,
+    await _fillRandom(
       ContainerLayout.recordOffset(_r.record) + ContainerLayout.bioSlotOffset,
       ContainerLayout.bioSlotLen,
     );
@@ -602,8 +624,7 @@ class VaultSession {
       root.children.remove(decoy);
       root.index.links.removeWhere((l) => l.record == decoy.record);
       await _commit(root);
-      await _writeRandom(
-        _raf,
+      await _fillRandom(
         ContainerLayout.recordOffset(decoy.record),
         ContainerLayout.recordSize,
       );
@@ -637,7 +658,7 @@ class VaultSession {
     (int, Uint8List)? hit;
     // Always try every record so timing doesn't reveal which ones are real.
     for (var r = 0; r < ContainerLayout.recordCount; r++) {
-      final slot = await _readAt(
+      final slot = _readAt(
         _raf,
         ContainerLayout.recordOffset(r) + ContainerLayout.pinSlotOffset,
         ContainerLayout.pinSlotLen,
@@ -651,7 +672,7 @@ class VaultSession {
   Future<(int, Uint8List)?> _findBioRecord(Uint8List kek) async {
     (int, Uint8List)? hit;
     for (var r = 0; r < ContainerLayout.recordCount; r++) {
-      final slot = await _readAt(
+      final slot = _readAt(
         _raf,
         ContainerLayout.recordOffset(r) + ContainerLayout.bioSlotOffset,
         ContainerLayout.bioSlotLen,
@@ -669,7 +690,7 @@ class VaultSession {
 
   Future<void> _writePinSlot(int record, Uint8List kek, Uint8List vk) async {
     final sealed = await CryptoPrimitives.seal(kek, vk, _aadPin(record));
-    await _writeAt(
+    _writeAt(
       ContainerLayout.recordOffset(record) + ContainerLayout.pinSlotOffset,
       sealed,
     );
@@ -710,7 +731,7 @@ class VaultSession {
       plain[1] = blob.length & 0xff;
       plain.setRange(2, 2 + blob.length, blob);
       final sealed = await CryptoPrimitives.seal(kek, plain, _aadBio(v.record));
-      await _writeAt(
+      _writeAt(
         ContainerLayout.recordOffset(v.record) + ContainerLayout.bioSlotOffset,
         sealed,
       );
@@ -750,7 +771,7 @@ class VaultSession {
     Map<String, dynamic>? best;
     var bestSlot = 0;
     for (var s = 0; s < 2; s++) {
-      final raw = await _readAt(
+      final raw = _readAt(
         _raf,
         ContainerLayout.recordOffset(record) + ContainerLayout.superOffsets[s],
         ContainerLayout.superSlotLen,
@@ -780,23 +801,31 @@ class VaultSession {
 
     final chunks = v.indexExtents.expand((e) => e.chunks).toList();
     final out = BytesBuilder(copy: false);
+    final sealed = <Uint8List>[];
+    final aads = <List<int>>[];
     for (var seq = 0; seq < chunks.length; seq++) {
       final last = seq == chunks.length - 1;
       final plainLen = last
           ? byteLen - seq * ContainerLayout.chunkPayload
           : ContainerLayout.chunkPayload;
-      final sealed = await _readAt(
-        _raf,
-        ContainerLayout.chunkOffset(chunks[seq]),
-        plainLen + ContainerLayout.sealOverhead,
-      );
-      out.add(
-        await CryptoPrimitives.open(
-          v.indexKey,
-          sealed,
-          _aadIndex(v.gen, seq, last),
+      if (plainLen < 0 || plainLen > ContainerLayout.chunkPayload) {
+        throw VaultCorruptedException('index length mismatch');
+      }
+      sealed.add(
+        _readAt(
+          _raf,
+          ContainerLayout.chunkOffset(chunks[seq]),
+          plainLen + ContainerLayout.sealOverhead,
         ),
       );
+      aads.add(_aadIndex(v.gen, seq, last));
+    }
+    for (final part in await _crypto.bulk.openChunks(
+      v.indexKey,
+      sealed,
+      aads,
+    )) {
+      out.add(part);
     }
     v.index = VaultIndex.decode(out.takeBytes());
     for (final link in v.index.links) {
@@ -849,15 +878,22 @@ class VaultSession {
     final n = max(1, (plain.length / ContainerLayout.chunkPayload).ceil());
     final chunks = await _allocate(v, n);
     final gen = v.gen + 1;
+    final plains = <Uint8List>[];
+    final aads = <List<int>>[];
     for (var seq = 0; seq < n; seq++) {
       final start = seq * ContainerLayout.chunkPayload;
       final end = min(plain.length, start + ContainerLayout.chunkPayload);
-      final sealed = await CryptoPrimitives.seal(
-        v.indexKey,
-        Uint8List.sublistView(plain, start, end),
-        _aadIndex(gen, seq, seq == n - 1),
-      );
-      await _writeChunk(chunks[seq], sealed);
+      plains.add(Uint8List.sublistView(plain, start, end));
+      aads.add(_aadIndex(gen, seq, seq == n - 1));
+    }
+    final fulls = await _crypto.bulk.sealChunks(
+      v.indexKey,
+      plains,
+      aads,
+      ContainerLayout.chunkSize,
+    );
+    for (var seq = 0; seq < n; seq++) {
+      _writeAt(ContainerLayout.chunkOffset(chunks[seq]), fulls[seq]);
     }
     await _raf.flush();
 
@@ -882,7 +918,7 @@ class VaultSession {
       sbPlain,
       _aadSuper(v.record, slot),
     );
-    await _writeAt(
+    _writeAt(
       ContainerLayout.recordOffset(v.record) +
           ContainerLayout.superOffsets[slot],
       sealed,
@@ -961,8 +997,7 @@ class VaultSession {
       }
 
       final grow = max(_crypto.growChunks, n - picked.length);
-      await _writeRandom(
-        _raf,
+      await _fillRandom(
         total * ContainerLayout.chunkSize,
         grow * ContainerLayout.chunkSize,
       );
@@ -975,22 +1010,20 @@ class VaultSession {
 
   // ─── Internals: raw IO ──────────────────────────────────────────
 
-  Future<void> _writeChunk(int chunk, Uint8List sealed) async {
-    final full = Uint8List(ContainerLayout.chunkSize);
-    full.setRange(0, sealed.length, sealed);
-    if (sealed.length < full.length) {
-      final pad = await CryptoPrimitives.randomFill(
-        full.length - sealed.length,
-      );
-      full.setRange(sealed.length, full.length, pad);
-    }
-    await _writeAt(ContainerLayout.chunkOffset(chunk), full);
+  /// Chunks sealed or opened per native call (16 × 64 KiB = 1 MiB).
+  static const int _batch = 16;
+
+  // Container IO is synchronous on purpose. Each call is a sub-millisecond
+  // positioned read/write, and every caller already holds [_locked]. Async
+  // file calls cost an event-loop round trip each (measured at 15–30 ms on
+  // an emulator), which made 64 KiB-at-a-time IO crawl.
+  void _writeAt(int offset, List<int> bytes) {
+    _raf.setPositionSync(offset);
+    _raf.writeFromSync(bytes);
   }
 
-  Future<void> _writeAt(int offset, List<int> bytes) async {
-    await _raf.setPosition(offset);
-    await _raf.writeFrom(bytes);
-  }
+  Future<void> _fillRandom(int offset, int length) =>
+      _crypto.bulk.fillRandom(_raf, _container.file, offset, length);
 
   /// Overwrites chunks with random data so freed space looks like any other
   /// free space and old ciphertext (and old index copies holding file keys)
@@ -998,8 +1031,7 @@ class VaultSession {
   /// level; the file keys are discarded either way.
   Future<void> _shred(List<Extent> extents) async {
     for (final e in extents) {
-      await _writeRandom(
-        _raf,
+      await _fillRandom(
         ContainerLayout.chunkOffset(e.start),
         e.length * ContainerLayout.chunkSize,
       );
@@ -1008,26 +1040,21 @@ class VaultSession {
   }
 }
 
-Future<Uint8List> _readAt(RandomAccessFile raf, int offset, int length) async {
-  await raf.setPosition(offset);
-  final data = await raf.read(length);
+Uint8List _readAt(RandomAccessFile raf, int offset, int length) {
+  raf.setPositionSync(offset);
+  final data = raf.readSync(length);
   if (data.length != length) throw VaultCorruptedException('short read');
   return data;
 }
 
-Future<void> _writeRandom(
-  RandomAccessFile raf,
-  int offset,
-  int length, {
-  void Function(double)? onProgress,
-}) async {
-  const step = 1024 * 1024;
-  var done = 0;
-  await raf.setPosition(offset);
-  while (done < length) {
-    final n = min(step, length - done);
-    await raf.writeFrom(await CryptoPrimitives.randomFill(n));
-    done += n;
-    onProgress?.call(done / length);
+/// Reads up to [max] bytes, looping over short reads; fewer only at EOF.
+Uint8List _readUpTo(RandomAccessFile raf, int max) {
+  final buf = Uint8List(max);
+  var got = 0;
+  while (got < max) {
+    final n = raf.readIntoSync(buf, got, max);
+    if (n == 0) break;
+    got += n;
   }
+  return got == max ? buf : Uint8List.sublistView(buf, 0, got);
 }

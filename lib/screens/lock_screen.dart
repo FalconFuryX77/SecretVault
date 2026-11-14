@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../config/features.dart';
 import '../models/gesture.dart';
 import '../providers/gesture_unlock_provider.dart';
 import '../services/security_channel_service.dart';
@@ -129,21 +130,14 @@ class _LockScreenState extends State<LockScreen>
   }
 
   void _verifyEnteredPin() async {
-    final pin = _pinController.text.trim();
+    // No trimming: setup stores exactly what was typed, so a passphrase with
+    // a leading/trailing space must be accepted exactly as typed.
+    final pin = _pinController.text;
+    _pinController.clear();
     if (pin.isEmpty) return;
-    final success = await context.read<GestureUnlockProvider>().verifyPin(pin);
-    if (!mounted) return;
-    if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFFE11D48),
-          content: Text(
-            'Not recognised.',
-            style: GoogleFonts.outfit(color: Colors.white),
-          ),
-        ),
-      );
-    }
+    // Failure feedback is the status line ("Not recognised."), not a
+    // SnackBar: a SnackBar would sit over the PIN button for seconds.
+    await context.read<GestureUnlockProvider>().verifyPin(pin);
   }
 
   @override
@@ -250,7 +244,9 @@ class _LockScreenState extends State<LockScreen>
                         ? 'Not recognised.'
                         : provider.state == UnlockState.authenticating
                         ? 'Checking…'
-                        : 'Perform your gesture, then confirm with your fingerprint.',
+                        : Features.gestures
+                        ? 'Perform your gesture, then confirm with your fingerprint.'
+                        : 'Enter your PIN.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.outfit(
                       fontSize: 13,
@@ -262,8 +258,8 @@ class _LockScreenState extends State<LockScreen>
                 ],
               ),
 
-              // 4 Gesture Slot Indicator Nodes
-              Column(
+              // Gesture progress dots (never the directions themselves)
+              if (Features.gestures) Column(
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -319,7 +315,7 @@ class _LockScreenState extends State<LockScreen>
               Column(
                 children: [
                   // Quick Tilt Buttons (Accessibility / Fallback)
-                  Wrap(
+                  if (Features.gestures) Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     alignment: WrapAlignment.center,

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/device_file_service.dart';
 
@@ -70,6 +71,8 @@ class DeviceFilesProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  static const _askedAllFilesKey = 'fm_asked_all_files';
+
   Future<void> requestPermissions() async {
     if (Platform.isAndroid) {
       // For Android 13+ (API 33+)
@@ -77,7 +80,17 @@ class DeviceFilesProvider extends ChangeNotifier {
       final videos = await Permission.videos.request();
       final audio = await Permission.audio.request();
       final storage = await Permission.storage.request();
-      final manageStorage = await Permission.manageExternalStorage.request();
+      // "All files access" can only be granted on a full system settings
+      // page. Ask once, ever: re-opening Settings on every launch is both
+      // annoying and odd-looking for a file manager.
+      var manageStorage = await Permission.manageExternalStorage.status;
+      if (!manageStorage.isGranted) {
+        const prefs = FlutterSecureStorage();
+        if (await prefs.read(key: _askedAllFilesKey) == null) {
+          await prefs.write(key: _askedAllFilesKey, value: '1');
+          manageStorage = await Permission.manageExternalStorage.request();
+        }
+      }
 
       _hasPermission = photos.isGranted ||
           videos.isGranted ||

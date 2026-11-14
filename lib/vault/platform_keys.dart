@@ -48,7 +48,8 @@ class AndroidDeviceBinding implements DeviceBinding {
     if (out == null || out.length != 32) {
       throw StateError('device binding unavailable');
     }
-    return out;
+    // Channel results are read-only views; copy so callers can wipe them.
+    return Uint8List.fromList(out);
   }
 }
 
@@ -86,6 +87,8 @@ class FixedDeviceBinding implements DeviceBinding {
       CryptoPrimitives.hmacSha256(secret, input);
 }
 
+Uint8List? _copy(Uint8List? b) => b == null ? null : Uint8List.fromList(b);
+
 class AndroidBiometricKeystore implements BiometricKeystore {
   @override
   Future<bool> isAvailable() async {
@@ -113,11 +116,13 @@ class AndroidBiometricKeystore implements BiometricKeystore {
     required String reason,
   }) async {
     try {
-      return await _channel.invokeMethod<Uint8List>('bioWrap', {
-        'slot': slot,
-        'data': secret,
-        'reason': reason,
-      });
+      return _copy(
+        await _channel.invokeMethod<Uint8List>('bioWrap', {
+          'slot': slot,
+          'data': secret,
+          'reason': reason,
+        }),
+      );
     } on PlatformException catch (e) {
       if (e.code == 'invalidated') throw BiometricInvalidatedException();
       return null;
@@ -131,11 +136,13 @@ class AndroidBiometricKeystore implements BiometricKeystore {
     required String reason,
   }) async {
     try {
-      return await _channel.invokeMethod<Uint8List>('bioUnwrap', {
-        'slot': slot,
-        'data': blob,
-        'reason': reason,
-      });
+      return _copy(
+        await _channel.invokeMethod<Uint8List>('bioUnwrap', {
+          'slot': slot,
+          'data': blob,
+          'reason': reason,
+        }),
+      );
     } on PlatformException catch (e) {
       if (e.code == 'invalidated') throw BiometricInvalidatedException();
       return null;
