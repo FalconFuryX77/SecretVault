@@ -1,614 +1,689 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../main.dart' show rootNavigatorKey;
+import '../config/features.dart';
 import '../models/gesture.dart';
 import '../services/gesture_detector.dart';
+import '../services/vault_service.dart';
 import '../providers/gesture_unlock_provider.dart';
-import '../services/auth_service.dart';
-import 'lock_screen.dart';
+import '../vault/vault_container.dart';
+import 'normal_files_screen.dart';
+import 'vault_home_screen.dart';
 
+/// What the wizard is for.
+enum SetupMode {
+  /// First run: create the vault container (gesture, then PIN).
+  create,
+
+  /// Re-record the unlocked vault's gesture (prompts for a biometric).
+  reenrollGesture,
+
+  /// Record a gesture for the decoy vault (prompts for a biometric).
+  decoyGesture,
+}
+
+/// Setup wizard.
+/// Step 0: record a 4–8 move motion gesture (needs biometrics on the device)
+/// Step 1: confirm it
+/// Step 2: set the PIN (create mode only)
+/// Then the vault container is created and the gesture is bound to a
+/// biometric-protected key.
 class SetupScreen extends StatefulWidget {
-  const SetupScreen({super.key});
+  final SetupMode mode;
+  const SetupScreen({super.key, this.mode = SetupMode.create});
 
   @override
   State<SetupScreen> createState() => _SetupScreenState();
 }
 
-class _SetupScreenState extends State<SetupScreen>
-    with TickerProviderStateMixin {
-  final _authService = AuthService();
-  final _gestureDetector = GestureDetectorService();
+class _SetupScreenState extends State<SetupScreen> {
+  static const int _minLen = GestureUnlockProvider.minPatternLength;
+  static const int _maxLen = GestureUnlockProvider.maxPatternLength;
+  static const int _minPinLen = 6;
 
-  static const int _patternLength = GestureUnlockProvider.patternLength;
+  int _currentStep = 0; // 0: Pattern, 1: Confirm Pattern, 2: PIN
+  final GestureDetectorService _detector = GestureDetectorService();
+  StreamSubscription<Gesture>? _gestureSub;
 
-  int _step = 0; // 0 = welcome, 1 = record, 2 = confirm, 3 = set PIN
   final List<Gesture> _recordedPattern = [];
   final List<Gesture> _confirmPattern = [];
-  final _pinController = TextEditingController();
-  final _pinConfirmController = TextEditingController();
-  String? _pinError;
-  bool _isRecording = false;
-  StreamSubscription? _gestureSub;
+  final TextEditingController _pinController = TextEditingController();
+  final TextEditingController _pinConfirmController = TextEditingController();
 
-  late AnimationController _fadeController;
-  late Animation<double> _fadeAnimation;
+  String? _errorMessage;
+  bool? _biometricsAvailable;
+  bool _busy = false;
+  double? _progress;
+
+  bool get _isCreate => widget.mode == SetupMode.create;
+  int get _stepCount => _isCreate ? 3 : 2;
 
   @override
   void initState() {
     super.initState();
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _fadeAnimation = CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeInOut,
-    );
-    _fadeController.forward();
+    if (Features.gestures) {
+      _detector.start();
+      _gestureSub = _detector.gestures.listen((gesture) {
+        if (!mounted) return;
+        _addGesture(gesture);
+      });
+    }
+    final bio = Features.gestures ? context.read<VaultService>().biometricsAvailable() : Future.value(false);
+    bio.then((ok) {
+      if (!mounted) return;
+      setState(() {
+        _biometricsAvailable = ok;
+        // Without biometrics a gesture can't unlock anything, so skip
+        // straight to the PIN.
+        if (!ok && _isCreate) _currentStep = 2;
+      });
+    });
   }
 
   @override
   void dispose() {
     _gestureSub?.cancel();
-    _gestureDetector.dispose();
+    _detector.dispose();
     _pinController.dispose();
     _pinConfirmController.dispose();
-    _fadeController.dispose();
     super.dispose();
   }
 
-  void _nextStep() {
-    _fadeController.reverse().then((_) {
-      setState(() => _step++);
-      _fadeController.forward();
-    });
-  }
-
-  void _startRecording() {
+  void _addGesture(Gesture g) {
+    if (_busy) return;
+    final list = _currentStep == 0
+        ? _recordedPattern
+        : (_currentStep == 1 ? _confirmPattern : null);
+    if (list == null || list.length >= _maxLen) return;
     setState(() {
-      _isRecording = true;
-      if (_step == 1) {
-        _recordedPattern.clear();
-      } else {
-        _confirmPattern.clear();
+      _errorMessage = null;
+      list.add(g);
+    });
+  }
+
+  void _addManualGesture(Gesture g) => _addGesture(g);
+
+  void _nextStep() {
+    if (_busy) return;
+    setState(() => _errorMessage = null);
+    if (_currentStep == 0) {
+      if (_recordedPattern.length < _minLen) {
+        setState(
+          () => _errorMessage =
+              'Record at least $_minLen moves (up to $_maxLen).',
+        );
+        return;
       }
-    });
-
-    // Cancel any old subscription first
-    _gestureSub?.cancel();
-    _gestureDetector.stop();
-
-    _gestureDetector.start();
-    _gestureSub = _gestureDetector.gestures.listen((g) {
-      if (!_isRecording) return;
-      setState(() {
-        if (_step == 1) {
-          _recordedPattern.add(g);
-          if (_recordedPattern.length >= _patternLength) {
-            _isRecording = false;
-            _gestureDetector.stop();
-            _gestureSub?.cancel();
-          }
-        } else if (_step == 2) {
-          _confirmPattern.add(g);
-          if (_confirmPattern.length >= _patternLength) {
-            _isRecording = false;
-            _gestureDetector.stop();
-            _gestureSub?.cancel();
-          }
-        }
-      });
-    });
+      setState(() => _currentStep = 1);
+    } else if (_currentStep == 1) {
+      if (!listEquals(_recordedPattern, _confirmPattern)) {
+        setState(() {
+          _errorMessage = 'Gestures did not match. Please try again.';
+          _confirmPattern.clear();
+        });
+        return;
+      }
+      if (_isCreate) {
+        setState(() => _currentStep = 2);
+      } else {
+        _enrollOnExistingVault();
+      }
+    } else if (_currentStep == 2) {
+      final pin = _pinController.text;
+      final confirmPin = _pinConfirmController.text;
+      if (pin.length < _minPinLen) {
+        setState(
+          () => _errorMessage =
+              'Use at least $_minPinLen characters. Longer is much stronger.',
+        );
+        return;
+      }
+      if (pin != confirmPin) {
+        setState(
+          () => _errorMessage = 'PINs do not match. Please check and retry.',
+        );
+        return;
+      }
+      _finalizeSetup();
+    }
   }
 
-  bool _patternsMatch() {
-    if (_recordedPattern.length != _confirmPattern.length) return false;
-    for (int i = 0; i < _recordedPattern.length; i++) {
-      if (_recordedPattern[i] != _confirmPattern[i]) return false;
-    }
-    return true;
-  }
-
-  Future<void> _completeSetup() async {
-    final pin = _pinController.text.trim();
-    final confirmPin = _pinConfirmController.text.trim();
-
-    if (pin.length < 4) {
-      setState(() => _pinError = 'PIN must be at least 4 digits');
-      return;
-    }
-    if (pin != confirmPin) {
-      setState(() => _pinError = 'PINs do not match');
-      return;
-    }
-
-    await _authService.saveCredentials(
-      pattern: _recordedPattern,
-      pin: pin,
-    );
-
-    if (mounted) {
-      context.read<GestureUnlockProvider>().onSetupComplete();
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LockScreen()),
+  Future<void> _enrollOnExistingVault() async {
+    final session = context.read<VaultService>().session;
+    if (session == null) {
+      setState(
+        () => _errorMessage = 'The vault locked. Unlock it and try again.',
       );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final ok = widget.mode == SetupMode.decoyGesture
+          ? await session.enrollDecoyGesture(
+              _recordedPattern,
+              reason: GestureUnlockProvider.biometricReason,
+            )
+          : await session.enrollGesture(
+              _recordedPattern,
+              reason: GestureUnlockProvider.biometricReason,
+            );
+      if (!mounted) return;
+      if (ok) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      setState(() => _errorMessage = 'Biometric confirmation was cancelled.');
+    } on CredentialInUseException {
+      setState(() {
+        _errorMessage =
+            'That gesture is already used by another vault. Pick a different one.';
+        _recordedPattern.clear();
+        _confirmPattern.clear();
+        _currentStep = 0;
+      });
+    } catch (e) {
+      setState(() => _errorMessage = 'Could not save the gesture: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _finalizeSetup() async {
+    final vault = context.read<VaultService>();
+    final unlock = context.read<GestureUnlockProvider>();
+    final pin = _pinController.text;
+    setState(() {
+      _busy = true;
+      _progress = 0;
+    });
+    try {
+      final session = await vault.create(
+        pin: pin,
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      String? warning;
+      if (_biometricsAvailable == true && _recordedPattern.length >= _minLen) {
+        setState(() => _progress = null);
+        final ok = await session.enrollGesture(
+          _recordedPattern,
+          reason: GestureUnlockProvider.biometricReason,
+        );
+        if (!ok) {
+          warning =
+              'Gesture not saved (biometric cancelled). You can add it later in Settings.';
+        }
+      }
+      _pinController.clear();
+      _pinConfirmController.clear();
+
+      await unlock.onSetupComplete();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const NormalFilesScreen()),
+        (_) => false,
+      );
+      rootNavigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => VaultHomeScreen(vaultType: session.type),
+        ),
+      );
+      final ctx = rootNavigatorKey.currentContext;
+      if (warning != null && ctx != null && ctx.mounted) {
+        ScaffoldMessenger.of(
+          ctx,
+        ).showSnackBar(SnackBar(content: Text(warning)));
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = null;
+          _errorMessage = 'Setup failed: $e';
+        });
+      }
+    }
+  }
+
+  IconData _getGestureIcon(Gesture g) {
+    switch (g) {
+      case Gesture.left:
+        return Icons.arrow_back_rounded;
+      case Gesture.right:
+        return Icons.arrow_forward_rounded;
+      case Gesture.up:
+        return Icons.arrow_upward_rounded;
+      case Gesture.down:
+        return Icons.arrow_downward_rounded;
+      case Gesture.shake:
+        return Icons.vibration_rounded;
+    }
+  }
+
+  String _getGestureLabel(Gesture g) {
+    switch (g) {
+      case Gesture.left:
+        return 'Tilt Left';
+      case Gesture.right:
+        return 'Tilt Right';
+      case Gesture.up:
+        return 'Tilt Up';
+      case Gesture.down:
+        return 'Tilt Down';
+      case Gesture.shake:
+        return 'Shake';
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F0C29), Color(0xFF302B63), Color(0xFF24243E)],
-          ),
-        ),
-        child: SafeArea(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: _buildStep(),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStep() {
-    switch (_step) {
-      case 0:
-        return _buildWelcome();
-      case 1:
-        return _buildRecordGesture();
-      case 2:
-        return _buildConfirmGesture();
-      case 3:
-        return _buildSetPin();
-      default:
-        return const SizedBox();
-    }
-  }
-
-  Widget _buildWelcome() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFA78BFA).withValues(alpha: 0.15),
-              border: Border.all(
-                color: const Color(0xFFA78BFA).withValues(alpha: 0.3),
-                width: 2,
-              ),
-            ),
-            child: const Icon(
-              Icons.shield_rounded,
-              size: 50,
-              color: Color(0xFFA78BFA),
-            ),
-          ),
-          const SizedBox(height: 32),
-          Text(
-            'SecretVault',
-            style: GoogleFonts.outfit(
-              fontSize: 36,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              letterSpacing: 2,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Your private notes, protected by\nmotion-based gesture authentication',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              color: Colors.white.withValues(alpha: 0.5),
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 48),
-          _buildPrimaryButton('Get Started', _nextStep),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRecordGesture() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.gesture,
-            size: 64,
-            color: const Color(0xFFFBBF24).withValues(alpha: 0.8),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Set Your Gesture',
-            style: GoogleFonts.outfit(
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Perform $_patternLength gestures to create your\nunlock pattern (shake, tilt left/right/up/down)',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.white.withValues(alpha: 0.5),
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Return phone to flat between each gesture',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: const Color(0xFFFBBF24).withValues(alpha: 0.5),
-            ),
-          ),
-          const SizedBox(height: 24),
-          _buildGestureChips(_recordedPattern, _patternLength),
-          const SizedBox(height: 32),
-          if (!_isRecording && _recordedPattern.isEmpty)
-            _buildPrimaryButton('Start Recording', _startRecording),
-          if (_isRecording) ...[
-            Text(
-              'Listening for gestures... (${_recordedPattern.length}/$_patternLength)',
-              style: TextStyle(
-                color: const Color(0xFFFBBF24).withValues(alpha: 0.8),
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            if (_recordedPattern.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _buildSecondaryButton('Reset / Clear Gestures', () {
-                _startRecording();
-              }),
-            ],
-          ],
-          if (!_isRecording && _recordedPattern.length == _patternLength) ...[
-            _buildPrimaryButton('Continue', _nextStep),
-            const SizedBox(height: 12),
-            _buildSecondaryButton('Re-record Pattern', () {
-              setState(() => _recordedPattern.clear());
-            }),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildConfirmGesture() {
-    final matched = !_isRecording &&
-        _confirmPattern.length == _patternLength &&
-        _patternsMatch();
-    final failed = !_isRecording &&
-        _confirmPattern.length == _patternLength &&
-        !_patternsMatch();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            matched
-                ? Icons.check_circle_rounded
-                : failed
-                    ? Icons.error_rounded
-                    : Icons.repeat_rounded,
-            size: 64,
-            color: matched
-                ? const Color(0xFF4ADE80)
-                : failed
-                    ? const Color(0xFFF87171)
-                    : const Color(0xFF60A5FA),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Confirm Gesture',
-            style: GoogleFonts.outfit(
-              fontSize: 28,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            failed
-                ? 'Patterns don\'t match. Try again.'
-                : 'Repeat the same $_patternLength gestures to confirm',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: failed
-                  ? const Color(0xFFF87171)
-                  : Colors.white.withValues(alpha: 0.5),
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 24),
-          _buildGestureChips(_confirmPattern, _patternLength),
-          const SizedBox(height: 32),
-          if (!_isRecording && _confirmPattern.isEmpty)
-            _buildPrimaryButton('Start Recording', _startRecording),
-          if (_isRecording) ...[
-            Text(
-              'Listening for gestures... (${_confirmPattern.length}/$_patternLength)',
-              style: TextStyle(
-                color: const Color(0xFFFBBF24).withValues(alpha: 0.8),
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            if (_confirmPattern.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              _buildSecondaryButton('Reset / Clear Confirm', () {
-                _startRecording();
-              }),
-            ],
-          ],
-          if (matched) _buildPrimaryButton('Continue', _nextStep),
-          if (failed)
-            _buildSecondaryButton('Try Again', () {
-              setState(() => _confirmPattern.clear());
-            }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSetPin() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      backgroundColor: const Color(0xFF090D16),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const SizedBox(height: 80),
-            Icon(
-              Icons.pin_rounded,
-              size: 64,
-              color: const Color(0xFF34D399).withValues(alpha: 0.8),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFA78BFA).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.shield_rounded,
+                color: Color(0xFFA78BFA),
+                size: 20,
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(width: 10),
             Text(
-              'Set Fallback PIN',
+              'Vault Setup',
               style: GoogleFonts.outfit(
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              'Set a numeric PIN in case you forget\nyour gesture pattern',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withValues(alpha: 0.5),
-                height: 1.5,
+          ],
+        ),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            children: [
+              // Progress Indicator
+              Row(
+                children: List.generate(_stepCount, (index) {
+                  final isActive = index <= _currentStep;
+                  return Expanded(
+                    child: Container(
+                      height: 4,
+                      margin: EdgeInsets.only(
+                        right: index < _stepCount - 1 ? 8 : 0,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isActive
+                            ? const Color(0xFFA78BFA)
+                            : Colors.white12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  );
+                }),
               ),
-            ),
-            const SizedBox(height: 32),
-            _buildPinField(_pinController, 'Enter PIN'),
-            const SizedBox(height: 16),
-            _buildPinField(_pinConfirmController, 'Confirm PIN'),
-            if (_pinError != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _pinError!,
-                style: const TextStyle(
-                  color: Color(0xFFF87171),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+              const SizedBox(height: 28),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      if (_currentStep == 0)
+                        _buildPatternStep(isConfirm: false),
+                      if (_currentStep == 1) _buildPatternStep(isConfirm: true),
+                      if (_currentStep == 2) _buildPinStep(),
+                      if (_busy) ...[
+                        const SizedBox(height: 24),
+                        LinearProgressIndicator(
+                          value: _progress,
+                          color: const Color(0xFFA78BFA),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _progress != null
+                              ? 'Preparing secure storage…'
+                              : 'Confirm with your fingerprint…',
+                          style: GoogleFonts.outfit(
+                            color: Colors.white54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-            ],
-            const SizedBox(height: 32),
-            _buildPrimaryButton('Complete Setup', _completeSetup),
-            const SizedBox(height: 80),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildPinField(TextEditingController controller, String hint) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: TextField(
-        controller: controller,
-        obscureText: true,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 18,
-          letterSpacing: 8,
-        ),
-        textAlign: TextAlign.center,
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(
-            color: Colors.white.withValues(alpha: 0.25),
-            fontSize: 14,
-            letterSpacing: 1,
-          ),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 16,
-          ),
-        ),
-        onChanged: (_) {
-          if (_pinError != null) setState(() => _pinError = null);
-        },
-      ),
-    );
-  }
+              if (_errorMessage != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE11D48).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFFE11D48).withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        color: Color(0xFFFB7185),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: GoogleFonts.outfit(
+                            color: const Color(0xFFFB7185),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
-  Widget _buildGestureChips(List<Gesture> gestures, int total) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(total, (i) {
-        if (i < gestures.length) {
-          final data = _gestureData(gestures[i]);
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: data.color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: data.color.withValues(alpha: 0.4)),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // Action Buttons
+              Row(
                 children: [
-                  Icon(data.icon, color: data.color, size: 22),
-                  const SizedBox(height: 3),
-                  Text(
-                    data.label,
-                    style: TextStyle(
-                      color: data.color,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w700,
+                  if (_currentStep > 0 &&
+                      !(_currentStep == 2 &&
+                          _biometricsAvailable == false)) ...[
+                    OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              setState(() {
+                                _errorMessage = null;
+                                _currentStep--;
+                              });
+                            },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: const BorderSide(color: Colors.white24),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 14,
+                        ),
+                      ),
+                      child: Text(
+                        'Back',
+                        style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _busy ? null : _nextStep,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFA78BFA),
+                        foregroundColor: const Color(0xFF090D16),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: Text(
+                        _currentStep == 2
+                            ? 'Create Vault'
+                            : (!_isCreate && _currentStep == 1
+                                  ? 'Save Gesture'
+                                  : 'Continue'),
+                        style: GoogleFonts.outfit(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 5),
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.1),
-              ),
-            ),
-            child: Icon(
-              Icons.help_outline_rounded,
-              color: Colors.white.withValues(alpha: 0.15),
-              size: 22,
-            ),
+            ],
           ),
-        );
-      }),
+        ),
+      ),
     );
   }
 
-  Widget _buildPrimaryButton(String text, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: const LinearGradient(
-            colors: [Color(0xFFA78BFA), Color(0xFF818CF8)],
+  Widget _buildPatternStep({required bool isConfirm}) {
+    final list = isConfirm ? _confirmPattern : _recordedPattern;
+    return Column(
+      children: [
+        Icon(
+          isConfirm ? Icons.lock_reset_rounded : Icons.screen_rotation_rounded,
+          color: const Color(0xFFA78BFA),
+          size: 48,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          isConfirm ? 'Confirm Your Gesture' : 'Set Secret Motion Gesture',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.outfit(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFA78BFA).withValues(alpha: 0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          isConfirm
+              ? 'Repeat the exact same sequence.'
+              : 'Tilt or shake your phone $_minLen–$_maxLen times (Left, Right, Up, Down, Shake). '
+                    'Longer is harder to guess. Your fingerprint is required with it, so the gesture alone never opens the vault.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.outfit(fontSize: 14, color: Colors.white60),
+        ),
+        const SizedBox(height: 32),
+
+        // 4 Slots
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(_maxLen, (index) {
+            final hasItem = index < list.length;
+            final item = hasItem ? list[index] : null;
+            return Container(
+              width: 30,
+              height: 44,
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              decoration: BoxDecoration(
+                color: hasItem
+                    ? const Color(0xFFA78BFA).withValues(alpha: 0.2)
+                    : const Color(0xFF161B22),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: hasItem ? const Color(0xFFA78BFA) : Colors.white12,
+                  width: hasItem ? 2 : 1,
+                ),
+              ),
+              child: hasItem
+                  ? Icon(
+                      _getGestureIcon(item!),
+                      color: const Color(0xFFA78BFA),
+                      size: 20,
+                    )
+                  : Center(
+                      child: Text(
+                        '${index + 1}',
+                        style: GoogleFonts.outfit(
+                          color: Colors.white24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+            );
+          }),
+        ),
+        const SizedBox(height: 16),
+
+        if (list.isNotEmpty)
+          TextButton.icon(
+            onPressed: () => setState(() => list.clear()),
+            icon: const Icon(
+              Icons.refresh_rounded,
+              size: 16,
+              color: Colors.white54,
             ),
+            label: Text(
+              'Clear Sequence',
+              style: GoogleFonts.outfit(color: Colors.white54, fontSize: 13),
+            ),
+          ),
+
+        const SizedBox(height: 24),
+        Text(
+          'Quick Tap Input (or physically tilt device):',
+          style: GoogleFonts.outfit(color: Colors.white38, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+
+        // Interactive Tap Pad for accessibility/testing
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            _buildGestureChip(Gesture.left),
+            _buildGestureChip(Gesture.right),
+            _buildGestureChip(Gesture.up),
+            _buildGestureChip(Gesture.down),
+            _buildGestureChip(Gesture.shake),
           ],
         ),
-        child: Text(
-          text,
+      ],
+    );
+  }
+
+  Widget _buildGestureChip(Gesture g) {
+    return ActionChip(
+      backgroundColor: const Color(0xFF1F242C),
+      side: const BorderSide(color: Colors.white12),
+      avatar: Icon(
+        _getGestureIcon(g),
+        size: 16,
+        color: const Color(0xFFA78BFA),
+      ),
+      label: Text(
+        _getGestureLabel(g),
+        style: GoogleFonts.outfit(color: Colors.white, fontSize: 13),
+      ),
+      onPressed: () => _addManualGesture(g),
+    );
+  }
+
+  Widget _buildPinStep() {
+    return Column(
+      children: [
+        const Icon(Icons.pin_rounded, color: Color(0xFFA78BFA), size: 48),
+        const SizedBox(height: 16),
+        Text(
+          'Set Your Vault PIN',
           textAlign: TextAlign.center,
-          style: const TextStyle(
+          style: GoogleFonts.outfit(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
             color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSecondaryButton(String text, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: Colors.white.withValues(alpha: 0.05),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-        child: Text(
-          text,
+        const SizedBox(height: 8),
+        Text(
+          !Features.gestures
+              ? 'The vault opens with this PIN. It encrypts your files: there is no reset. '
+                    'Use 6+ characters; a passphrase is best.'
+              : _biometricsAvailable == false
+              ? 'This device has no fingerprint unlock set up, so the vault opens with this PIN only. '
+                    'It encrypts your files: there is no reset. Use 6+ characters; a passphrase is best.'
+              : 'Your PIN works when the gesture or fingerprint cannot. It encrypts your files: '
+                    'there is no reset. Use 6+ characters; a passphrase is best.',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.6),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+          style: GoogleFonts.outfit(fontSize: 14, color: Colors.white60),
+        ),
+        const SizedBox(height: 28),
+
+        TextField(
+          controller: _pinController,
+          keyboardType: TextInputType.visiblePassword,
+          obscureText: true,
+          maxLength: 64,
+          style: GoogleFonts.outfit(
+            fontSize: 20,
+            letterSpacing: 6,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+          decoration: InputDecoration(
+            counterText: '',
+            hintText: '6+ digits or a passphrase',
+            hintStyle: GoogleFonts.outfit(
+              fontSize: 14,
+              letterSpacing: 0,
+              color: Colors.white24,
+            ),
+            filled: true,
+            fillColor: const Color(0xFF161B22),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none,
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 16),
+
+        TextField(
+          controller: _pinConfirmController,
+          keyboardType: TextInputType.visiblePassword,
+          obscureText: true,
+          maxLength: 64,
+          style: GoogleFonts.outfit(
+            fontSize: 20,
+            letterSpacing: 6,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+          decoration: InputDecoration(
+            counterText: '',
+            hintText: 'Confirm PIN',
+            hintStyle: GoogleFonts.outfit(
+              fontSize: 14,
+              letterSpacing: 0,
+              color: Colors.white24,
+            ),
+            filled: true,
+            fillColor: const Color(0xFF161B22),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+      ],
     );
   }
-
-  _GestureData _gestureData(Gesture g) {
-    switch (g) {
-      case Gesture.shake:
-        return _GestureData(
-            Icons.vibration, 'SHAKE', const Color(0xFFFBBF24));
-      case Gesture.left:
-        return _GestureData(
-            Icons.arrow_back_rounded, 'LEFT', const Color(0xFF60A5FA));
-      case Gesture.right:
-        return _GestureData(
-            Icons.arrow_forward_rounded, 'RIGHT', const Color(0xFF34D399));
-      case Gesture.up:
-        return _GestureData(
-            Icons.arrow_upward_rounded, 'UP', const Color(0xFFC084FC));
-      case Gesture.down:
-        return _GestureData(
-            Icons.arrow_downward_rounded, 'DOWN', const Color(0xFFFB923C));
-    }
-  }
-}
-
-class _GestureData {
-  final IconData icon;
-  final String label;
-  final Color color;
-  _GestureData(this.icon, this.label, this.color);
 }

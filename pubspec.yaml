@@ -37,20 +37,23 @@ dependencies:
   sensors_plus: ^4.0.2
   provider: ^6.1.2
   vibration: ^3.1.8
-  sqflite: ^2.4.1
   path: ^1.9.0
   flutter_secure_storage: ^9.2.4
-  encrypt: ^5.0.3
-  crypto: ^3.0.6
   uuid: ^4.5.1
   intl: ^0.19.0
-  local_auth: ^2.3.0
   google_fonts: ^6.2.1
+  path_provider: ^2.1.5
+  file_picker: ^8.1.4
+  permission_handler: ^11.3.1
+  open_filex: ^4.5.0
+  cryptography: ^2.9.0
+  cryptography_flutter: ^2.3.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  sqflite_common_ffi: ^2.3.4+4
+  integration_test:
+    sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

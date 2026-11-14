@@ -1,12 +1,17 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '../models/gesture.dart';
+import '../config/features.dart';
 import '../providers/gesture_unlock_provider.dart';
-import '../services/gesture_detector.dart';
+import '../services/auth_service.dart';
+import '../services/vault_service.dart';
+import '../vault/vault_container.dart';
+import 'setup_screen.dart';
 
+/// Security & Preferences Settings Screen.
+///
+/// Everything here acts on the vault that is currently open. A decoy vault
+/// sees the same screen minus decoy management (a decoy can't host one).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -15,629 +20,586 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final AuthService _authService = AuthService();
+  bool _autoLockOnSwitch = true;
+  int _inactivityTimeout = 30;
+  bool _biometrics = false;
+
   @override
-  Widget build(BuildContext context) {
-    final unlockProvider = context.watch<GestureUnlockProvider>();
-    if (unlockProvider.state != UnlockState.unlocked) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final vault = context.read<VaultService>();
+    final autoLock = await _authService.getAutoLockOnSwitch();
+    final timeout = await _authService.getInactivityTimeout();
+    final bio = await vault.biometricsAvailable();
+    if (mounted) {
+      setState(() {
+        _autoLockOnSwitch = autoLock;
+        _inactivityTimeout = timeout;
+        _biometrics = bio && Features.gestures;
       });
     }
+  }
 
+  VaultSession? get _session => context.read<VaultService>().session;
+
+  void _toast(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: error
+            ? const Color(0xFFE11D48)
+            : const Color(0xFF059669),
+        content: Text(msg, style: GoogleFonts.outfit(color: Colors.white)),
+      ),
+    );
+  }
+
+  /// Asks for a new PIN twice. Returns null if cancelled.
+  Future<String?> _askNewPin(String title, String hint) => showDialog<String>(
+    context: context,
+    builder: (_) => _NewPinDialog(title: title, hint: hint),
+  );
+
+  Future<void> _runPinChange({required bool decoy}) async {
+    final pin = await _askNewPin(
+      decoy ? 'Decoy Vault PIN' : 'Change PIN',
+      decoy
+          ? 'The PIN you can hand over if forced. It opens only the decoy vault.'
+          : 'Your files are re-protected under the new PIN immediately.',
+    );
+    final session = _session;
+    if (pin == null || session == null) return;
+    try {
+      if (decoy) {
+        await session.changeDecoyPin(pin);
+      } else {
+        await session.changePin(pin);
+      }
+      _toast('PIN updated.');
+    } on CredentialInUseException {
+      _toast('That PIN is already used by another vault.', error: true);
+    } catch (e) {
+      _toast('Could not change PIN: $e', error: true);
+    }
+  }
+
+  Future<void> _createDecoy() async {
+    final pin = await _askNewPin(
+      'Set Up Decoy Vault',
+      'If someone forces you to unlock, give them this PIN instead. It opens a separate, '
+          'ordinary-looking vault; nothing on the phone shows a second one exists. '
+          'Fill it with believable files after creating it.',
+    );
+    final session = _session;
+    if (pin == null || session == null) return;
+    try {
+      await session.createDecoy(pin: pin);
+      if (mounted) setState(() {});
+      _toast(
+        'Decoy vault created. Lock and open it with its PIN to add content.',
+      );
+    } on CredentialInUseException {
+      _toast(
+        'That PIN is already used by your real vault. Choose a different one.',
+        error: true,
+      );
+    } catch (e) {
+      _toast('Could not create decoy: $e', error: true);
+    }
+  }
+
+  Future<void> _removeDecoy() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: Text(
+          'Remove decoy vault?',
+          style: GoogleFonts.outfit(color: Colors.white),
+        ),
+        content: Text(
+          'Everything in the decoy vault is erased. This cannot be undone.',
+          style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Remove',
+              style: TextStyle(color: Color(0xFFFB7185)),
+            ),
+          ),
+        ],
+      ),
+    );
+    final session = _session;
+    if (ok != true || session == null) return;
+    await session.removeDecoy();
+    if (mounted) setState(() {});
+    _toast('Decoy vault removed.');
+  }
+
+  Future<void> _recordGesture({required bool decoy}) async {
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SetupScreen(
+          mode: decoy ? SetupMode.decoyGesture : SetupMode.reenrollGesture,
+        ),
+      ),
+    );
+    if (saved == true) _toast('Gesture saved.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.read<VaultService>().session;
+    final canDecoy = session?.canManageDecoy ?? false;
+    final hasDecoy = session?.hasDecoy ?? false;
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F0C29), Color(0xFF1A1744), Color(0xFF24243E)],
+      backgroundColor: const Color(0xFF090D16),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white70,
+            size: 18,
+          ),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Security & Settings',
+          style: GoogleFonts.outfit(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
           ),
         ),
-        child: SafeArea(
-          child: SingleChildScrollView(
+      ),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        children: [
+          _buildSectionHeader('ACCESS & CREDENTIALS'),
+          if (_biometrics) ...[
+            _buildSettingCard(
+              icon: Icons.screen_rotation_rounded,
+              color: const Color(0xFFA78BFA),
+              title: 'Re-record Motion Gesture',
+              subtitle: 'Gesture + fingerprint to open this vault',
+              onTap: () => _recordGesture(decoy: false),
+            ),
+            const SizedBox(height: 8),
+          ],
+          _buildSettingCard(
+            icon: Icons.pin_rounded,
+            color: const Color(0xFF34D399),
+            title: 'Change PIN',
+            subtitle: 'Opens this vault without the gesture',
+            onTap: () => _runPinChange(decoy: false),
+          ),
+
+          if (canDecoy) ...[
+            const SizedBox(height: 24),
+            _buildSectionHeader('DECOY VAULT'),
+            if (!hasDecoy)
+              _buildSettingCard(
+                icon: Icons.theater_comedy_rounded,
+                color: const Color(0xFFF59E0B),
+                title: 'Set Up Decoy Vault',
+                subtitle: 'A second PIN that opens a harmless vault',
+                onTap: _createDecoy,
+              )
+            else ...[
+              _buildSettingCard(
+                icon: Icons.pin_outlined,
+                color: const Color(0xFFF59E0B),
+                title: 'Change Decoy PIN',
+                subtitle: 'The PIN you can give up under pressure',
+                onTap: () => _runPinChange(decoy: true),
+              ),
+              if (_biometrics) ...[
+                const SizedBox(height: 8),
+                _buildSettingCard(
+                  icon: Icons.screen_rotation_alt_rounded,
+                  color: const Color(0xFFF59E0B),
+                  title: 'Set Decoy Gesture',
+                  subtitle: 'A different gesture that opens the decoy',
+                  onTap: () => _recordGesture(decoy: true),
+                ),
+              ],
+              const SizedBox(height: 8),
+              _buildSettingCard(
+                icon: Icons.delete_forever_rounded,
+                color: const Color(0xFFFB7185),
+                title: 'Remove Decoy Vault',
+                subtitle: 'Erases the decoy and its contents',
+                onTap: _removeDecoy,
+              ),
+            ],
+          ],
+
+          const SizedBox(height: 24),
+          _buildSectionHeader('LOCKDOWN & TIMEOUTS'),
+
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    'Auto-Lock on App Switch',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Lock immediately and purge RAM when leaving app',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: Colors.white54,
+                    ),
+                  ),
+                  value: _autoLockOnSwitch,
+                  activeThumbColor: const Color(0xFFA78BFA),
+                  onChanged: (val) async {
+                    setState(() => _autoLockOnSwitch = val);
+                    await _authService.setAutoLockOnSwitch(val);
+                    if (context.mounted) {
+                      await context
+                          .read<GestureUnlockProvider>()
+                          .reloadSettings();
+                    }
+                  },
+                ),
+                const Divider(color: Colors.white10),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    'Inactivity Auto-Lock Timeout',
+                    style: GoogleFonts.outfit(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '$_inactivityTimeout seconds of idle touch',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: Colors.white54,
+                    ),
+                  ),
+                  trailing: DropdownButton<int>(
+                    value: _inactivityTimeout,
+                    dropdownColor: const Color(0xFF1F2937),
+                    underline: const SizedBox(),
+                    style: GoogleFonts.outfit(
+                      color: const Color(0xFFA78BFA),
+                      fontWeight: FontWeight.bold,
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 15, child: Text('15s')),
+                      DropdownMenuItem(value: 30, child: Text('30s')),
+                      DropdownMenuItem(value: 60, child: Text('60s')),
+                      DropdownMenuItem(value: 120, child: Text('2m')),
+                    ],
+                    onChanged: (val) async {
+                      if (val == null) return;
+                      setState(() => _inactivityTimeout = val);
+                      await _authService.setInactivityTimeout(val);
+                      if (context.mounted) {
+                        await context
+                            .read<GestureUnlockProvider>()
+                            .reloadSettings();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+          _buildSectionHeader('SECURITY & THREAT MODEL'),
+
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // App bar
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Settings',
-                        style: GoogleFonts.outfit(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
+                _buildSecurityBadge(
+                  'File Encryption',
+                  'AES-256-GCM per 64 KB chunk; any tampering is detected',
                 ),
-
-                const SizedBox(height: 24),
-                _sectionLabel('SECURITY'),
-                const SizedBox(height: 12),
-                _actionTile(
-                  icon: Icons.gesture,
-                  title: 'Change Gesture Pattern',
-                  subtitle: 'Record a new 4-gesture unlock pattern',
-                  color: const Color(0xFFFBBF24),
-                  onTap: () => _showChangeGestureSheet(),
+                const SizedBox(height: 10),
+                _buildSecurityBadge(
+                  'Key Protection',
+                  'PIN stretched with Argon2id and bound to this phone\'s secure hardware',
                 ),
-                _actionTile(
-                  icon: Icons.pin_rounded,
-                  title: 'Change Fallback PIN',
-                  subtitle: 'Update your backup PIN code',
-                  color: const Color(0xFF34D399),
-                  onTap: () => _showChangePinDialog(),
+                const SizedBox(height: 10),
+                _buildSecurityBadge(
+                  'Hard Shake Panic',
+                  'Instant session termination & RAM wipe upon sudden shake',
                 ),
-
-                const SizedBox(height: 24),
-                _sectionLabel('BEHAVIOR'),
-                const SizedBox(height: 12),
-                _buildSwitchTile(),
-                _buildTimeoutTile(),
-
-                const SizedBox(height: 24),
-                _sectionLabel('ABOUT'),
-                const SizedBox(height: 12),
-                _actionTile(
-                  icon: Icons.info_outline_rounded,
-                  title: 'SecretVault',
-                  subtitle: 'v1.0.0 — Motion-based secure notes',
-                  color: const Color(0xFFA78BFA),
-                  onTap: () {},
+                const SizedBox(height: 10),
+                _buildSecurityBadge(
+                  'Plausible Cover',
+                  'Native-styled Files Explorer disguise with covert entry',
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 10),
+                _buildSecurityBadge(
+                  'Memory Protection',
+                  'In-memory decrypted buffers purged on lock or panic',
+                ),
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Section label ─────────────────────────────────────
-
-  Widget _sectionLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: Colors.white.withValues(alpha: 0.25),
-          letterSpacing: 2,
-        ),
-      ),
-    );
-  }
-
-  // ─── Generic action tile ───────────────────────────────
-
-  Widget _actionTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 22),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.9))),
-                    const SizedBox(height: 4),
-                    Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.35))),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: Colors.white.withValues(alpha: 0.2)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Lock on App Switch toggle ─────────────────────────
-
-  Widget _buildSwitchTile() {
-    final provider = context.watch<GestureUnlockProvider>();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: const Color(0xFF60A5FA).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.swap_horiz_rounded, color: Color(0xFF60A5FA), size: 22),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Lock on App Switch', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.9))),
-                  const SizedBox(height: 4),
-                  Text(
-                    provider.autoLockOnSwitch
-                        ? 'App locks when you switch away'
-                        : 'App stays unlocked when switching',
-                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.35)),
-                  ),
-                ],
-              ),
-            ),
-            Switch(
-              value: provider.autoLockOnSwitch,
-              activeThumbColor: const Color(0xFF60A5FA),
-              onChanged: (val) => provider.setAutoLockOnSwitch(val),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─── Inactivity Timeout selector ───────────────────────
-
-  Widget _buildTimeoutTile() {
-    final provider = context.watch<GestureUnlockProvider>();
-    final options = [30, 60, 120, 300, 600];
-    final labels = ['30 sec', '1 min', '2 min', '5 min', '10 min'];
-    final idx = options.indexOf(provider.inactivityTimeoutSeconds);
-    final currentLabel = idx >= 0 ? labels[idx] : '${provider.inactivityTimeoutSeconds}s';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          showModalBottomSheet(
-            context: context,
-            backgroundColor: const Color(0xFF1A1744),
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            builder: (ctx) => Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(height: 20),
-                  Text('Auto-Lock After Inactivity', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
-                  const SizedBox(height: 16),
-                  ...List.generate(options.length, (i) {
-                    final selected = provider.inactivityTimeoutSeconds == options[i];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: GestureDetector(
-                        onTap: () {
-                          provider.setInactivityTimeout(options[i]);
-                          Navigator.pop(ctx);
-                        },
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-                          decoration: BoxDecoration(
-                            color: selected ? const Color(0xFFC084FC).withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.04),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: selected ? const Color(0xFFC084FC).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.06)),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(labels[i], style: TextStyle(color: selected ? const Color(0xFFC084FC) : Colors.white.withValues(alpha: 0.6), fontSize: 15, fontWeight: FontWeight.w600)),
-                              const Spacer(),
-                              if (selected) const Icon(Icons.check_rounded, color: Color(0xFFC084FC), size: 20),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ],
-              ),
-            ),
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.04),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFC084FC).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.timer_outlined, color: Color(0xFFC084FC), size: 22),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Inactivity Timeout', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.9))),
-                    const SizedBox(height: 4),
-                    Text('Lock after $currentLabel of inactivity', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.35))),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFC084FC).withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(currentLabel, style: const TextStyle(color: Color(0xFFC084FC), fontSize: 12, fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Change Gesture Pattern ────────────────────────────
-
-  void _showChangeGestureSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => const _ChangeGestureSheet(),
-    );
-  }
-
-  // ─── Change PIN ────────────────────────────────────────
-
-  void _showChangePinDialog() {
-    final currentPinCtrl = TextEditingController();
-    final newPinCtrl = TextEditingController();
-    final confirmPinCtrl = TextEditingController();
-    String? error;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1744),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-            side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-          ),
-          title: Text('Change PIN', style: GoogleFonts.outfit(color: Colors.white, fontWeight: FontWeight.w700)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _pinField(currentPinCtrl, 'Current PIN'),
-              const SizedBox(height: 12),
-              _pinField(newPinCtrl, 'New PIN'),
-              const SizedBox(height: 12),
-              _pinField(confirmPinCtrl, 'Confirm New PIN'),
-              if (error != null) ...[
-                const SizedBox(height: 12),
-                Text(error!, style: const TextStyle(color: Color(0xFFF87171), fontSize: 13)),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: Colors.white.withValues(alpha: 0.5))),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF34D399),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () async {
-                final provider = context.read<GestureUnlockProvider>();
-                final verified = await provider.verifyPin(currentPinCtrl.text);
-                if (!verified) {
-                  setDialogState(() => error = 'Current PIN is incorrect');
-                  return;
-                }
-                if (newPinCtrl.text.length < 4) {
-                  setDialogState(() => error = 'New PIN must be at least 4 digits');
-                  return;
-                }
-                if (newPinCtrl.text != confirmPinCtrl.text) {
-                  setDialogState(() => error = 'New PINs do not match');
-                  return;
-                }
-                await provider.updatePin(newPinCtrl.text);
-                if (ctx.mounted) {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    SnackBar(
-                      content: const Text('PIN updated successfully'),
-                      backgroundColor: const Color(0xFF34D399),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Update', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _pinField(TextEditingController controller, String hint) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: TextField(
-        controller: controller,
-        obscureText: true,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(color: Colors.white, fontSize: 16, letterSpacing: 6),
-        textAlign: TextAlign.center,
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2), fontSize: 13, letterSpacing: 1),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.all(14),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Change Gesture Bottom Sheet ─────────────────────────
-
-class _ChangeGestureSheet extends StatefulWidget {
-  const _ChangeGestureSheet();
-
-  @override
-  State<_ChangeGestureSheet> createState() => _ChangeGestureSheetState();
-}
-
-class _ChangeGestureSheetState extends State<_ChangeGestureSheet> {
-  final _detector = GestureDetectorService();
-  final List<Gesture> _newPattern = [];
-  final List<Gesture> _confirmPattern = [];
-  int _step = 0;
-  bool _isRecording = false;
-  StreamSubscription? _gestureSub;
-
-  static const int _len = GestureUnlockProvider.patternLength;
-
-  @override
-  void dispose() {
-    _gestureSub?.cancel();
-    _detector.dispose();
-    super.dispose();
-  }
-
-  void _startRecording() {
-    setState(() {
-      _isRecording = true;
-      if (_step == 0) {
-        _newPattern.clear();
-      } else {
-        _confirmPattern.clear();
-      }
-    });
-
-    _gestureSub?.cancel();
-    _detector.stop();
-    _detector.start();
-
-    _gestureSub = _detector.gestures.listen((g) {
-      if (!_isRecording) return;
-      setState(() {
-        final target = _step == 0 ? _newPattern : _confirmPattern;
-        target.add(g);
-        if (target.length >= _len) {
-          _isRecording = false;
-          _detector.stop();
-          _gestureSub?.cancel();
-        }
-      });
-    });
-  }
-
-  bool _patternsMatch() {
-    if (_newPattern.length != _confirmPattern.length) return false;
-    for (int i = 0; i < _newPattern.length; i++) {
-      if (_newPattern[i] != _confirmPattern[i]) return false;
-    }
-    return true;
-  }
-
-  Future<void> _savePattern() async {
-    final provider = context.read<GestureUnlockProvider>();
-    await provider.updatePattern(_newPattern);
-    if (mounted) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Gesture pattern updated!'),
-          backgroundColor: const Color(0xFFFBBF24),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final gestures = _step == 0 ? _newPattern : _confirmPattern;
-    final matched = _step == 1 && !_isRecording && _confirmPattern.length == _len && _patternsMatch();
-    final failed = _step == 1 && !_isRecording && _confirmPattern.length == _len && !_patternsMatch();
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1A1744),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(2))),
-          const SizedBox(height: 24),
-          Text(
-            _step == 0 ? 'Record New Pattern' : 'Confirm Pattern',
-            style: GoogleFonts.outfit(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _step == 0
-                ? 'Perform $_len gestures (return to flat between each)'
-                : failed ? 'Patterns don\'t match — try again' : 'Repeat the same $_len gestures',
-            style: TextStyle(fontSize: 14, color: failed ? const Color(0xFFF87171) : Colors.white.withValues(alpha: 0.4)),
-          ),
-          const SizedBox(height: 24),
-          _buildChips(gestures),
-          const SizedBox(height: 24),
-          if (!_isRecording && gestures.isEmpty) _actionBtn('Start Recording', _startRecording),
-          if (_isRecording) ...[
-            Text('Listening... (${gestures.length}/$_len)', style: TextStyle(color: const Color(0xFFFBBF24).withValues(alpha: 0.8), fontWeight: FontWeight.w600)),
-            if (gestures.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: _startRecording,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                  ),
-                  child: const Text('Reset / Retry', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ],
-          ],
-          if (!_isRecording && gestures.length == _len && _step == 0) ...[
-            _actionBtn('Confirm Pattern', () => setState(() => _step = 1)),
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () => setState(() => _newPattern.clear()),
-              child: const Center(
-                child: Text('Re-record Pattern', style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w600)),
-              ),
-            ),
-          ],
-          if (matched) _actionBtn('Save Pattern', _savePattern),
-          if (failed) _actionBtn('Retry', () => setState(() => _confirmPattern.clear())),
+          const SizedBox(height: 30),
         ],
       ),
     );
   }
 
-  Widget _buildChips(List<Gesture> gestures) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(_len, (i) {
-        if (i < gestures.length) {
-          final d = _gd(gestures[i]);
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Container(
-              width: 60, height: 60,
-              decoration: BoxDecoration(color: d.color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16), border: Border.all(color: d.color.withValues(alpha: 0.4))),
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(d.icon, color: d.color, size: 22),
-                const SizedBox(height: 3),
-                Text(d.label, style: TextStyle(color: d.color, fontSize: 8, fontWeight: FontWeight.w700)),
-              ]),
-            ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 5),
-          child: Container(
-            width: 60, height: 60,
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withValues(alpha: 0.1))),
-            child: Icon(Icons.help_outline_rounded, color: Colors.white.withValues(alpha: 0.15), size: 22),
-          ),
-        );
-      }),
-    );
-  }
-
-  Widget _actionBtn(String text, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), gradient: const LinearGradient(colors: [Color(0xFFA78BFA), Color(0xFF818CF8)])),
-        child: Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10, left: 4),
+      child: Text(
+        title,
+        style: GoogleFonts.outfit(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+          color: Colors.white38,
+        ),
       ),
     );
   }
 
-  ({IconData icon, String label, Color color}) _gd(Gesture g) => switch (g) {
-    Gesture.shake => (icon: Icons.vibration, label: 'SHAKE', color: const Color(0xFFFBBF24)),
-    Gesture.left => (icon: Icons.arrow_back_rounded, label: 'LEFT', color: const Color(0xFF60A5FA)),
-    Gesture.right => (icon: Icons.arrow_forward_rounded, label: 'RIGHT', color: const Color(0xFF34D399)),
-    Gesture.up => (icon: Icons.arrow_upward_rounded, label: 'UP', color: const Color(0xFFC084FC)),
-    Gesture.down => (icon: Icons.arrow_downward_rounded, label: 'DOWN', color: const Color(0xFFFB923C)),
-  };
+  Widget _buildSettingCard({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: color, size: 22),
+        ),
+        title: Text(
+          title,
+          style: GoogleFonts.outfit(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
+        ),
+        trailing: const Icon(
+          Icons.arrow_forward_ios_rounded,
+          color: Colors.white24,
+          size: 14,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSecurityBadge(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(
+          Icons.check_circle_outline_rounded,
+          color: Color(0xFF34D399),
+          size: 16,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: RichText(
+            text: TextSpan(
+              style: GoogleFonts.outfit(fontSize: 12, color: Colors.white70),
+              children: [
+                TextSpan(
+                  text: '$label: ',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                TextSpan(
+                  text: value,
+                  style: const TextStyle(color: Colors.white60),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Enter a new PIN twice" dialog. It owns its text controllers so they are
+/// disposed only when the dialog itself is gone. Disposing them as soon as
+/// `showDialog` returns breaks the fields during the closing animation.
+class _NewPinDialog extends StatefulWidget {
+  final String title;
+  final String hint;
+  const _NewPinDialog({required this.title, required this.hint});
+
+  @override
+  State<_NewPinDialog> createState() => _NewPinDialogState();
+}
+
+class _NewPinDialogState extends State<_NewPinDialog> {
+  final _a = TextEditingController();
+  final _b = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _a.dispose();
+    _b.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_a.text.length < 6) {
+      setState(() => _error = 'Use at least 6 characters.');
+    } else if (_a.text != _b.text) {
+      setState(() => _error = 'PINs do not match.');
+    } else {
+      Navigator.pop(context, _a.text);
+    }
+  }
+
+  Widget _field(TextEditingController c, String hint) => TextField(
+    controller: c,
+    keyboardType: TextInputType.visiblePassword,
+    obscureText: true,
+    maxLength: 64,
+    style: GoogleFonts.outfit(
+      fontSize: 18,
+      color: Colors.white,
+      letterSpacing: 4,
+    ),
+    textAlign: TextAlign.center,
+    decoration: InputDecoration(
+      counterText: '',
+      hintText: hint,
+      hintStyle: GoogleFonts.outfit(
+        fontSize: 13,
+        letterSpacing: 0,
+        color: Colors.white24,
+      ),
+      filled: true,
+      fillColor: const Color(0xFF21262D),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF161B22),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(
+        widget.title,
+        style: GoogleFonts.outfit(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.hint,
+              style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            _field(_a, 'New PIN'),
+            const SizedBox(height: 10),
+            _field(_b, 'Confirm'),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  color: const Color(0xFFFB7185),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.outfit(color: Colors.white54),
+          ),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFA78BFA),
+            foregroundColor: const Color(0xFF090D16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          onPressed: _submit,
+          child: Text(
+            'Save',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
+  }
 }

@@ -1,0 +1,14 @@
+name: sync_core
+description: End-to-end encrypted, resumable sync engine (pure Dart). See docs/SYNC_DESIGN.md.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  cryptography: ^2.9.0
+  http: ^1.5.0
+
+dev_dependencies:
+  test: ^1.26.0
