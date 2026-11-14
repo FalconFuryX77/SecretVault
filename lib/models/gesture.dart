@@ -1,4 +1,4 @@
-enum Gesture { shake, left, right, up, down, wandAirStroke }
+enum Gesture { left, right, up, down, shake }
 
 enum UnlockState {
   locked,
@@ -14,3 +14,4 @@ enum VaultType {
   primary,
   decoy,
 }
+

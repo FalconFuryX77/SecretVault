@@ -24,7 +24,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late TextEditingController _titleController;
   late TextEditingController _contentController;
   Timer? _autoSaveTimer;
-  bool _hasChanges = false;
 
   @override
   void initState() {
@@ -42,10 +41,10 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   }
 
   void _onChanged() {
-    _hasChanges = true;
     _autoSaveTimer?.cancel();
     _autoSaveTimer = Timer(const Duration(seconds: 2), _saveNote);
   }
+
 
   Future<void> _saveNote() async {
     final title = _titleController.text.trim();
@@ -59,9 +58,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           content: content,
           category: widget.category,
         );
-
-    _hasChanges = false;
   }
+
 
   Future<void> _saveAndPop() async {
     _autoSaveTimer?.cancel();
@@ -131,7 +129,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                   expands: true,
                   style: GoogleFonts.firaCode(
                     fontSize: 14,
-                    color: Colors.white.withOpacity(0.85),
+                    color: Colors.white.withValues(alpha: 0.85),
                     height: 1.6,
                   ),
                   decoration: InputDecoration(

@@ -1,17 +1,11 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../models/gesture.dart';
-import '../models/motion_point.dart';
 import '../providers/gesture_unlock_provider.dart';
-import '../providers/vault_provider.dart';
-import '../services/gesture_detector.dart';
-import 'vault_home_screen.dart';
+import '../services/security_channel_service.dart';
 
-/// 3D Wand Spatial Unlock Screen.
-/// Features a real-time motion particle trail canvas, biometric scan trigger,
-/// PIN fallback, and automatic routing to Primary or Decoy vault.
+/// Clean, discrete 4-step motion gesture & biometric unlock portal.
 class LockScreen extends StatefulWidget {
   const LockScreen({super.key});
 
@@ -19,21 +13,22 @@ class LockScreen extends StatefulWidget {
   State<LockScreen> createState() => _LockScreenState();
 }
 
-class _LockScreenState extends State<LockScreen> with SingleTickerProviderStateMixin {
+class _LockScreenState extends State<LockScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   final TextEditingController _pinController = TextEditingController();
-  bool _isDrawingManual = false;
 
   @override
   void initState() {
     super.initState();
+    SecurityChannelService.setSecureFlag(true);
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1600),
     )..repeat(reverse: true);
 
-    _pulseAnimation = Tween<double>(begin: 0.95, end: 1.05).animate(
+    _pulseAnimation = Tween<double>(begin: 0.96, end: 1.04).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
   }
@@ -42,6 +37,7 @@ class _LockScreenState extends State<LockScreen> with SingleTickerProviderStateM
   void dispose() {
     _pulseController.dispose();
     _pinController.dispose();
+    SecurityChannelService.setSecureFlag(false);
     super.dispose();
   }
 
@@ -52,29 +48,35 @@ class _LockScreenState extends State<LockScreen> with SingleTickerProviderStateM
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF161B22),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'Security PIN Fallback',
-          style: GoogleFonts.outfit(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
+        title: Row(
+          children: [
+            const Icon(Icons.pin_rounded, color: Color(0xFFA78BFA), size: 22),
+            const SizedBox(width: 8),
+            Text(
+              'Security PIN',
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Enter your authorization PIN to unlock the vault.',
+              'Enter your PIN.',
               style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _pinController,
-              keyboardType: TextInputType.number,
+              keyboardType: TextInputType.visiblePassword,
               obscureText: true,
-              maxLength: 8,
+              maxLength: 64,
               autofocus: true,
               style: GoogleFonts.outfit(
-                fontSize: 24,
+                fontSize: 22,
                 letterSpacing: 8,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -89,57 +91,71 @@ class _LockScreenState extends State<LockScreen> with SingleTickerProviderStateM
                   borderSide: BorderSide.none,
                 ),
               ),
+              onSubmitted: (_) {
+                Navigator.pop(ctx);
+                _verifyEnteredPin();
+              },
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: GoogleFonts.outfit(color: Colors.white54)),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.outfit(color: Colors.white54),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFA78BFA),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              foregroundColor: const Color(0xFF090D16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
-            onPressed: () async {
-              final pin = _pinController.text.trim();
-              if (pin.isEmpty) return;
+            onPressed: () {
               Navigator.pop(ctx);
-
-              final provider = context.read<GestureUnlockProvider>();
-              final success = await provider.verifyPin(pin);
-              if (success && mounted) {
-                _navigateToVault(provider.activeVaultType);
-              }
+              _verifyEnteredPin();
             },
-            child: Text('Unlock', style: GoogleFonts.outfit(color: Colors.black, fontWeight: FontWeight.bold)),
+            child: Text(
+              'Unlock',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _navigateToVault(VaultType type) {
-    context.read<VaultProvider>().loadVault(type);
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => VaultHomeScreen(vaultType: type)),
-    );
+  void _verifyEnteredPin() async {
+    final pin = _pinController.text.trim();
+    if (pin.isEmpty) return;
+    final success = await context.read<GestureUnlockProvider>().verifyPin(pin);
+    if (!mounted) return;
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFFE11D48),
+          content: Text(
+            'Not recognised.',
+            style: GoogleFonts.outfit(color: Colors.white),
+          ),
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final unlockProvider = context.watch<GestureUnlockProvider>();
+    final provider = context.watch<GestureUnlockProvider>();
 
-    // Listen for unlock state transition
-    if (unlockProvider.state == UnlockState.unlocked) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _navigateToVault(unlockProvider.activeVaultType);
-        }
-      });
-    }
+    // Navigation into the vault is handled by NormalFilesScreen, which
+    // listens for unlock events.
+    final isLockout = provider.state == UnlockState.lockout;
+    final isFailed = provider.state == UnlockState.failed;
+    final isPanic = provider.state == UnlockState.panicLocked;
+    final inputTrail = provider.inputTrail;
 
     return Scaffold(
       backgroundColor: const Color(0xFF090D16),
@@ -147,278 +163,266 @@ class _LockScreenState extends State<LockScreen> with SingleTickerProviderStateM
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: Colors.white70,
+            size: 20,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.pin_rounded, color: Colors.white70),
-            tooltip: 'Enter PIN',
-            onPressed: _showPinDialog,
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const SizedBox(height: 12),
-              // Header
-              Text(
-                'Spatial Wand Portal',
-                style: GoogleFonts.outfit(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                unlockProvider.state == UnlockState.lockout
-                    ? 'Security lockout active • ${unlockProvider.lockoutRemaining}s remaining'
-                    : 'Draw your 3D secret motion glyph in the air',
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  color: unlockProvider.state == UnlockState.lockout
-                      ? const Color(0xFFF87171)
-                      : Colors.white60,
-                ),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 28),
-
-              // Interactive 3D Wand Particle Canvas
-              Expanded(
-                child: GestureDetector(
-                  onPanStart: (_) {
-                    setState(() => _isDrawingManual = true);
-                    unlockProvider.startAirDrawing();
-                  },
-                  onPanEnd: (_) {
-                    setState(() => _isDrawingManual = false);
-                    unlockProvider.stopAirDrawingAndEvaluate();
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        colors: [
-                          const Color(0xFF1E1B4B).withOpacity(0.6),
-                          const Color(0xFF0F172A).withOpacity(0.8),
-                        ],
-                        radius: 0.85,
-                      ),
-                      borderRadius: BorderRadius.circular(28),
-                      border: Border.all(
-                        color: unlockProvider.state == UnlockState.recording || _isDrawingManual
-                            ? const Color(0xFFA78BFA)
-                            : Colors.white.withOpacity(0.08),
-                        width: 1.5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFA78BFA).withOpacity(0.08),
-                          blurRadius: 24,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(28),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          // Live Motion Trail
-                          CustomPaint(
-                            size: Size.infinite,
-                            painter: _MotionTrailPainter(
-                              trail: unlockProvider.currentTrail,
-                              isRecording: unlockProvider.state == UnlockState.recording || _isDrawingManual,
-                            ),
-                          ),
-
-                          // Center Pulsing Portal Glyph
-                          ScaleTransition(
-                            scale: _pulseAnimation,
-                            child: Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: const Color(0xFF1E293B).withOpacity(0.7),
-                                border: Border.all(
-                                  color: const Color(0xFFA78BFA).withOpacity(0.3),
-                                  width: 2,
-                                ),
-                              ),
-                              child: Icon(
-                                unlockProvider.state == UnlockState.recording || _isDrawingManual
-                                    ? Icons.auto_awesome_rounded
-                                    : Icons.lock_outline_rounded,
-                                color: const Color(0xFFA78BFA),
-                                size: 38,
-                              ),
-                            ),
-                          ),
-
-                          // Bottom Touch Indicator
-                          Positioned(
-                            bottom: 20,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.4),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: Colors.white10),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _isDrawingManual ? Icons.touch_app_rounded : Icons.sensors_rounded,
-                                    color: const Color(0xFF38BDF8),
-                                    size: 14,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    _isDrawingManual ? 'Drawing active...' : 'Move phone or hold to draw',
-                                    style: GoogleFonts.outfit(
-                                      fontSize: 12,
-                                      color: Colors.white70,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Biometric & Rapid Scan Actions
-              Row(
+              // Top Safe Shield Badge
+              Column(
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.white.withOpacity(0.12)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                      onPressed: () async {
-                        final authenticated = await unlockProvider.authenticateBiometrics();
-                        if (authenticated && mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              backgroundColor: const Color(0xFF1E1B4B),
-                              content: Text(
-                                'Fingerprint verified • Now perform 3D Wand Gesture',
-                                style: GoogleFonts.outfit(color: Colors.white),
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      icon: Icon(
-                        unlockProvider.isBiometricVerified ? Icons.check_circle_rounded : Icons.fingerprint_rounded,
-                        color: unlockProvider.isBiometricVerified ? const Color(0xFF34D399) : const Color(0xFFA78BFA),
-                      ),
-                      label: Text(
-                        unlockProvider.isBiometricVerified ? 'Fingerprint Ready' : 'Scan Fingerprint',
-                        style: GoogleFonts.outfit(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
+                  ScaleTransition(
+                    scale: _pulseAnimation,
+                    child: Container(
+                      width: 88,
+                      height: 88,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isPanic
+                            ? const Color(0xFFE11D48).withValues(alpha: 0.2)
+                            : isFailed
+                            ? const Color(0xFFFB7185).withValues(alpha: 0.15)
+                            : const Color(0xFFA78BFA).withValues(alpha: 0.12),
+                        border: Border.all(
+                          color: isPanic
+                              ? const Color(0xFFE11D48)
+                              : isFailed
+                              ? const Color(0xFFFB7185)
+                              : const Color(0xFFA78BFA),
+                          width: 2,
                         ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isPanic
+                                ? const Color(0xFFE11D48).withValues(alpha: 0.3)
+                                : const Color(
+                                    0xFFA78BFA,
+                                  ).withValues(alpha: 0.15),
+                            blurRadius: 24,
+                            spreadRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        isPanic
+                            ? Icons.lock_clock_rounded
+                            : isLockout
+                            ? Icons.lock_outline_rounded
+                            : Icons.lock_outline_rounded,
+                        size: 38,
+                        color: isPanic
+                            ? const Color(0xFFFB7185)
+                            : isFailed
+                            ? const Color(0xFFFB7185)
+                            : const Color(0xFFA78BFA),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  IconButton.filled(
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF1F2937),
-                      padding: const EdgeInsets.all(14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  const SizedBox(height: 16),
+                  Text(
+                    isPanic
+                        ? 'Locked'
+                        : isLockout
+                        ? 'Temporarily Locked'
+                        : 'Locked',
+                    style: GoogleFonts.outfit(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isPanic ? const Color(0xFFFB7185) : Colors.white,
                     ),
-                    icon: const Icon(Icons.keyboard_alt_outlined, color: Colors.white70),
-                    tooltip: 'PIN Code',
-                    onPressed: _showPinDialog,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    isPanic
+                        ? 'Keys cleared from memory.'
+                        : isLockout
+                        ? 'Too many failed attempts. Try again in ${_formatSeconds(provider.lockoutRemaining)}'
+                        : isFailed
+                        ? 'Not recognised.'
+                        : provider.state == UnlockState.authenticating
+                        ? 'Checking…'
+                        : 'Perform your gesture, then confirm with your fingerprint.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontSize: 13,
+                      color: isFailed || isPanic
+                          ? const Color(0xFFFB7185)
+                          : Colors.white60,
+                    ),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 20),
+              // 4 Gesture Slot Indicator Nodes
+              Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      GestureUnlockProvider.maxPatternLength,
+                      (index) {
+                        final hasItem = index < inputTrail.length;
+                        return Container(
+                          width: 14,
+                          height: 14,
+                          margin: const EdgeInsets.symmetric(horizontal: 5),
+                          decoration: BoxDecoration(
+                            color: isFailed
+                                ? const Color(0xFFE11D48).withValues(alpha: 0.2)
+                                : hasItem
+                                ? const Color(0xFFA78BFA)
+                                : const Color(0xFF161B22),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isFailed
+                                  ? const Color(0xFFFB7185)
+                                  : hasItem
+                                  ? const Color(0xFFA78BFA)
+                                  : Colors.white12,
+                              width: hasItem || isFailed ? 2 : 1,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (inputTrail.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () => provider.clearInputTrail(),
+                      icon: const Icon(
+                        Icons.refresh_rounded,
+                        size: 16,
+                        color: Colors.white38,
+                      ),
+                      label: Text(
+                        'Reset',
+                        style: GoogleFonts.outfit(
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+
+              // Bottom Actions: Tap gestures + Biometrics
+              Column(
+                children: [
+                  // Quick Tilt Buttons (Accessibility / Fallback)
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      _buildQuickAction(
+                        Gesture.left,
+                        'Left',
+                        Icons.arrow_back_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.up,
+                        'Up',
+                        Icons.arrow_upward_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.down,
+                        'Down',
+                        Icons.arrow_downward_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.right,
+                        'Right',
+                        Icons.arrow_forward_rounded,
+                        provider,
+                      ),
+                      _buildQuickAction(
+                        Gesture.shake,
+                        'Shake',
+                        Icons.vibration_rounded,
+                        provider,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Biometrics & PIN Buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF161B22),
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: isLockout ? null : _showPinDialog,
+                        icon: const Icon(
+                          Icons.pin_rounded,
+                          color: Color(0xFFA78BFA),
+                          size: 18,
+                        ),
+                        label: Text(
+                          'PIN Code',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       ),
     );
   }
-}
 
-/// Custom painter rendering dynamic 3D spatial motion particle ribbons
-class _MotionTrailPainter extends CustomPainter {
-  final List<MotionPoint> trail;
-  final bool isRecording;
-
-  _MotionTrailPainter({required this.trail, required this.isRecording});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (trail.isEmpty) return;
-
-    final centerX = size.width / 2;
-    final centerY = size.height / 2;
-
-    final offsets = GestureDetectorService.compute2DPath(trail, scale: 1.2);
-    if (offsets.isEmpty) return;
-
-    final path = Path();
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    for (int i = 0; i < offsets.length; i++) {
-      final off = offsets[i];
-      final x = (centerX + off.dx).clamp(20.0, size.width - 20.0);
-      final y = (centerY + off.dy).clamp(20.0, size.height - 20.0);
-
-      final progress = (i + 1) / offsets.length;
-      paint
-        ..strokeWidth = 3.0 + (progress * 4.5)
-        ..color = isRecording
-            ? Color.lerp(const Color(0xFF38BDF8), const Color(0xFFA78BFA), progress)!.withOpacity(progress)
-            : Colors.white.withOpacity(progress * 0.4);
-
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
-      }
-
-      // Draw particle dot at head
-      if (i == offsets.length - 1) {
-        final glowPaint = Paint()
-          ..color = const Color(0xFFA78BFA).withOpacity(0.9)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-        canvas.drawCircle(Offset(x, y), 8, glowPaint);
-        canvas.drawCircle(Offset(x, y), 4.5, Paint()..color = Colors.white);
-      }
-    }
-
-    canvas.drawPath(path, paint);
+  Widget _buildQuickAction(
+    Gesture gesture,
+    String label,
+    IconData icon,
+    GestureUnlockProvider provider,
+  ) {
+    return ActionChip(
+      backgroundColor: const Color(0xFF161B22),
+      side: const BorderSide(color: Colors.white12),
+      avatar: Icon(icon, size: 15, color: const Color(0xFFA78BFA)),
+      label: Text(
+        label,
+        style: GoogleFonts.outfit(color: Colors.white70, fontSize: 12),
+      ),
+      onPressed: provider.state == UnlockState.lockout
+          ? null
+          : () => provider.addManualGesture(gesture),
+    );
   }
 
-  @override
-  bool shouldRepaint(covariant _MotionTrailPainter oldDelegate) => true;
+  String _formatSeconds(int s) {
+    if (s < 60) return '${s}s';
+    final m = s ~/ 60;
+    final r = s % 60;
+    return r == 0 ? '${m}m' : '${m}m ${r}s';
+  }
 }

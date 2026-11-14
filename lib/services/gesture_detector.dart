@@ -1,66 +1,41 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
 import 'package:sensors_plus/sensors_plus.dart';
 import '../models/gesture.dart';
-import '../models/motion_point.dart';
 
-/// 6-DOF Spatial Motion & 3D Wand Trajectory Service with reference baseline capture,
-/// dynamic path integration, deadzone trimming, and panic detection.
+/// Detects discrete tilt gestures (Left, Right, Up, Down, Shake) and
+/// high-intensity hard-shake panic events from sensor data.
 class GestureDetectorService {
-  // Streams
   final _gestureController = StreamController<Gesture>.broadcast();
   Stream<Gesture> get gestures => _gestureController.stream;
-
-  final _motionPointController = StreamController<MotionPoint>.broadcast();
-  Stream<MotionPoint> get motionPoints => _motionPointController.stream;
-
-  final _trajectoryController = StreamController<List<MotionPoint>>.broadcast();
-  Stream<List<MotionPoint>> get trajectoryStream => _trajectoryController.stream;
 
   final _panicController = StreamController<void>.broadcast();
   Stream<void> get onPanicTriggered => _panicController.stream;
 
-  // Custom streams for unit tests
+  // Custom stream for unit tests
   final Stream<AccelerometerEvent>? _customAccelStream;
-  final Stream<GyroscopeEvent>? _customGyroStream;
-
   StreamSubscription? _accelSub;
-  StreamSubscription? _gyroSub;
 
   // EMA Low-Pass Filter State
   static const double _filterAlpha = 0.40;
-  double _smoothGx = 0.0, _smoothGy = 0.0, _smoothGz = 0.0;
   double _smoothAx = 0.0, _smoothAy = 0.0, _smoothAz = 9.81;
   bool _filterInitialized = false;
 
-  // Reference Orientation Baseline (Captured when user touches screen)
-  double _refAx = 0.0, _refAy = 0.0, _refAz = 9.81;
-
-  // Integrated 2D/3D Displacement Path from Reference
-  double _velX = 0.0, _velY = 0.0, _velZ = 0.0;
-  double _posX = 0.0, _posY = 0.0, _posZ = 0.0;
-  int _lastSampleTimeMs = 0;
-
-  // Trajectory recording state
-  bool _isManualRecording = false;
-  bool _isAutoRecording = false;
-  final List<MotionPoint> _activeTrajectory = [];
-  Timer? _autoRecordTimeoutTimer;
-  Timer? _quietPeriodTimer;
-
-  // Panic detection parameters
-  static const double _panicDynamicThreshold = 24.0;
+  // Rolling dynamic acceleration buffer for transit/vehicle motion estimation
+  static const int _rollingBufferSize = 40;
+  final List<double> _rollingDynBuffer = [];
+  DateTime _lastVehicleMotionTime = DateTime(0);
+  int _consecutivePanicSamples = 0;
   DateTime _lastPanicTriggerTime = DateTime(0);
 
-  // Auto air-draw detection thresholds
-  static const double _motionStartGyro = 1.2; // rad/s rotation
-  static const double _motionStartAccel = 2.4; // dynamic m/s^2
-  static const double _motionStopThreshold = 0.6; // quiet threshold
+  /// Returns true if high ambient vibration (vehicle/transit/bumpy road) is currently detected.
+  bool get isVehicleMotionDetected =>
+      DateTime.now().difference(_lastVehicleMotionTime).inMilliseconds < 2500;
 
-  // Backward compatibility discrete thresholds
-  static const double _motionStartTilt = 4.2;
-  static const double _neutralThreshold = 3.5;
+  // Discrete tilt & shake parameters
+  static const double _motionStartTiltNormal = 4.0;
+  static const double _motionStartTiltVehicle = 5.8;
+  static const double _neutralThreshold = 3.2;
   bool _discreteArmed = true;
   DateTime _lastDiscreteDetected = DateTime(0);
   final List<AccelerometerEvent> _discreteWindowSamples = [];
@@ -69,15 +44,15 @@ class GestureDetectorService {
   GestureDetectorService({
     Stream<AccelerometerEvent>? accelStream,
     Stream<GyroscopeEvent>? gyroStream,
-  })  : _customAccelStream = accelStream,
-        _customGyroStream = gyroStream;
+  }) : _customAccelStream = accelStream;
 
   void start() {
     stop();
     _discreteArmed = true;
     _filterInitialized = false;
-    _activeTrajectory.clear();
     _discreteWindowSamples.clear();
+    _rollingDynBuffer.clear();
+    _consecutivePanicSamples = 0;
 
     if (_customAccelStream != null) {
       _accelSub = _customAccelStream.listen(_onAccelEvent, onError: (_) {});
@@ -88,82 +63,17 @@ class GestureDetectorService {
         ).listen(_onAccelEvent, onError: (_) {});
       } catch (_) {}
     }
-
-    if (_customGyroStream != null) {
-      _gyroSub = _customGyroStream.listen(_onGyroEvent, onError: (_) {});
-    } else {
-      try {
-        _gyroSub = gyroscopeEventStream(
-          samplingPeriod: const Duration(milliseconds: 20),
-        ).listen(_onGyroEvent, onError: (_) {});
-      } catch (_) {}
-    }
   }
 
   void stop() {
     _accelSub?.cancel();
     _accelSub = null;
-    _gyroSub?.cancel();
-    _gyroSub = null;
-    _autoRecordTimeoutTimer?.cancel();
-    _autoRecordTimeoutTimer = null;
-    _quietPeriodTimer?.cancel();
-    _quietPeriodTimer = null;
     _discreteWindowTimer?.cancel();
     _discreteWindowTimer = null;
-    _isManualRecording = false;
-    _isAutoRecording = false;
     _filterInitialized = false;
-    _activeTrajectory.clear();
     _discreteWindowSamples.clear();
-  }
-
-  /// Sets the reference baseline to the current phone orientation at the instant
-  /// the user touches down on the screen.
-  void startRecording() {
-    _isManualRecording = true;
-    _isAutoRecording = false;
-    _autoRecordTimeoutTimer?.cancel();
-    _quietPeriodTimer?.cancel();
-    _activeTrajectory.clear();
-
-    // Lock reference baseline to current orientation
-    _refAx = _smoothAx;
-    _refAy = _smoothAy;
-    _refAz = _smoothAz;
-
-    // Reset kinematic integrator
-    _velX = 0.0;
-    _velY = 0.0;
-    _velZ = 0.0;
-    _posX = 0.0;
-    _posY = 0.0;
-    _posZ = 0.0;
-    _lastSampleTimeMs = DateTime.now().millisecondsSinceEpoch;
-  }
-
-  /// Manually stops recording and emits the gathered trajectory
-  List<MotionPoint> stopRecording() {
-    _isManualRecording = false;
-    final trimmed = trimDeadzone(List<MotionPoint>.from(_activeTrajectory));
-    _activeTrajectory.clear();
-    if (trimmed.length >= 6) {
-      _trajectoryController.add(trimmed);
-    }
-    return trimmed;
-  }
-
-  void _onGyroEvent(GyroscopeEvent e) {
-    if (!_filterInitialized) {
-      _smoothGx = e.x;
-      _smoothGy = e.y;
-      _smoothGz = e.z;
-    } else {
-      _smoothGx = _smoothGx * (1.0 - _filterAlpha) + e.x * _filterAlpha;
-      _smoothGy = _smoothGy * (1.0 - _filterAlpha) + e.y * _filterAlpha;
-      _smoothGz = _smoothGz * (1.0 - _filterAlpha) + e.z * _filterAlpha;
-    }
-    _processFusedSample();
+    _rollingDynBuffer.clear();
+    _consecutivePanicSamples = 0;
   }
 
   void _onAccelEvent(AccelerometerEvent e) {
@@ -171,9 +81,6 @@ class GestureDetectorService {
       _smoothAx = e.x;
       _smoothAy = e.y;
       _smoothAz = e.z;
-      _refAx = e.x;
-      _refAy = e.y;
-      _refAz = e.z;
       _filterInitialized = true;
     } else {
       _smoothAx = _smoothAx * (1.0 - _filterAlpha) + e.x * _filterAlpha;
@@ -181,175 +88,69 @@ class GestureDetectorService {
       _smoothAz = _smoothAz * (1.0 - _filterAlpha) + e.z * _filterAlpha;
     }
 
+    _updateVehicleMotionState(e);
     _checkPanicMotion(e);
     _checkDiscreteMotion(e);
-    _processFusedSample();
   }
 
-  void _processFusedSample() {
-    final now = DateTime.now();
-    final nowMs = now.millisecondsSinceEpoch;
-    final dt = _lastSampleTimeMs > 0 ? min(0.05, max(0.01, (nowMs - _lastSampleTimeMs) / 1000.0)) : 0.025;
-    _lastSampleTimeMs = nowMs;
+  /// Evaluates rolling dynamic acceleration variance to identify continuous vehicle/transit vibration.
+  void _updateVehicleMotionState(AccelerometerEvent e) {
+    final totalMag = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
+    final dynAccel = (totalMag - 9.81).abs();
 
-    // Compute dynamic acceleration relative to baseline
-    final dynAx = _smoothAx - _refAx;
-    final dynAy = _smoothAy - _refAy;
-    final dynAz = _smoothAz - _refAz;
-
-    // Kinematic integration with leaky damping (prevents sensor drift)
-    _velX = _velX * 0.90 + (dynAx * 9.81 * dt);
-    _velY = _velY * 0.90 + (dynAy * 9.81 * dt);
-    _velZ = _velZ * 0.90 + (dynAz * 9.81 * dt);
-
-    _posX += _velX * dt * 80.0;
-    _posY += _velY * dt * 80.0;
-    _posZ += _velZ * dt * 80.0;
-
-    final point = MotionPoint(
-      timestampMs: nowMs,
-      gx: _smoothGx,
-      gy: _smoothGy,
-      gz: _smoothGz,
-      ax: _smoothAx,
-      ay: _smoothAy,
-      az: _smoothAz,
-    );
-
-    if (!_motionPointController.isClosed) {
-      _motionPointController.add(point);
+    _rollingDynBuffer.add(dynAccel);
+    if (_rollingDynBuffer.length > _rollingBufferSize) {
+      _rollingDynBuffer.removeAt(0);
     }
 
-    // Handle Manual Recording
-    if (_isManualRecording) {
-      _activeTrajectory.add(point);
-      return;
-    }
-
-    // Handle Auto Air-Draw Detection
-    final gyroMag = point.gyroMagnitude;
-    final dynAccel = point.dynamicAcceleration;
-    final isMoving = gyroMag >= _motionStartGyro || dynAccel >= _motionStartAccel;
-
-    if (!_isAutoRecording) {
-      if (isMoving) {
-        _isAutoRecording = true;
-        _refAx = _smoothAx;
-        _refAy = _smoothAy;
-        _refAz = _smoothAz;
-        _velX = 0;
-        _velY = 0;
-        _velZ = 0;
-        _posX = 0;
-        _posY = 0;
-        _posZ = 0;
-        _activeTrajectory.clear();
-        _activeTrajectory.add(point);
-
-        _autoRecordTimeoutTimer?.cancel();
-        _autoRecordTimeoutTimer = Timer(const Duration(milliseconds: 2400), _finishAutoRecording);
+    if (_rollingDynBuffer.length >= 15) {
+      double sum = 0.0;
+      for (final val in _rollingDynBuffer) {
+        sum += val;
       }
-    } else {
-      _activeTrajectory.add(point);
+      final mean = sum / _rollingDynBuffer.length;
 
-      if (gyroMag < _motionStopThreshold && dynAccel < 0.8) {
-        _quietPeriodTimer ??= Timer(const Duration(milliseconds: 320), _finishAutoRecording);
-      } else {
-        _quietPeriodTimer?.cancel();
-        _quietPeriodTimer = null;
+      double varSum = 0.0;
+      for (final val in _rollingDynBuffer) {
+        final diff = val - mean;
+        varSum += diff * diff;
+      }
+      final variance = varSum / _rollingDynBuffer.length;
+
+      // When continuous road rumble / vibration variance is high (e.g. car, auto-rickshaw)
+      if (variance >= 0.5 || mean >= 1.4) {
+        _lastVehicleMotionTime = DateTime.now();
       }
     }
   }
 
-  void _finishAutoRecording() {
-    _autoRecordTimeoutTimer?.cancel();
-    _autoRecordTimeoutTimer = null;
-    _quietPeriodTimer?.cancel();
-    _quietPeriodTimer = null;
-
-    if (!_isAutoRecording) return;
-    _isAutoRecording = false;
-
-    final trimmed = trimDeadzone(List<MotionPoint>.from(_activeTrajectory));
-    _activeTrajectory.clear();
-
-    if (trimmed.length >= 8) {
-      _trajectoryController.add(trimmed);
-    }
-  }
-
-  /// Trims stationary leading and trailing deadzone points from a recorded stroke.
-  static List<MotionPoint> trimDeadzone(List<MotionPoint> points) {
-    if (points.length < 8) return points;
-
-    const double minGyroCutoff = 0.4; // rad/s
-    const double minAccelCutoff = 0.6; // m/s^2 dynamic
-
-    int startIdx = 0;
-    while (startIdx < points.length - 4) {
-      final p = points[startIdx];
-      if (p.gyroMagnitude >= minGyroCutoff || p.dynamicAcceleration >= minAccelCutoff) {
-        break;
-      }
-      startIdx++;
-    }
-
-    int endIdx = points.length - 1;
-    while (endIdx > startIdx + 4) {
-      final p = points[endIdx];
-      if (p.gyroMagnitude >= minGyroCutoff || p.dynamicAcceleration >= minAccelCutoff) {
-        break;
-      }
-      endIdx--;
-    }
-
-    return points.sublist(startIdx, endIdx + 1);
-  }
-
-  /// Converts a sequence of 6-DOF points into an integrated 2D spatial path
-  /// relative to the initial starting orientation.
-  static List<Offset> compute2DPath(List<MotionPoint> points, {double scale = 1.0}) {
-    if (points.isEmpty) return [];
-
-    final List<Offset> path = [];
-    final first = points.first;
-    final refAx = first.ax;
-    final refAy = first.ay;
-
-    double vx = 0.0, vy = 0.0;
-    double px = 0.0, py = 0.0;
-
-    for (int i = 0; i < points.length; i++) {
-      final p = points[i];
-      final dt = i > 0
-          ? min(0.05, max(0.01, (p.timestampMs - points[i - 1].timestampMs) / 1000.0))
-          : 0.025;
-
-      // Dynamic acceleration in device plane
-      final dax = p.ax - refAx;
-      final day = p.ay - refAy;
-
-      // Combine linear acceleration and angular velocity for translation + tilt
-      vx = vx * 0.90 + (dax * 12.0 + p.gz * 2.5) * dt;
-      vy = vy * 0.90 + (day * 12.0 - p.gx * 2.5) * dt;
-
-      px += vx * dt * scale * 120.0;
-      py -= vy * dt * scale * 120.0;
-
-      path.add(Offset(px, py));
-    }
-
-    return path;
-  }
-
+  /// Detects intense, hard shakes OR face-down flip.
+  /// Dynamically raises thresholds and requires multi-sample confirmation in moving vehicles
+  /// so road bumps and potholes never trigger an accidental emergency panic wipe.
   void _checkPanicMotion(AccelerometerEvent e) {
     final totalMag = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
     final dynAccel = (totalMag - 9.81).abs();
 
-    if (dynAccel >= _panicDynamicThreshold) {
+    final inVehicle = isVehicleMotionDetected;
+    final panicThreshold = inVehicle ? 34.0 : 22.0;
+    final singleSampleThreshold = inVehicle ? 40.0 : 26.0;
+
+    if (dynAccel >= panicThreshold) {
+      _consecutivePanicSamples++;
+    } else {
+      _consecutivePanicSamples = 0;
+    }
+
+    final isHardShake = dynAccel >= singleSampleThreshold ||
+        _consecutivePanicSamples >= (inVehicle ? 3 : 2);
+
+    final isFaceDown = e.z <= -8.5 && _smoothAz <= -7.5;
+
+    if (isHardShake || isFaceDown) {
       final now = DateTime.now();
       if (now.difference(_lastPanicTriggerTime).inMilliseconds >= 800) {
         _lastPanicTriggerTime = now;
+        _consecutivePanicSamples = 0;
         if (!_panicController.isClosed) {
           _panicController.add(null);
         }
@@ -357,7 +158,8 @@ class GestureDetectorService {
     }
   }
 
-  // ─── Discrete Fallback for legacy tests / settings ───
+  /// Processes accelerometer samples over a sliding window to identify
+  /// Left, Right, Up, Down tilt gestures or deliberate multi-cycle Shake.
   void _checkDiscreteMotion(AccelerometerEvent e) {
     if (_gestureController.isClosed) return;
     final now = DateTime.now();
@@ -366,19 +168,26 @@ class GestureDetectorService {
     final absX = e.x.abs();
     final absY = e.y.abs();
 
+    final inVehicle = isVehicleMotionDetected;
+    final maxAllowedDynForRearm = inVehicle ? 5.5 : 3.5;
+
     if (!_discreteArmed) {
-      if (now.difference(_lastDiscreteDetected) >= const Duration(milliseconds: 650) &&
+      // Re-arm when device is held relatively still and neutral
+      if (now.difference(_lastDiscreteDetected) >= const Duration(milliseconds: 600) &&
           absX < _neutralThreshold &&
           absY < _neutralThreshold &&
-          dyn < 4.0) {
+          dyn < maxAllowedDynForRearm) {
         _discreteArmed = true;
         _discreteWindowSamples.clear();
       }
       return;
     }
 
+    final startTilt = inVehicle ? _motionStartTiltVehicle : _motionStartTiltNormal;
+    final startDyn = inVehicle ? 7.5 : 5.0;
+
     if (_discreteWindowSamples.isEmpty) {
-      if (absX >= _motionStartTilt || absY >= _motionStartTilt || dyn >= 5.5) {
+      if (absX >= startTilt || absY >= startTilt || dyn >= startDyn) {
         _discreteWindowSamples.add(e);
         _discreteWindowTimer?.cancel();
         _discreteWindowTimer = Timer(const Duration(milliseconds: 320), _evaluateDiscreteWindow);
@@ -393,6 +202,8 @@ class GestureDetectorService {
     _discreteWindowTimer?.cancel();
     _discreteWindowTimer = null;
     if (_discreteWindowSamples.isEmpty) return;
+
+    final inVehicle = isVehicleMotionDetected;
 
     double minX = _discreteWindowSamples[0].x, maxX = _discreteWindowSamples[0].x;
     double minY = _discreteWindowSamples[0].y, maxY = _discreteWindowSamples[0].y;
@@ -414,6 +225,7 @@ class GestureDetectorService {
       if (s.z < minZ) minZ = s.z;
       if (s.z > maxZ) maxZ = s.z;
 
+      // Weight the sustained tail of the movement window for tilts
       if (i >= _discreteWindowSamples.length ~/ 3) {
         sumX += s.x;
         sumY += s.y;
@@ -438,15 +250,39 @@ class GestureDetectorService {
     final double maxPtp = max(ptpX, max(ptpY, ptpZ));
 
     Gesture? detected;
-    if (signChangesX >= 1 || signChangesY >= 1 || (maxPtp >= 14.0 && meanDyn >= 20.0) || maxPtp >= 18.0) {
-      detected = Gesture.shake;
+
+    if (inVehicle) {
+      // In vehicle mode: reject single-bump road shocks.
+      // Require multi-cycle deliberate hand oscillation (>= 3 sign reversals with high ptp)
+      final isDeliberateMultiShake =
+          ((signChangesX >= 3 || signChangesY >= 3) && maxPtp >= 17.0 && meanDyn >= 18.0) ||
+          maxPtp >= 24.0;
+
+      if (isDeliberateMultiShake) {
+        detected = Gesture.shake;
+      } else {
+        final double absAvgX = avgX.abs();
+        final double absAvgY = avgY.abs();
+        // Higher threshold for deliberate tilt in transit
+        if (absAvgX >= 5.5 && absAvgX > (absAvgY * 1.25)) {
+          detected = avgX > 0 ? Gesture.left : Gesture.right;
+        } else if (absAvgY >= 5.5 && absAvgY > (absAvgX * 1.25)) {
+          detected = avgY > 0 ? Gesture.down : Gesture.up;
+        }
+      }
     } else {
-      final double absAvgX = avgX.abs();
-      final double absAvgY = avgY.abs();
-      if (absAvgX >= 4.5 && absAvgX > (absAvgY * 1.15)) {
-        detected = avgX > 0 ? Gesture.left : Gesture.right;
-      } else if (absAvgY >= 4.5 && absAvgY > (absAvgX * 1.15)) {
-        detected = avgY > 0 ? Gesture.down : Gesture.up;
+      // Normal stationary / walking mode
+      final isShake = (signChangesX >= 2 || signChangesY >= 2 || (maxPtp >= 13.0 && meanDyn >= 16.0) || maxPtp >= 16.0);
+      if (isShake) {
+        detected = Gesture.shake;
+      } else {
+        final double absAvgX = avgX.abs();
+        final double absAvgY = avgY.abs();
+        if (absAvgX >= 4.0 && absAvgX > (absAvgY * 1.15)) {
+          detected = avgX > 0 ? Gesture.left : Gesture.right;
+        } else if (absAvgY >= 4.0 && absAvgY > (absAvgX * 1.15)) {
+          detected = avgY > 0 ? Gesture.down : Gesture.up;
+        }
       }
     }
 
@@ -461,8 +297,7 @@ class GestureDetectorService {
   void dispose() {
     stop();
     _gestureController.close();
-    _motionPointController.close();
-    _trajectoryController.close();
     _panicController.close();
   }
 }
+
