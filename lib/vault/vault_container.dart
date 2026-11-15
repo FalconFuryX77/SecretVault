@@ -290,6 +290,21 @@ class VaultSession {
     return r;
   }
 
+  /// The open vault for code running *inside* an operation. A lock that
+  /// arrives mid-operation waits for it ([close] awaits the queue), so the
+  /// operation must not fail half-way just because a lock was requested:
+  /// that turned a finished save into a rollback that shredded the new copy.
+  _OpenVault get _live {
+    final r = _root;
+    if (r == null) throw StateError('vault is locked');
+    return r;
+  }
+
+  /// Chunks picked for the root vault during the current operation, not yet
+  /// in its index. Unlike [_reserved] this excludes chunks picked for the
+  /// decoy, so the decoy's ceiling isn't pulled down to its own index.
+  final Set<int> _rootReserved = {};
+
   bool get isOpen => !_closed && _root != null;
 
   /// The real vault allocates top-down; a decoy bottom-up. Callers must not
@@ -323,6 +338,7 @@ class VaultSession {
         completer.completeError(e, st);
       } finally {
         _reserved.clear();
+        _rootReserved.clear();
       }
     });
     return completer.future;
@@ -411,16 +427,31 @@ class VaultSession {
     Uint8List Function(int seq) next,
     void Function(double)? onProgress,
   ) async {
-    final root = _r;
+    final root = _live;
     final n = max(1, (length / ContainerLayout.chunkPayload).ceil());
     final chunks = await _allocate(root, n);
     final fileKey = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
     for (var start = 0; start < n; start += _batch) {
+      // A lock during a long import stops it here rather than keeping every
+      // key in memory for minutes; nothing was committed, and the key goes.
+      if (_closed) {
+        CryptoPrimitives.wipe(fileKey);
+        throw StateError('vault locked during import');
+      }
       final end = min(n, start + _batch);
       final plains = <Uint8List>[];
       final aads = <List<int>>[];
       for (var seq = start; seq < end; seq++) {
-        plains.add(next(seq));
+        final plain = next(seq);
+        // Every chunk but the last is full, and the total is [length]. A
+        // source that shrank or grew mid-import would otherwise be stored as
+        // an entry that can never be read back.
+        final expected = seq == n - 1 ? length - seq * ContainerLayout.chunkPayload : ContainerLayout.chunkPayload;
+        if (plain.length != expected) {
+          CryptoPrimitives.wipe(fileKey);
+          throw StateError('the file changed while it was being imported');
+        }
+        plains.add(plain);
         aads.add(_aadFile(id, seq, seq == n - 1));
       }
       final fulls = await _crypto.bulk.sealChunks(
@@ -439,7 +470,7 @@ class VaultSession {
   }
 
   Future<IndexEntry> _addEntry(VaultItem meta, List<int> chunks, Uint8List fileKey, int length) async {
-    final root = _r;
+    final root = _live;
     final entry = IndexEntry(
       item: meta.copyWith(fileSizeBytes: length),
       fileKey: fileKey,
@@ -666,11 +697,23 @@ class VaultSession {
           vk,
           VaultIndex(topDown: false, ceiling: await _lowestChunkOf(root)),
         );
+        // Order matters for crash safety: the decoy's index, then the real
+        // vault's link to it (so the real vault protects the decoy's space
+        // from then on), and only then the PIN slot that makes it openable.
+        // An openable decoy the real vault didn't know about could later
+        // overwrite real data.
         await _writeIndex(decoy);
-        await _writePinSlot(record, kek, vk);
         root.children.add(decoy);
-        root.index.links.add(LinkedVault(record, Uint8List.fromList(vk)));
-        await _commit(root);
+        final link = LinkedVault(record, Uint8List.fromList(vk));
+        root.index.links.add(link);
+        try {
+          await _commit(root);
+        } catch (_) {
+          root.children.remove(decoy);
+          root.index.links.remove(link);
+          rethrow;
+        }
+        await _writePinSlot(record, kek, vk);
       } finally {
         CryptoPrimitives.wipe(kek);
       }
@@ -687,6 +730,15 @@ class VaultSession {
       final decoy = _decoy;
       final chunks =
           decoy.selfAndDescendants.expand((v) => v.usedChunks).toList()..sort();
+      // First make the decoy PIN stop working, so a crash at any later
+      // point can't leave an openable decoy the real vault no longer
+      // protects. Its superblocks stay until the unlink is committed (the
+      // real vault still needs them to load it until then).
+      await _fillRandom(
+        ContainerLayout.recordOffset(decoy.record) + ContainerLayout.pinSlotOffset,
+        ContainerLayout.pinSlotLen,
+      );
+      await _raf.flush();
       root.children.remove(decoy);
       root.index.links.removeWhere((l) => l.record == decoy.record);
       _holdUntilShredded(extentsFromChunks(chunks));
@@ -701,7 +753,7 @@ class VaultSession {
   }
 
   _OpenVault get _decoy {
-    final root = _r;
+    final root = _live;
     if (root.children.isEmpty) throw StateError('no decoy');
     return root.children.first;
   }
@@ -856,9 +908,21 @@ class VaultSession {
 
   /// Persists [v]'s index, then (for the real vault) keeps its decoy's
   /// allocation ceiling below every chunk the real vault uses.
+  ///
+  /// Once the root superblock is written the change is committed: anything
+  /// after that (moving the decoy's ceiling up, shredding the old index) is
+  /// best effort and never throws, so callers only ever roll back changes
+  /// that didn't reach the disk.
   Future<void> _commit(_OpenVault v) async {
     await _writeIndex(v);
-    if (v.index.topDown) await _syncChildCeilings(v);
+    if (v.index.topDown) {
+      try {
+        await _syncChildCeilings(v);
+      } catch (_) {
+        // Only ever raises the decoy's ceiling (lowering happens before any
+        // real data is written, in _allocate); leaving it lower is safe.
+      }
+    }
   }
 
   Future<void> _syncChildCeilings(_OpenVault v) async {
@@ -873,14 +937,18 @@ class VaultSession {
     }
   }
 
-  /// The lowest chunk [v] uses (or the container end if it uses none).
+  /// The lowest chunk [v] uses (or the container end if it uses none),
+  /// counting chunks picked for it in this operation but not chunks picked
+  /// for its decoy or freed ones waiting to be shredded.
   Future<int> _lowestChunkOf(_OpenVault v) async {
     var low = await _raf.length() ~/ ContainerLayout.chunkSize;
     for (final c in v.usedChunks) {
       if (c < low) low = c;
     }
-    for (final c in _reserved) {
-      if (c < low) low = c;
+    if (identical(v, _root)) {
+      for (final c in _rootReserved) {
+        if (c < low) low = c;
+      }
     }
     return low;
   }
@@ -939,12 +1007,18 @@ class VaultSession {
     );
     await _raf.flush();
 
+    // Committed. From here on nothing may throw.
     final old = v.indexExtents;
     v.indexExtents = extents;
     v.gen = gen;
     v.slot = slot;
     CryptoPrimitives.wipe(plain);
-    await _shred(old);
+    try {
+      await _shred(old);
+    } catch (_) {
+      // The old index stays unreadable without its superblock; its chunks
+      // are free and get overwritten by later use.
+    }
   }
 
   // ─── Internals: allocation ──────────────────────────────────────
@@ -952,7 +1026,7 @@ class VaultSession {
   /// Picks [n] free chunks for [target], growing the container if needed.
   /// Returned in ascending order; data is written in that order.
   Future<List<int>> _allocate(_OpenVault target, int n) async {
-    final root = _r;
+    final root = _live;
     // A decoy opened on its own can't see the real vault, so it stays below
     // its ceiling (or in space it grew itself).
     final constrained = !root.index.topDown;
@@ -991,6 +1065,7 @@ class VaultSession {
       if (picked.length == n) {
         picked.sort();
         _reserved.addAll(picked);
+        if (identical(target, root)) _rootReserved.addAll(picked);
         // The real vault is about to write below its decoy's ceiling: lower
         // the ceiling *first*, so a crash can never leave the decoy free to
         // overwrite real data.
@@ -1001,16 +1076,29 @@ class VaultSession {
             final grown = child.index.grownFrom;
             if (low < child.index.ceiling ||
                 (grown != null && picked.last >= grown)) {
-              child.index.ceiling = min(child.index.ceiling, low);
+              final oldCeiling = child.index.ceiling;
+              child.index.ceiling = min(oldCeiling, low);
               child.index.grownFrom = null;
-              await _writeIndex(child);
+              try {
+                await _writeIndex(child);
+              } catch (_) {
+                // Not lowered on disk, so not in memory either: otherwise a
+                // retry would write real data below the decoy's stored
+                // ceiling with nothing on disk protecting it.
+                child.index.ceiling = oldCeiling;
+                child.index.grownFrom = grown;
+                rethrow;
+              }
             }
           }
         }
         return picked;
       }
 
-      final grow = max(_crypto.growChunks, n - picked.length);
+      // Always grow by whole steps, so the file size says nothing about the
+      // size of the import that triggered it.
+      final step = _crypto.growChunks;
+      final grow = max(1, ((n - picked.length) + step - 1) ~/ step) * step;
       await _fillRandom(
         total * ContainerLayout.chunkSize,
         grow * ContainerLayout.chunkSize,
