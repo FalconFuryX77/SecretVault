@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models/vault_state.dart';
 import '../models/vault_item.dart';
+import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
 import '../viewers/file_kind.dart';
@@ -99,6 +100,59 @@ class VaultProvider extends ChangeNotifier {
   Future<void> loadVault(VaultType vaultType) async {
     _activeVaultType = vaultType;
     _refreshFromSession();
+    // Recordings made while the vault was locked move in now.
+    unawaited(importRecordings().catchError((Object _) => 0));
+  }
+
+  Future<int>? _importing;
+
+  /// Moves finished recordings that belong to the open vault into it: each
+  /// is decrypted in memory with the vault's private key, stored as a vault
+  /// file, and its encrypted staging copy is shredded. Recordings belonging
+  /// to the other vault are left alone. Returns how many moved in.
+  Future<int> importRecordings() {
+    return _importing ??= _importRecordings().whenComplete(() => _importing = null);
+  }
+
+  Future<int> _importRecordings() async {
+    final session = _vault.session;
+    if (session == null || !VaultRecorder.isAvailable) return 0;
+    final privateKey = RecordingKeys.privateKey(session);
+    if (privateKey == null) return 0; // this vault has never recorded
+    var moved = 0;
+    try {
+      for (final p in await VaultRecorder.pending()) {
+        final r = await VaultRecorder.open(p.id, Uint8List.fromList(privateKey));
+        if (r == null) continue;
+        final title = 'Recording ${_stamp(r.startedAt)}${r.complete ? '' : ' (cut short)'}.${r.ext}';
+        await _vault.whileBusy(
+          () => session.importBytes(
+            r.data,
+            VaultItem(
+              id: _uuid.v4(),
+              title: title,
+              category: VaultCategory.document,
+              mimeType: mimeForName(title),
+              fileSizeBytes: r.data.length,
+              createdAt: r.startedAt,
+              updatedAt: DateTime.now(),
+              tags: const ['recording'],
+            ),
+          ),
+        );
+        await VaultRecorder.discard(p.id);
+        moved++;
+      }
+    } finally {
+      privateKey.fillRange(0, privateKey.length, 0);
+    }
+    if (moved > 0) _refreshFromSession();
+    return moved;
+  }
+
+  static String _stamp(DateTime t) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}.${two(t.minute)}.${two(t.second)}';
   }
 
   void _refreshFromSession() {

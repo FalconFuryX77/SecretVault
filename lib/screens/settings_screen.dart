@@ -6,6 +6,8 @@ import '../services/auth_service.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
 import 'backup_screen.dart';
+import 'hidden_recorder_screen.dart';
+import 'recorder_screen.dart';
 
 /// Security & Preferences Settings Screen.
 ///
@@ -211,6 +213,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ],
+
+          const SizedBox(height: 24),
+          _buildSectionHeader('RECORDING'),
+          _buildSettingCard(
+            icon: Icons.mic_rounded,
+            color: const Color(0xFFF43F5E),
+            title: 'Record audio',
+            subtitle: 'Straight into the vault, encrypted as it goes',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const RecorderScreen()),
+            ),
+          ),
+          _buildSettingCard(
+            icon: Icons.screen_lock_portrait_rounded,
+            color: const Color(0xFFA78BFA),
+            title: 'Hidden recorder',
+            subtitle: 'Volume-down ×3 records with the screen off',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HiddenRecorderScreen()),
+            ),
+          ),
 
           const SizedBox(height: 24),
           _buildSectionHeader('BACKUP'),

@@ -43,6 +43,7 @@ Download the APK from the [latest release](https://github.com/FalconFuryX77/Secr
 * [Threat model](docs/THREAT_MODEL.md): who this protects against, what each adversary still learns, and what's out of scope.
 * [Container format](docs/CONTAINER_FORMAT.md): the on-device storage format, byte by byte.
 * [Sync design](docs/SYNC_DESIGN.md): end-to-end encrypted, resumable sync for slow and intermittent connections (draft).
+* [Roadmap](docs/ROADMAP.md): what's next, what's open, and ideas we parked.
 
 ## How to run it 🚀
 You'll need a standard Flutter development environment and an Android device or emulator.
