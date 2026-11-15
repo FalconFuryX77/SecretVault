@@ -56,6 +56,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// A PIN that is taken can't be used, and saying so tells whoever tried
+  /// it that it opens something. The message is the same as for any other
+  /// refused PIN, and the refusal counts as a failed unlock attempt.
+  Future<void> _refused() async {
+    await context.read<UnlockProvider>().registerRefusedPin();
+    _toast("That PIN can't be used. Choose a different one.", error: true);
+  }
+
   /// Asks for a new PIN twice. Returns null if cancelled.
   Future<String?> _askNewPin(String title, String hint) => showDialog<String>(
     context: context,
@@ -73,13 +81,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (pin == null || session == null) return;
     try {
       if (decoy) {
-        await session.changeDecoyPin(pin);
+        if (session.canManageDecoy) {
+          await session.changeDecoyPin(pin);
+        } else {
+          await session.standInDecoySetup(pin, shown: true);
+        }
       } else {
         await session.changePin(pin);
       }
       _toast('PIN updated.');
     } on CredentialInUseException {
-      _toast('That PIN is already used by another vault.', error: true);
+      await _refused();
     } catch (e) {
       _toast('Could not change PIN: $e', error: true);
     }
@@ -95,16 +107,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final session = _session;
     if (pin == null || session == null) return;
     try {
-      await session.createDecoy(pin: pin);
+      if (session.canManageDecoy) {
+        await session.createDecoy(pin: pin);
+      } else {
+        await session.standInDecoySetup(pin, shown: true);
+      }
       if (mounted) setState(() {});
       _toast(
         'Decoy vault created. Lock and open it with its PIN to add content.',
       );
     } on CredentialInUseException {
-      _toast(
-        'That PIN is already used by your real vault. Choose a different one.',
-        error: true,
-      );
+      await _refused();
     } catch (e) {
       _toast('Could not create decoy: $e', error: true);
     }
@@ -140,7 +153,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     final session = _session;
     if (ok != true || session == null) return;
-    await session.removeDecoy();
+    if (session.canManageDecoy) {
+      await session.removeDecoy();
+    } else {
+      await session.standInDecoySetup('', shown: false);
+    }
     if (mounted) setState(() {});
     _toast('Decoy vault removed.');
   }
@@ -148,8 +165,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final session = context.read<VaultService>().session;
-    final canDecoy = session?.canManageDecoy ?? false;
-    final hasDecoy = session?.hasDecoy ?? false;
+    // Both vaults show the same decoy section, so it can't tell them apart.
+    const canDecoy = true;
+    final hasDecoy = session?.showsDecoy ?? false;
     return Scaffold(
       backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(

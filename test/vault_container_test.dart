@@ -416,6 +416,27 @@ void main() {
       await d.close();
     });
 
+    test("the decoy's stand-in decoy setup reveals nothing and opens nothing", () async {
+      final s = await createVault();
+      await s.createDecoy(pin: '111222');
+      await s.close();
+      final d = (await VaultContainer(containerFile, crypto).unlockWithPin('111222'))!;
+      expect(d.showsDecoy, isFalse, reason: 'looks like a lone vault');
+      // The real PIN is accepted like any free PIN: no "already in use".
+      await d.standInDecoySetup('482913', shown: true);
+      expect(d.showsDecoy, isTrue);
+      // Its own PIN is refused, as a lone vault refuses its own.
+      await expectLater(d.standInDecoySetup('111222', shown: true), throwsA(isA<CredentialInUseException>()));
+      await d.standInDecoySetup('765432', shown: true);
+      await d.close();
+      final c = VaultContainer(containerFile, crypto);
+      expect(await c.unlockWithPin('765432'), isNull, reason: 'the stand-in PIN opens nothing');
+      final r = (await c.unlockWithPin('482913'))!;
+      expect(r.type, VaultType.primary, reason: 'the real vault is untouched');
+      expect(r.hasDecoy, isTrue);
+      await r.close();
+    });
+
     test('decoy cannot reuse the real PIN', () async {
       final s = await createVault();
       await expectLater(

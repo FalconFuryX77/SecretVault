@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:vibration/vibration.dart';
 import '../models/vault_state.dart';
@@ -136,6 +137,13 @@ class UnlockProvider extends ChangeNotifier {
     if (state == UnlockState.lockout || state == UnlockState.authenticating) {
       return false;
     }
+    // A lockout may have started while a vault was open (refused PIN
+    // changes count too); honour it before checking anything.
+    final lockoutEnd = await _authService.getLockoutEndTime();
+    if (lockoutEnd != null) {
+      _startLockoutCountdown(max(1, lockoutEnd.difference(DateTime.now()).inSeconds));
+      return false;
+    }
     state = UnlockState.authenticating;
     notifyListeners();
 
@@ -164,8 +172,7 @@ class UnlockProvider extends ChangeNotifier {
     VaultType vaultType, {
     bool announce = true,
   }) async {
-    _failedAttempts = 0;
-    await _authService.resetAfterSuccess();
+    await _authService.recordSuccess();
     activeVaultType = vaultType;
     state = UnlockState.unlocked;
     _vibrateSuccess();
@@ -177,9 +184,21 @@ class UnlockProvider extends ChangeNotifier {
     }
   }
 
+  /// A PIN change refused because the PIN is taken (or unusable) tells
+  /// whoever tried it something, so it costs the same as a wrong PIN at the
+  /// lock screen. The current screen is left alone; a lockout it starts
+  /// applies to the next unlock.
+  Future<void> registerRefusedPin() async {
+    _failedAttempts = await _authService.recordFailure();
+    if (_failedAttempts >= maxFailedAttempts) {
+      await _authService.beginLockout();
+      _failedAttempts = 0;
+      await _authService.setFailedAttempts(0);
+    }
+  }
+
   Future<void> _onFailedAttempt() async {
-    _failedAttempts++;
-    await _authService.setFailedAttempts(_failedAttempts);
+    _failedAttempts = await _authService.recordFailure();
     _vibrateError();
 
     if (_failedAttempts >= maxFailedAttempts) {

@@ -683,7 +683,11 @@ class VaultSession {
       if (root.children.isNotEmpty) throw StateError('decoy already exists');
       final kek = await _crypto.pinKek(pin, _salt);
       try {
-        if (await _findPinRecord(kek) != null) throw CredentialInUseException();
+        final hit = await _findPinRecord(kek);
+        if (hit != null) {
+          CryptoPrimitives.wipe(hit.$2);
+          throw CredentialInUseException();
+        }
         final taken = root.selfAndDescendants.map((v) => v.record).toSet();
         final free = [
           for (var r = 0; r < ContainerLayout.recordCount; r++)
@@ -719,6 +723,39 @@ class VaultSession {
       }
     });
   }
+
+  /// What a decoy does when its user "sets up a decoy" (or changes or
+  /// removes one) in Settings. A decoy must look like a lone real vault,
+  /// which offers that, but a decoy can't safely create a vault of its own:
+  /// it can't see which records and chunks the real vault uses. So it does
+  /// the same work (one key derivation, so it takes as long) and records the
+  /// "decoy" in its own settings, without creating anything. The PIN it was
+  /// given opens nothing. It refuses only what a lone vault would refuse:
+  /// its own PIN. Never reveals whether [pin] opens another vault.
+  Future<void> standInDecoySetup(String pin, {required bool shown}) {
+    return _locked(() async {
+      final root = _r;
+      if (root.index.topDown) throw StateError('only a decoy uses the stand-in');
+      final kek = await _crypto.pinKek(pin, _salt);
+      try {
+        final hit = await _findPinRecord(kek);
+        if (hit != null) CryptoPrimitives.wipe(hit.$2);
+        if (hit != null && hit.$1 == root.record) throw CredentialInUseException();
+      } finally {
+        CryptoPrimitives.wipe(kek);
+      }
+      root.index.extras[standInDecoyKey] = shown;
+      if (!shown) root.index.extras.remove(standInDecoyKey);
+      await _commit(root);
+    });
+  }
+
+  static const String standInDecoyKey = 'decoy.shown';
+
+  /// Whether this vault shows a decoy in Settings: a real decoy for the
+  /// real vault, the stand-in one for a decoy.
+  bool get showsDecoy =>
+      _r.index.topDown ? _r.children.isNotEmpty : _r.index.extras[standInDecoyKey] == true;
 
   Future<void> changeDecoyPin(String pin) =>
       _locked(() => _setPin(_decoy, pin));
@@ -801,6 +838,7 @@ class VaultSession {
     final kek = await _crypto.pinKek(pin, _salt);
     try {
       final hit = await _findPinRecord(kek);
+      if (hit != null) CryptoPrimitives.wipe(hit.$2);
       if (hit != null && hit.$1 != v.record) throw CredentialInUseException();
       await _writePinSlot(v.record, kek, v.vk);
     } finally {
