@@ -16,6 +16,7 @@ class AuthService {
   static const _lockoutCountKey = 'lockout_count';
   static const _lastFailureKey = 'last_failure';
   static const _lockoutAnchorKey = 'lockout_anchor';
+  static const _failureAnchorKey = 'failure_anchor';
 
   /// Failed attempts and the lockout escalation are forgotten this long
   /// after the last failure, never by a successful unlock: otherwise anyone
@@ -39,7 +40,7 @@ class AuthService {
     await _storage.write(key: _lockoutEndKey, value: endTime.toIso8601String());
     // Also anchored to time since boot, so moving the phone's clock forward
     // doesn't end a lockout early.
-    final clock = await SecurityChannelService.monotonicClock();
+    final clock = await _bootClock();
     if (clock != null) {
       final dur = endTime.difference(DateTime.now()).inMilliseconds;
       await _storage.write(
@@ -51,7 +52,7 @@ class AuthService {
 
   Future<DateTime?> getLockoutEndTime() async {
     final anchorRaw = await _storage.read(key: _lockoutAnchorKey);
-    final clock = anchorRaw == null ? null : await SecurityChannelService.monotonicClock();
+    final clock = anchorRaw == null ? null : await _bootClock();
     if (anchorRaw != null && clock != null) {
       final a = jsonDecode(anchorRaw) as Map<String, dynamic>;
       var remaining = (a['end'] as int) - clock.elapsed;
@@ -64,6 +65,8 @@ class AuthService {
           value: jsonEncode({'boot': clock.boot, 'end': clock.elapsed + remaining, 'dur': remaining}),
         );
       }
+      // Never longer than the lockout itself, whatever the clocks say.
+      remaining = remaining.clamp(0, a['dur'] as int);
       if (remaining <= 0) {
         await _storage.delete(key: _lockoutAnchorKey);
         await _storage.delete(key: _lockoutEndKey);
@@ -93,22 +96,60 @@ class AuthService {
   /// count and escalation alone (see [failureMemory]).
   Future<void> recordSuccess() async {}
 
-  /// Forgets failures older than [failureMemory].
+  /// Forgets failures older than [failureMemory]. Measured on time since
+  /// boot where available: moving the phone's clock forward must not wipe
+  /// the escalation. After a restart the window starts again in full.
   Future<void> _expireOldFailures() async {
-    final last = DateTime.tryParse(await _storage.read(key: _lastFailureKey) ?? '');
-    if (last != null && DateTime.now().difference(last) > failureMemory) {
+    final clock = await _bootClock();
+    final anchorRaw = await _storage.read(key: _failureAnchorKey);
+    bool expired;
+    if (clock != null && anchorRaw != null) {
+      final a = jsonDecode(anchorRaw) as Map<String, dynamic>;
+      if (a['boot'] == clock.boot) {
+        expired = clock.elapsed >= (a['expire'] as int);
+      } else {
+        await _anchorFailureWindow(clock);
+        expired = false;
+      }
+    } else {
+      final last = DateTime.tryParse(await _storage.read(key: _lastFailureKey) ?? '');
+      expired = last != null && DateTime.now().difference(last) > failureMemory;
+    }
+    if (expired) {
       await _storage.write(key: _failedAttemptsKey, value: '0');
       await _storage.write(key: _lockoutCountKey, value: '0');
       await _storage.delete(key: _lastFailureKey);
+      await _storage.delete(key: _failureAnchorKey);
     }
   }
 
+  Future<void> _anchorFailureWindow(({int elapsed, int boot}) clock) => _storage.write(
+        key: _failureAnchorKey,
+        value: jsonEncode({'boot': clock.boot, 'expire': clock.elapsed + failureMemory.inMilliseconds}),
+      );
+
+  /// Time since boot, or null where it can't be trusted (no channel, or a
+  /// phone that doesn't report its boot count, where a restart can't be
+  /// detected).
+  Future<({int elapsed, int boot})?> _bootClock() async {
+    final c = await SecurityChannelService.monotonicClock();
+    return c == null || c.boot < 0 ? null : c;
+  }
+
+  Future<void> _failureQueue = Future.value();
+
   /// Counts one failed attempt (a wrong PIN, or a refused PIN change) and
   /// returns the running count.
-  Future<int> recordFailure() async {
-    final n = await getFailedAttempts() + 1;
-    await setFailedAttempts(n);
-    return n;
+  Future<int> recordFailure() {
+    // One at a time: concurrent read-add-write would lose counts, letting
+    // a burst of submissions slip past the lockout.
+    final run = _failureQueue.then((_) async {
+      final n = await getFailedAttempts() + 1;
+      await setFailedAttempts(n);
+      return n;
+    });
+    _failureQueue = run.then((_) {}, onError: (_) {});
+    return run;
   }
 
   /// Starts the next lockout. Durations double each time (30 s, 1 min,
@@ -136,6 +177,8 @@ class AuthService {
     await _storage.write(key: _failedAttemptsKey, value: attempts.toString());
     if (attempts > 0) {
       await _storage.write(key: _lastFailureKey, value: DateTime.now().toIso8601String());
+      final clock = await _bootClock();
+      if (clock != null) await _anchorFailureWindow(clock);
     }
   }
 

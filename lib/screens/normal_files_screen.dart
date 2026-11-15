@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../navigation/vault_routes.dart';
 import '../theme/app_fonts.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -53,6 +54,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
       nav.popUntil((route) => route.isFirst);
       nav.push(
         MaterialPageRoute(
+          settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
           builder: (_) => VaultHomeScreen(vaultType: vaultType),
         ),
       );
@@ -150,12 +152,18 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
     if (!provider.isSetupComplete) {
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const SetupScreen()),
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '${vaultRoutePrefix}setup'),
+          builder: (_) => const SetupScreen(),
+        ),
       );
     } else {
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const LockScreen()),
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '${vaultRoutePrefix}lock'),
+          builder: (_) => const LockScreen(),
+        ),
       );
     }
   }

@@ -297,6 +297,10 @@ class VaultSession {
   final Uint8List _salt;
   _OpenVault? _root;
   bool _closed = false;
+
+  /// A lock has been requested: work already queued still runs (a save on
+  /// lock must land), but a long import stops at its next batch.
+  bool _closing = false;
   Future<void> _tail = Future.value();
   final Set<int> _reserved = {};
 
@@ -381,6 +385,7 @@ class VaultSession {
           length,
           (_) => _readUpTo(src, ContainerLayout.chunkPayload),
           onProgress,
+          abortOnLock: true,
         );
         return _addEntry(meta, chunks, fileKey, length);
       } finally {
@@ -425,7 +430,7 @@ class VaultSession {
         await _shred(fresh.extents);
         rethrow;
       }
-      await _shred(old.extents);
+      await _shredAfterCommit(old.extents);
       CryptoPrimitives.wipe(old.fileKey);
       return fresh;
     });
@@ -444,8 +449,9 @@ class VaultSession {
     String id,
     int length,
     Uint8List Function(int seq) next,
-    void Function(double)? onProgress,
-  ) async {
+    void Function(double)? onProgress, {
+    bool abortOnLock = false,
+  }) async {
     final root = _live;
     final n = max(1, (length / ContainerLayout.chunkPayload).ceil());
     final chunks = await _allocate(root, n);
@@ -453,7 +459,8 @@ class VaultSession {
     for (var start = 0; start < n; start += _batch) {
       // A lock during a long import stops it here rather than keeping every
       // key in memory for minutes; nothing was committed, and the key goes.
-      if (_closed) {
+      // (Saves and recordings, which are small, are allowed to finish.)
+      if (abortOnLock && _closing) {
         CryptoPrimitives.wipe(fileKey);
         throw StateError('vault locked during import');
       }
@@ -679,7 +686,7 @@ class VaultSession {
       final entry = root.index.entries.removeAt(idx);
       _holdUntilShredded(entry.extents);
       await _commit(root);
-      await _shred(entry.extents);
+      await _shredAfterCommit(entry.extents);
       CryptoPrimitives.wipe(entry.fileKey);
     });
   }
@@ -755,13 +762,15 @@ class VaultSession {
     return _locked(() async {
       final root = _r;
       if (root.index.topDown) throw StateError('only a decoy uses the stand-in');
-      final kek = await _crypto.pinKek(pin, _salt);
-      try {
-        final hit = await _findPinRecord(kek);
-        if (hit != null) CryptoPrimitives.wipe(hit.$2);
-        if (hit != null && hit.$1 == root.record) throw CredentialInUseException();
-      } finally {
-        CryptoPrimitives.wipe(kek);
+      if (shown) {
+        final kek = await _crypto.pinKek(pin, _salt);
+        try {
+          final hit = await _findPinRecord(kek);
+          if (hit != null) CryptoPrimitives.wipe(hit.$2);
+          if (hit != null && hit.$1 == root.record) throw CredentialInUseException();
+        } finally {
+          CryptoPrimitives.wipe(kek);
+        }
       }
       root.index.extras[standInDecoyKey] = shown;
       if (!shown) root.index.extras.remove(standInDecoyKey);
@@ -799,11 +808,13 @@ class VaultSession {
       root.index.links.removeWhere((l) => l.record == decoy.record);
       _holdUntilShredded(extentsFromChunks(chunks));
       await _commit(root);
-      await _fillRandom(
-        ContainerLayout.recordOffset(decoy.record),
-        ContainerLayout.recordSize,
-      );
-      await _shred(extentsFromChunks(chunks));
+      try {
+        await _fillRandom(
+          ContainerLayout.recordOffset(decoy.record),
+          ContainerLayout.recordSize,
+        );
+      } catch (_) {}
+      await _shredAfterCommit(extentsFromChunks(chunks));
       decoy.wipe();
     });
   }
@@ -816,11 +827,16 @@ class VaultSession {
 
   /// Locks the vault: wipes keys from memory and closes the file.
   Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
+    if (_closing || _closed) return;
+    _closing = true;
+    // Everything queued so far finishes first (saves included). The vault
+    // service already handed out its last reference to this session, so
+    // nothing new arrives except reads from a viewer that is closing, and
+    // those are refused once [_closed] is set below.
     try {
       await _tail;
     } catch (_) {}
+    _closed = true;
     _root?.wipe();
     _root = null;
     CryptoPrimitives.wipe(_salt);
@@ -1192,6 +1208,14 @@ class VaultSession {
     for (final e in extents) {
       _reserved.addAll(e.chunks);
     }
+  }
+
+  /// [_shred] for chunks freed by a change that is already committed: a
+  /// failure here mustn't make a finished change look failed.
+  Future<void> _shredAfterCommit(List<Extent> extents) async {
+    try {
+      await _shred(extents);
+    } catch (_) {}
   }
 
   /// Overwrites chunks with random data so freed space looks like any other

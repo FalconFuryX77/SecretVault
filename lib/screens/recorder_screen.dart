@@ -88,13 +88,9 @@ class _RecorderScreenState extends State<RecorderScreen> {
       await VaultRecorder.record(pub);
       await _waitFor((s) => (s.recording && s.recordingKey == _myKey) || s.error != null);
       if (!_recordingHere) {
-        // The same words whether another app or anything else holds the mic.
-        _say(
-          _status.error == 'microphone busy'
-              ? "The microphone isn't available right now."
-              : 'Could not start recording.',
-          error: true,
-        );
+        // One message for every failure: which failure it was (e.g. the
+        // other vault recording) must not show here.
+        _say("Couldn't start recording. The microphone may be in use; try again.", error: true);
       }
     } catch (e) {
       _say('Could not start recording: $e', error: true);

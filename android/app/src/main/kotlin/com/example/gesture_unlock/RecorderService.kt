@@ -269,6 +269,7 @@ class RecorderService : Service() {
         if (presses.size < 3) return
         presses.clear()
         triggers++
+        if (stopping) return // the last stop is still being written
         if (recording) {
             stopRecording()
             buzz(longArrayOf(0, 60, 120, 60))
@@ -297,6 +298,12 @@ class RecorderService : Service() {
 
     private fun startRecording(vaultKey: ByteArray): Boolean {
         if (recording) {
+            // Still finishing the last recording: refuse visibly rather than
+            // pretend to start (it ends within a few seconds).
+            if (stopping) {
+                lastError = "microphone busy"
+                return false
+            }
             if (recordingKeyId == keyId(vaultKey)) return true
             // Another vault's recording holds the microphone. Say so the way
             // any busy microphone would, without naming who has it.
@@ -324,15 +331,21 @@ class RecorderService : Service() {
         return true
     }
 
+    /** True between asking the recorder to stop and it having stopped. */
+    private var stopping = false
+
     /** Asks the recorder to finish; [recorderEnded] runs once it has. */
     private fun stopRecording() {
-        worker?.requestStop()
+        val w = worker ?: return
+        stopping = true
+        w.requestStop()
     }
 
     /** On the main thread, after the recorder thread has closed its file. */
     private fun recorderEnded(t: RecorderThread, error: String?) {
         if (worker !== t) return
         worker = null
+        stopping = false
         if (error != null) lastError = error
         recording = false
         activeFile = null

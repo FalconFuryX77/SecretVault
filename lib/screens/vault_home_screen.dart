@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../navigation/vault_routes.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
 import 'export_dialog.dart';
@@ -47,16 +48,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     super.dispose();
   }
 
+  // Vault screens are removed at once, not animated out: the exit animation
+  // would draw the vault for a few hundred milliseconds after the lock, with
+  // screenshot protection already being lifted.
   void _lockAndExit() {
     context.read<VaultProvider>().clearVaultSession();
     context.read<UnlockProvider>().lockVault();
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    vaultRoutes.removeAllAboveFirst();
   }
 
   void _triggerPanicLock() {
     context.read<VaultProvider>().clearVaultSession();
     context.read<UnlockProvider>().triggerPanicLock();
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    vaultRoutes.removeAllAboveFirst();
   }
 
   void _showImportOptions() {
@@ -280,7 +284,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (unlockProvider.state != UnlockState.unlocked) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        vaultRoutes.removeAllAboveFirst();
       });
     }
 
