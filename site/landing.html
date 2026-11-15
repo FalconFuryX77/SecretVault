@@ -306,11 +306,12 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
   <div class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">For journalists, fixers and documenters · Android beta</div>
+      <div class="eyebrow">For journalists, fixers and documenters · Android · v2.0.0 beta</div>
       <h1>Hand over your phone.<br>Keep your <span class="redacted">sources.</span></h1>
       <p class="lede">SecretVault looks and works like an ordinary file manager. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware.</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/SecretVault">See the source on GitHub</a>
+        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/SecretVault/releases/latest">Download v2.0.0 for Android</a>
+        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault">See the source</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
       <div class="facts">
@@ -452,6 +453,9 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="feature"><span class="k">Tamper-evident</span><h3>Refuses altered files</h3><p>Every 64 KB of every file is authenticated. A changed, swapped or cut-short file won't open.</p></div>
       <div class="feature"><span class="k">Lockouts</span><h3>Guessing gets slower</h3><p>Five wrong tries lock it for 30 seconds, then a minute, then two, doubling up to an hour.</p></div>
       <div class="feature"><span class="k">Quiet</span><h3>Connects to one place</h3><p>The app makes no connections until you set up backup, and then only to the server you entered. It's excluded from phone cloud backups.</p></div>
+      <div class="feature"><span class="k">Opens inside</span><h3>No other app sees it</h3><p>Photos, video, audio, PDFs, Word documents and text open right in the vault, and text files can be edited there. Nothing decrypted is saved to the phone.</p></div>
+      <div class="feature"><span class="k">Sealed-off reader</span><h3>PDFs can't reach the vault</h3><p>PDFs are drawn in a separate, locked-down process with no access to your files, the vault or the internet. A booby-trapped document gets nothing.</p></div>
+      <div class="feature"><span class="k">Private typing</span><h3>Your keyboard forgets</h3><p>What you type in the vault isn't learned by the keyboard, so it won't turn up later as a suggestion somewhere else.</p></div>
     </div>
   </div>
 </section>
@@ -511,6 +515,8 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <li><b>A lab can tell there's encrypted data.</b><span>It can't tell how much, or how many vaults.</span></li>
       <li><b>It can't beat spyware.</b><span>If your phone is already compromised, it can watch you unlock.</span></li>
       <li><b>Use a real passphrase.</b><span>A 6-digit PIN can be worked through on the phone itself in a few weeks. Longer is much safer.</span></li>
+      <li><b>Pictures aren't sealed off yet.</b><span>Images open inside the app itself. So far only PDFs get the separate locked-down reader.</span></li>
+      <li><b>Uninstalling erases the vault.</b><span>The vault lives inside the app. Back it up to your server before removing or reinstalling.</span></li>
       <li><b>Android only, and in beta.</b><span>It hasn't had an independent security review yet.</span></li>
     </ul>
   </div>
@@ -518,8 +524,9 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
 <footer>
   <div class="wrap foot">
-    <div>SecretVault · Android beta · Built in the open</div>
+    <div>SecretVault v2.0.0 · Android beta · Built in the open</div>
     <nav aria-label="Documents">
+      <a href="https://github.com/FalconFuryX77/SecretVault/releases/latest">Download</a>
       <a href="https://github.com/FalconFuryX77/SecretVault">Source</a>
       <a href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/THREAT_MODEL.md">Threat model</a>
       <a href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/SYNC_DESIGN.md">Sync design</a>
