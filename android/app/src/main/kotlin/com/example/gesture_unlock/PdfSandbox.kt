@@ -66,7 +66,7 @@ class PdfSandbox(private val activity: Activity) {
                 // The renderer died: a crash, or killed for using too much memory.
                 binder = null
                 main.post { result.error("crashed", e.toString(), null) }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 main.post { result.error("failed", e.toString(), null) }
             }
         }

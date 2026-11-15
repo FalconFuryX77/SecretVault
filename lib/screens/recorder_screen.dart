@@ -41,11 +41,11 @@ class _RecorderScreenState extends State<RecorderScreen> {
   bool _messageIsError = false;
 
   bool get _recordingHere => _status.recording && _status.recordingKey != null && _status.recordingKey == _myKey;
-  bool get _micBusy => _status.recording && !_recordingHere;
 
   @override
   void initState() {
     super.initState();
+    _poll = Timer.periodic(const Duration(milliseconds: 500), (_) => _refresh());
     _init();
   }
 
@@ -53,13 +53,13 @@ class _RecorderScreenState extends State<RecorderScreen> {
     final session = context.read<VaultService>().session;
     if (session != null) _myKey = await RecordingKeys.id(session);
     await _refresh();
-    _poll = Timer.periodic(const Duration(milliseconds: 500), (_) => _refresh());
   }
 
   Future<void> _refresh() async {
     final s = await VaultRecorder.status();
     if (!mounted) return;
-    if (s.recording) context.read<UnlockProvider>().onUserActivity();
+    // Only this vault's own recording keeps it from auto-locking.
+    if (s.recording && s.recordingKey == _myKey) context.read<UnlockProvider>().onUserActivity();
     setState(() => _status = s);
   }
 
@@ -86,8 +86,16 @@ class _RecorderScreenState extends State<RecorderScreen> {
       final pub = await RecordingKeys.publicKey(session);
       _myKey = await VaultRecorder.keyId(pub);
       await VaultRecorder.record(pub);
-      await _waitFor((s) => s.recording || s.error != null);
-      if (_status.error != null && !_status.recording) _say('Could not start: ${_status.error}', error: true);
+      await _waitFor((s) => (s.recording && s.recordingKey == _myKey) || s.error != null);
+      if (!_recordingHere) {
+        // The same words whether another app or anything else holds the mic.
+        _say(
+          _status.error == 'microphone busy'
+              ? "The microphone isn't available right now."
+              : 'Could not start recording.',
+          error: true,
+        );
+      }
     } catch (e) {
       _say('Could not start recording: $e', error: true);
     } finally {
@@ -166,7 +174,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
             Center(
               child: GestureDetector(
                 key: const Key('rec-button'),
-                onTap: _busy || _micBusy ? null : (_recordingHere ? _stop : _start),
+                onTap: _busy ? null : (_recordingHere ? _stop : _start),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   width: 112,
@@ -197,9 +205,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
             ),
             const SizedBox(height: 22),
             Text(
-              _micBusy
-                  ? 'The microphone is in use.'
-                  : _recordingHere
+              _recordingHere
                       ? 'Recording. Leaving the app or locking the phone doesn\'t stop it.'
                       : 'Tap to record. The audio is encrypted as it\'s captured and goes straight into the vault.',
               key: const Key('rec-state'),

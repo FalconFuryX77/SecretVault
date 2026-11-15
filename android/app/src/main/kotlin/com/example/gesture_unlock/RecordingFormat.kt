@@ -104,17 +104,20 @@ object RecordingFormat {
     /** Fills [file] with random bytes, then deletes it. */
     fun shred(file: File) {
         try {
-            val len = file.length()
-            FileOutputStream(file, false).use { out ->
+            // Overwrite the existing blocks in place: opening for writing
+            // with truncation would put the random data in fresh blocks and
+            // leave the old ciphertext where it was.
+            java.io.RandomAccessFile(file, "rw").use { raf ->
+                val len = raf.length()
                 val buf = ByteArray(64 * 1024)
                 var left = len
                 while (left > 0) {
                     random.nextBytes(buf)
                     val n = minOf(left, buf.size.toLong()).toInt()
-                    out.write(buf, 0, n)
+                    raf.write(buf, 0, n)
                     left -= n
                 }
-                out.fd.sync()
+                raf.fd.sync()
             }
         } catch (_: Exception) {
         }
@@ -123,8 +126,8 @@ object RecordingFormat {
 }
 
 /** Writes one encrypted recording, segment by segment. Not thread-safe. */
-class RecordingWriter(file: File, vaultPublicKey: ByteArray) {
-    private val out = FileOutputStream(file)
+class RecordingWriter(private val file: File, vaultPublicKey: ByteArray) {
+    private val out: FileOutputStream
     private val key: ByteArray
     private val pending = ByteArrayOutputStream()
     private var index = 0L
@@ -132,15 +135,28 @@ class RecordingWriter(file: File, vaultPublicKey: ByteArray) {
     var closed = false
         private set
 
+    /** Set after a failed write: the file is left as it is (cut short). */
+    private var poisoned = false
+
     init {
+        // Derive the key before creating the file, so a failure here leaves
+        // nothing behind.
         val g = KeyPairGenerator.getInstance("EC")
         g.initialize(ECGenParameterSpec("secp256r1"))
         val eph = g.generateKeyPair()
         val ephPub = eph.public.encoded
         key = RecordingFormat.fileKey(eph.private, RecordingFormat.publicKey(vaultPublicKey), ephPub)
-        out.write(ByteBuffer.allocate(2).putShort(ephPub.size.toShort()).array())
-        out.write(ephPub)
-        out.flush()
+        out = FileOutputStream(file)
+        try {
+            out.write(ByteBuffer.allocate(2).putShort(ephPub.size.toShort()).array())
+            out.write(ephPub)
+            out.flush()
+        } catch (e: Exception) {
+            out.close()
+            file.delete()
+            key.fill(0)
+            throw e
+        }
     }
 
     fun config(startedAtMs: Long, sampleRate: Int, channels: Int, csd: ByteArray) {
@@ -165,27 +181,41 @@ class RecordingWriter(file: File, vaultPublicKey: ByteArray) {
 
     fun finish() {
         if (closed) return
-        pending.write(RecordingFormat.REC_END)
-        flush(true)
-        out.fd.sync()
-        out.close()
-        key.fill(0)
         closed = true
+        try {
+            if (!poisoned) {
+                pending.write(RecordingFormat.REC_END)
+                flush(true)
+                out.fd.sync()
+            }
+        } finally {
+            out.close()
+            key.fill(0)
+        }
     }
 
     private fun flush(final: Boolean) {
+        check(!poisoned) { "an earlier write failed" }
         val plain = pending.toByteArray()
         pending.reset()
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, RecordingFormat.nonce(index)))
-        c.updateAAD(RecordingFormat.aad(index, final))
-        val sealed = c.doFinal(plain)
-        plain.fill(0)
-        out.write(ByteBuffer.allocate(4).putInt(sealed.size).array())
-        out.write(sealed)
-        out.flush()
-        out.fd.sync()
-        index++
+        // Claim the index before writing: if the write fails after part of
+        // it reached the disk, nothing else is ever sealed under this nonce.
+        val i = index++
+        try {
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, RecordingFormat.nonce(i)))
+            c.updateAAD(RecordingFormat.aad(i, final))
+            val sealed = c.doFinal(plain)
+            out.write(ByteBuffer.allocate(4).putInt(sealed.size).array())
+            out.write(sealed)
+            out.flush()
+            out.fd.sync()
+        } catch (e: Exception) {
+            poisoned = true
+            throw e
+        } finally {
+            plain.fill(0)
+        }
         lastFlush = System.nanoTime()
     }
 }
@@ -274,7 +304,7 @@ object RecordingReader {
         null
     }
 
-    private fun parse(data: ByteArray, finalSeen: Boolean): Recording? {
+    private fun parse(data: ByteArray, finalSeen: Boolean): Recording {
         val b = ByteBuffer.wrap(data)
         var startedAt = 0L
         var sampleRate = 0
@@ -303,7 +333,9 @@ object RecordingReader {
             // Truncated record at the end of a cut-short recording.
         }
         data.fill(0)
-        if (sampleRate == 0) return null
+        // Decrypted with this vault's key but no audio (the recorder failed
+        // before the encoder started, or the phone died in the first
+        // second): the owner gets an empty recording and discards it.
         return Recording(startedAt, sampleRate, channels, csd, frames, finalSeen && ended)
     }
 }

@@ -105,48 +105,76 @@ class VaultProvider extends ChangeNotifier {
   }
 
   Future<int>? _importing;
+  VaultSession? _importingFor;
 
   /// Moves finished recordings that belong to the open vault into it: each
   /// is decrypted in memory with the vault's private key, stored as a vault
   /// file, and its encrypted staging copy is shredded. Recordings belonging
   /// to the other vault are left alone. Returns how many moved in.
   Future<int> importRecordings() {
-    return _importing ??= _importRecordings().whenComplete(() => _importing = null);
+    final session = _vault.session;
+    // A run for another (now locked) vault doesn't count for this one.
+    if (_importing != null && identical(_importingFor, session)) return _importing!;
+    _importingFor = session;
+    final run = _importRecordings(session);
+    _importing = run;
+    return run.whenComplete(() {
+      if (identical(_importing, run)) {
+        _importing = null;
+        _importingFor = null;
+      }
+    });
   }
 
-  Future<int> _importRecordings() async {
-    final session = _vault.session;
+  Future<int> _importRecordings(VaultSession? session) async {
     if (session == null || !VaultRecorder.isAvailable) return 0;
     final privateKey = RecordingKeys.privateKey(session);
     if (privateKey == null) return 0; // this vault has never recorded
     var moved = 0;
     try {
       for (final p in await VaultRecorder.pending()) {
-        final r = await VaultRecorder.open(p.id, Uint8List.fromList(privateKey));
-        if (r == null) continue;
-        final title = 'Recording ${_stamp(r.startedAt)}${r.complete ? '' : ' (cut short)'}.${r.ext}';
-        await _vault.whileBusy(
-          () => session.importBytes(
-            r.data,
-            VaultItem(
-              id: _uuid.v4(),
-              title: title,
-              category: VaultCategory.document,
-              mimeType: mimeForName(title),
-              fileSizeBytes: r.data.length,
-              createdAt: r.startedAt,
-              updatedAt: DateTime.now(),
-              tags: const ['recording'],
+        if (!session.isOpen) break;
+        // One bad file must not hold up the rest.
+        try {
+          final tag = 'src:${p.id}';
+          if (session.entries.any((e) => e.item.tags.contains(tag))) {
+            // Moved in before, but the app stopped before the staging copy
+            // was removed: don't import it twice.
+            await VaultRecorder.discard(p.id);
+            continue;
+          }
+          final r = await VaultRecorder.open(p.id, Uint8List.fromList(privateKey));
+          if (r == null) continue; // another vault's
+          if (r.empty) {
+            await VaultRecorder.discard(p.id);
+            continue;
+          }
+          final title = 'Recording ${_stamp(r.startedAt)}${r.complete ? '' : ' (cut short)'}.${r.ext}';
+          await _vault.whileBusy(
+            () => session.importBytes(
+              r.data,
+              VaultItem(
+                id: _uuid.v4(),
+                title: title,
+                category: VaultCategory.document,
+                mimeType: mimeForName(title),
+                fileSizeBytes: r.data.length,
+                createdAt: r.startedAt,
+                updatedAt: DateTime.now(),
+                tags: ['recording', tag],
+              ),
             ),
-          ),
-        );
-        await VaultRecorder.discard(p.id);
-        moved++;
+          );
+          await VaultRecorder.discard(p.id);
+          moved++;
+        } catch (e) {
+          debugPrint('recording ${p.id} not imported: $e');
+        }
       }
     } finally {
       privateKey.fillRange(0, privateKey.length, 0);
     }
-    if (moved > 0) _refreshFromSession();
+    if (moved > 0 && identical(_vault.session, session)) _refreshFromSession();
     return moved;
   }
 
