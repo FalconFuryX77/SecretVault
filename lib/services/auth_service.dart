@@ -11,6 +11,13 @@ class AuthService {
   static const _lockoutEndKey = 'lockout_end_time';
   static const _failedAttemptsKey = 'failed_attempts';
   static const _lockoutCountKey = 'lockout_count';
+  static const _lastFailureKey = 'last_failure';
+
+  /// Failed attempts and the lockout escalation are forgotten this long
+  /// after the last failure, never by a successful unlock: otherwise anyone
+  /// holding the decoy PIN could make four guesses at the real PIN, open the
+  /// decoy to reset the count, and repeat forever.
+  static const Duration failureMemory = Duration(hours: 24);
   static const _autoLockOnSwitchKey = 'auto_lock_on_switch';
   static const _inactivityTimeoutKey = 'inactivity_timeout_seconds';
 
@@ -46,15 +53,32 @@ class AuthService {
     await _storage.write(key: _failedAttemptsKey, value: '0');
   }
 
-  /// Called after a successful unlock: everything resets.
-  Future<void> resetAfterSuccess() async {
-    await clearLockout();
-    await _storage.write(key: _lockoutCountKey, value: '0');
+  /// Called after a successful unlock. Deliberately leaves the failure
+  /// count and escalation alone (see [failureMemory]).
+  Future<void> recordSuccess() async {}
+
+  /// Forgets failures older than [failureMemory].
+  Future<void> _expireOldFailures() async {
+    final last = DateTime.tryParse(await _storage.read(key: _lastFailureKey) ?? '');
+    if (last != null && DateTime.now().difference(last) > failureMemory) {
+      await _storage.write(key: _failedAttemptsKey, value: '0');
+      await _storage.write(key: _lockoutCountKey, value: '0');
+      await _storage.delete(key: _lastFailureKey);
+    }
+  }
+
+  /// Counts one failed attempt (a wrong PIN, or a refused PIN change) and
+  /// returns the running count.
+  Future<int> recordFailure() async {
+    final n = await getFailedAttempts() + 1;
+    await setFailedAttempts(n);
+    return n;
   }
 
   /// Starts the next lockout. Durations double each time (30 s, 1 min,
   /// 2 min, … capped at 1 h) until a successful unlock.
   Future<int> beginLockout() async {
+    await _expireOldFailures();
     final count =
         int.tryParse(await _storage.read(key: _lockoutCountKey) ?? '') ?? 0;
     final seconds = min(
@@ -67,12 +91,16 @@ class AuthService {
   }
 
   Future<int> getFailedAttempts() async {
+    await _expireOldFailures();
     final val = await _storage.read(key: _failedAttemptsKey);
     return int.tryParse(val ?? '') ?? 0;
   }
 
   Future<void> setFailedAttempts(int attempts) async {
     await _storage.write(key: _failedAttemptsKey, value: attempts.toString());
+    if (attempts > 0) {
+      await _storage.write(key: _lastFailureKey, value: DateTime.now().toIso8601String());
+    }
   }
 
   // ─── Settings Persistence ───────────────────────────────
