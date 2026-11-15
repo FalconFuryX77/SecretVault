@@ -219,6 +219,7 @@ class _SetupScreenState extends State<SetupScreen> {
     ValueChanged<String>? onSubmitted,
   }) {
     return TextField(
+      enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
       controller: controller,
       enabled: !_busy,
       keyboardType: TextInputType.visiblePassword,

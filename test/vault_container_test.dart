@@ -209,6 +209,61 @@ void main() {
       await s.close();
     });
 
+    test('the vault still opens after deleting the most recent file', () async {
+      // Deleting frees the file's chunks before the index is rewritten, so
+      // the new index can land in them. Shredding must not then wipe it.
+      for (final size in [5000, 65508 * 3 + 7]) {
+        final s = await createVault();
+        await s.importFile(await sourceFile('keep', 70000, seed: 2), _meta('keep', 'keep'));
+        await s.importFile(await sourceFile('gone', size, seed: 3), _meta('gone', 'gone'));
+        await s.delete('gone');
+        await s.upsertItem(s.entryById('keep')!.item.copyWith(title: 'renamed after delete'));
+        await s.close();
+        final s2 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+        expect(s2.entries.map((e) => e.item.id), ['keep']);
+        expect(await s2.readAll(s2.entryById('keep')!), await File('${tmp.path}/keep').readAsBytes());
+        await s2.close();
+        await containerFile.delete();
+      }
+    });
+
+    test("replacing a file's content keeps the item and survives a reopen", () async {
+      final s = await createVault();
+      final original = Uint8List.fromList(List.generate(200000, (i) => i % 251));
+      await s.importBytes(original, _meta('t', 'notes.txt'));
+      await s.importFile(await sourceFile('other', 9000), _meta('other', 'other'));
+      final oldExtents = s.entryById('t')!.extents.expand((e) => e.chunks).toList();
+      final position = s.entries.indexWhere((e) => e.item.id == 't');
+      final edited = Uint8List.fromList('edited text, much shorter'.codeUnits);
+      final renamed = s.entryById('t')!.item.copyWith(title: 'notes v2.txt');
+      final fresh = await s.replaceContent('t', edited, renamed);
+      expect(fresh.byteLength, edited.length);
+      expect(fresh.item.fileSizeBytes, edited.length);
+      expect(s.entries.indexWhere((e) => e.item.id == 't'), position, reason: 'keeps its place in the list');
+      expect(await s.readAll(s.entryById('t')!), edited);
+      // The old ciphertext is gone from the chunks the new copy didn't reuse.
+      final newChunks = fresh.extents.expand((e) => e.chunks).toSet();
+      expect(oldExtents.where(newChunks.contains), isEmpty, reason: 'written to fresh chunks');
+      await s.close();
+      final s2 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+      expect(await s2.readAll(s2.entryById('t')!), edited);
+      expect(s2.entryById('t')!.item.title, 'notes v2.txt');
+      expect(await s2.readAll(s2.entryById('other')!), await File('${tmp.path}/other').readAsBytes());
+      await s2.close();
+    });
+
+    test('importBytes stores data without a source file', () async {
+      final s = await createVault();
+      final data = Uint8List.fromList(List.generate(65508 * 2 + 3, (i) => (i * 7) % 256));
+      final e = await s.importBytes(data, _meta('m', 'memo.m4a'));
+      expect(e.byteLength, data.length);
+      expect(await s.readRange(e, 65500, 20), data.sublist(65500, 65520));
+      await s.close();
+      final s2 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+      expect(await s2.readAll(s2.entryById('m')!), data);
+      await s2.close();
+    });
+
     test('container grows in random-filled steps when full', () async {
       final s = await createVault(chunks: 4);
       final size0 = await containerFile.length();

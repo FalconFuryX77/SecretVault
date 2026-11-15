@@ -314,7 +314,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
       <div class="facts">
-        <span>AES-256-GCM</span><span>Argon2id + hardware keystore</span><span>Decoy PIN</span><span>No internet permission</span>
+        <span>AES-256-GCM</span><span>Argon2id + hardware keystore</span><span>Decoy PIN</span><span>Backs up only to your server</span>
       </div>
     </div>
 
@@ -451,7 +451,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="feature"><span class="k">No screenshots</span><h3>Blank in recent apps</h3><p>Vault screens can't be captured and show blank in the app switcher. The cover app behaves normally.</p></div>
       <div class="feature"><span class="k">Tamper-evident</span><h3>Refuses altered files</h3><p>Every 64 KB of every file is authenticated. A changed, swapped or cut-short file won't open.</p></div>
       <div class="feature"><span class="k">Lockouts</span><h3>Guessing gets slower</h3><p>Five wrong tries lock it for 30 seconds, then a minute, then two, doubling up to an hour.</p></div>
-      <div class="feature"><span class="k">Offline</span><h3>Nothing leaves the phone</h3><p>The app has no internet permission and is excluded from cloud backups. There's no account to make.</p></div>
+      <div class="feature"><span class="k">Quiet</span><h3>Connects to one place</h3><p>The app makes no connections until you set up backup, and then only to the server you entered. It's excluded from phone cloud backups.</p></div>
     </div>
   </div>
 </section>
@@ -483,7 +483,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 <section id="sync">
   <div class="wrap sync">
     <div class="sync-copy">
-      <span class="status-chip">In development · not in the app yet</span>
+      <span class="status-chip">Early · manual backup works, automatic is next</span>
       <h2>Getting your work out on a bad signal</h2>
       <p>The safest file is one that has already left the phone. SecretVault's encrypted sync sends files in small pieces that resume where they stopped, so even a few seconds of signal count.</p>
       <p>The server only ever holds ciphertext. A news desk or NGO can run its own. And a phone taken from you can't delete what already got out.</p>

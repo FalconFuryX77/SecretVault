@@ -13,6 +13,7 @@ import 'crypto.dart';
 import 'keys.dart';
 import 'log.dart';
 import 'piece.dart';
+import 'source.dart';
 
 /// One version of one file. Sealed under K_manifest and stored as a piece.
 class Manifest {
@@ -220,9 +221,59 @@ class SyncEngine {
   static bool _compressible(String mime) =>
       mime.startsWith('text/') || mime == 'application/json' || mime == 'application/pdf' || mime.contains('xml');
 
-  /// Backs up [file]. Safe to call again after a crash: the journal remembers
-  /// the plan and the server remembers which pieces arrived.
-  Future<BackupReport> backupFile(File file, {required String fileId, Map<String, dynamic> meta = const {}}) async {
+  /// Backs up a file on disk. See [backupSource].
+  Future<BackupReport> backupFile(File file, {required String fileId, Map<String, dynamic> meta = const {}}) =>
+      backupSource(FileSyncSource(file), fileId: fileId, meta: meta);
+
+  /// One pass over the content: finds the piece boundaries, names every
+  /// piece and computes the whole-file MAC, holding at most one piece
+  /// (about 1 MiB) in memory.
+  Future<({List<List<dynamic>> plan, String mac, int size})> _plan(SyncSource src) async {
+    final state = ChunkerState();
+    final cuts = <ChunkRef>[];
+    final plan = <List<dynamic>>[];
+    final macSink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
+    final pending = BytesBuilder(copy: false); // bytes not yet part of a finished piece
+    var pendingStart = 0;
+    var size = 0;
+
+    Future<void> emit(Uint8List bytes, ChunkRef r) async {
+      final piece = Uint8List.sublistView(bytes, r.offset - pendingStart, r.end - pendingStart);
+      plan.add([r.offset, r.length, await codec.idFor(piece)]);
+    }
+
+    await for (final block in src.openRead()) {
+      if (block.isEmpty) continue;
+      macSink.add(block);
+      size += block.length;
+      final before = cuts.length;
+      chunker.feed(state, block, cuts);
+      pending.add(block);
+      if (cuts.length > before) {
+        final bytes = pending.takeBytes();
+        for (var i = before; i < cuts.length; i++) {
+          await emit(bytes, cuts[i]);
+        }
+        final consumed = cuts.last.end - pendingStart;
+        if (consumed < bytes.length) pending.add(Uint8List.sublistView(bytes, consumed));
+        pendingStart = cuts.last.end;
+      }
+    }
+    final tail = chunker.finish(state);
+    if (tail != null) await emit(pending.takeBytes(), tail);
+    macSink.close();
+    return (plan: plan, mac: hex((await macSink.mac()).bytes), size: size);
+  }
+
+  /// Backs up [src] under [fileId]. Safe to call again after a crash: the
+  /// journal remembers the plan and the server remembers which pieces
+  /// arrived. The content is read from [src] only; nothing is written to
+  /// disk in the clear.
+  Future<BackupReport> backupSource(
+    SyncSource src, {
+    required String fileId,
+    Map<String, dynamic> meta = const {},
+  }) async {
     final clock = Stopwatch()..start();
     final sentBefore = api.bytesSent;
     var attempts = 0;
@@ -232,25 +283,14 @@ class SyncEngine {
     var job = (jobs[fileId] as Map?)?.cast<String, dynamic>();
 
     if (job == null || job['state'] == 'committed') {
-      final refs = await chunker.chunkFile(file);
-      final raf = await file.open();
-      final plan = <List<dynamic>>[];
-      try {
-        for (final r in refs) {
-          raf.setPositionSync(r.offset);
-          plan.add([r.offset, r.length, await codec.idFor(raf.readSync(r.length))]);
-        }
-      } finally {
-        await raf.close();
-      }
+      final planned = await _plan(src);
       job = {
-        'path': file.path,
         'version': hex(randomBytes(16)),
         'parent': job?['version'],
-        'size': await file.length(),
-        'mac': hex(await _macFile(file)),
+        'size': planned.size,
+        'mac': planned.mac,
         'meta': meta,
-        'plan': plan,
+        'plan': planned.plan,
         'state': 'planned',
       };
       jobs[fileId] = job;
@@ -265,18 +305,13 @@ class SyncEngine {
     // Pieces: ask what's missing, send only that. Every drop → ask again.
     await _withRetry(() async {
       final todo = (await api.missing(ids)).toSet();
-      final raf = await file.open();
-      try {
-        for (final p in plan) {
-          final id = p[2] as String;
-          if (!todo.remove(id)) continue;
-          raf.setPositionSync(p[0] as int);
-          final sealed = await codec.seal(id, raf.readSync(p[1] as int), compress: compress);
-          await _sendPiece(id, sealed);
-          uploaded++;
-        }
-      } finally {
-        await raf.close();
+      for (final p in plan) {
+        final id = p[2] as String;
+        if (!todo.remove(id)) continue;
+        final plain = await src.readRange(p[0] as int, p[1] as int);
+        final sealed = await codec.seal(id, plain, compress: compress);
+        await _sendPiece(id, sealed);
+        uploaded++;
       }
     }, () => attempts++);
 
@@ -333,7 +368,11 @@ class SyncEngine {
 
   void _markCommitted(Map<String, dynamic> j, String fileId) {
     final jobs = (j['jobs'] as Map).cast<String, dynamic>();
-    (jobs[fileId] as Map)['state'] = 'committed';
+    // The manifest on the server holds the piece list now; keeping it here
+    // would bloat the journal (thousands of entries for one long video).
+    (jobs[fileId] as Map)
+      ..['state'] = 'committed'
+      ..remove('plan');
   }
 
   /// Rebuilds this device's chain position from the server's log. Returns
@@ -406,15 +445,6 @@ class SyncEngine {
       restored.add(target);
     }
     return restored;
-  }
-
-  Future<Uint8List> _macFile(File f) async {
-    final sink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
-    await for (final part in f.openRead()) {
-      sink.add(part);
-    }
-    sink.close();
-    return Uint8List.fromList((await sink.mac()).bytes);
   }
 
   static String _safeName(String s) {

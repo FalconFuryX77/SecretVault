@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Every build (debug included, so tests run under the shipped rules):
+     https only, with one exception. The in-vault media player reads
+     decrypted audio and video from a stream the app serves on 127.0.0.1
+     (lib/viewers/vault_media_server.dart), which never leaves the phone.
+     Debug builds can also reach a test backup server through that address
+     with `adb reverse`; release builds refuse http:// for backups anyway. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

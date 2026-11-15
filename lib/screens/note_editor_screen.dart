@@ -137,6 +137,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           child: Column(
             children: [
               TextField(
+                enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
                 controller: _titleController,
                 onChanged: (_) => _onChanged(),
                 style: AppFonts.outfit(
@@ -159,6 +160,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
               const Divider(color: Colors.white12, height: 24),
               Expanded(
                 child: TextField(
+                  enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
                   controller: _contentController,
                   onChanged: (_) => _onChanged(),
                   maxLines: null,

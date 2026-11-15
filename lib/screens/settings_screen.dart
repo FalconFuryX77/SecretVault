@@ -5,6 +5,7 @@ import '../providers/unlock_provider.dart';
 import '../services/auth_service.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
+import 'backup_screen.dart';
 
 /// Security & Preferences Settings Screen.
 ///
@@ -210,6 +211,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ],
+
+          const SizedBox(height: 24),
+          _buildSectionHeader('BACKUP'),
+          _buildSettingCard(
+            icon: Icons.cloud_upload_rounded,
+            color: const Color(0xFF38BDF8),
+            title: 'Backup',
+            subtitle: 'Send encrypted copies to a server you trust',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BackupScreen()),
+            ),
+          ),
 
           const SizedBox(height: 24),
           _buildSectionHeader('LOCKDOWN & TIMEOUTS'),
@@ -475,6 +489,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
   }
 
   Widget _field(TextEditingController c, String hint) => TextField(
+    enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
     controller: c,
     keyboardType: TextInputType.visiblePassword,
     obscureText: true,

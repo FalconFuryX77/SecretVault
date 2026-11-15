@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
+import '../viewers/file_kind.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
@@ -184,11 +185,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ? VaultCategory.video
           : category;
 
-      final mimeType = (cat == VaultCategory.image)
-          ? 'image/$ext'
-          : (cat == VaultCategory.video)
-          ? 'video/$ext'
-          : 'application/octet-stream';
+      final mimeType = mimeForName(fileName);
 
       try {
         await context.read<VaultProvider>().importFile(
@@ -419,6 +416,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: TextField(
+              enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
               controller: _searchController,
               onChanged: (q) => vault.setSearchQuery(q),
               style: AppFonts.outfit(color: Colors.white, fontSize: 14),
@@ -840,6 +838,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             ),
           ),
           content: TextField(
+            enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
             controller: controller,
             autofocus: true,
             style: AppFonts.outfit(color: Colors.white),

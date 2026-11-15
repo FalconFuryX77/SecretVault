@@ -9,3 +9,4 @@ export 'src/keys.dart';
 export 'src/log.dart';
 export 'src/piece.dart';
 export 'src/setup.dart';
+export 'src/source.dart';
