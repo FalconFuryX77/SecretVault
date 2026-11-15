@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
+import 'recorder_screen.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
@@ -128,6 +129,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     FileType.any,
                     null,
                     VaultCategory.document,
+                  );
+                },
+              ),
+              _buildModalTile(
+                icon: Icons.mic_rounded,
+                color: const Color(0xFFF43F5E),
+                title: 'Record Audio',
+                subtitle: 'Recorded straight into the vault, encrypted as it goes',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RecorderScreen()),
                   );
                 },
               ),

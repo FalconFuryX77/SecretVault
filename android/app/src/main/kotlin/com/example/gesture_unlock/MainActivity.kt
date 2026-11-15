@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
         private const val SECURITY_CHANNEL = "com.example.secretvault/security"
         private const val KEYS_CHANNEL = "app.vault/keys"
         private const val PDF_CHANNEL = "app.vault/pdf"
+        private const val RECORDER_CHANNEL = "app.vault/recorder"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
         // Neutral alias names: nothing in the keystore says "vault".
@@ -119,6 +120,10 @@ class MainActivity : FlutterActivity() {
             pdfSandbox.handle(call, result)
         }
 
+        MethodChannel(messenger, RECORDER_CHANNEL).setMethodCallHandler { call, result ->
+            handleRecorder(call, result)
+        }
+
         worker.execute {
             try {
                 LEGACY_BIO_ALIASES.forEach { if (keyStore.containsAlias(it)) keyStore.deleteEntry(it) }
@@ -161,6 +166,115 @@ class MainActivity : FlutterActivity() {
             }
         }
     }
+
+    // ─── Recorder ───────────────────────────────────────────────────
+    //
+    // See RecorderService and RecordingFormat. The vault's private key only
+    // passes through here to open finished recordings, in memory.
+
+    private fun recorderIntent(action: String) =
+        android.content.Intent(this, RecorderService::class.java).setAction(action)
+
+    private fun startRecorderService(intent: android.content.Intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+    }
+
+    private fun handleRecorder(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        try {
+            when (call.method) {
+                "keyPair" -> {
+                    val (pub, priv) = RecordingFormat.newVaultKeyPair()
+                    result.success(mapOf("pub" to pub, "priv" to priv))
+                }
+                "status" -> result.success(
+                    mapOf(
+                        "armed" to RecorderService.armed,
+                        "recording" to RecorderService.recording,
+                        "startedAt" to RecorderService.startedAtMs,
+                        "error" to RecorderService.lastError,
+                        "triggers" to RecorderService.triggers,
+                        "armedKey" to RecorderService.armedKeyId,
+                        "recordingKey" to RecorderService.recordingKeyId,
+                    ),
+                )
+                "arm" -> {
+                    startRecorderService(
+                        recorderIntent(RecorderService.ACTION_ARM)
+                            .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!)
+                            .putExtra(RecorderService.EXTRA_VIBRATE, call.argument<Boolean>("vibrate") ?: true)
+                            .putExtra(RecorderService.EXTRA_ALWAYS_LISTEN, call.argument<Boolean>("alwaysListen") ?: false),
+                    )
+                    result.success(true)
+                }
+                "disarm" -> {
+                    if (RecorderService.armed || RecorderService.recording) {
+                        startService(recorderIntent(RecorderService.ACTION_DISARM))
+                    }
+                    result.success(true)
+                }
+                "record" -> {
+                    startRecorderService(
+                        recorderIntent(RecorderService.ACTION_RECORD)
+                            .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!),
+                    )
+                    result.success(true)
+                }
+                "stop" -> {
+                    if (RecorderService.recording) startService(recorderIntent(RecorderService.ACTION_STOP))
+                    result.success(true)
+                }
+                "pending" -> {
+                    val active = RecorderService.activeFile
+                    val files = RecorderService.stagingDir(this).listFiles()
+                        ?.filter { it.isFile && it.name.endsWith(".bin") && it != active }
+                        ?.sortedBy { it.lastModified() }
+                        ?: emptyList()
+                    result.success(
+                        files.map { mapOf("id" to it.name, "size" to it.length(), "modified" to it.lastModified()) },
+                    )
+                }
+                "open" -> inBackground(result) {
+                    val file = stagedFile(call.argument<String>("id")!!)
+                    val key = call.argument<ByteArray>("key")!!
+                    try {
+                        val rec = if (file.exists()) RecordingReader.open(file, key) else null
+                        if (rec == null) {
+                            null
+                        } else {
+                            val (data, ext) = RecordingPacker.pack(rec)
+                            rec.wipe()
+                            mapOf(
+                                "data" to data,
+                                "ext" to ext,
+                                "startedAt" to rec.startedAtMs,
+                                "durationMs" to rec.durationMs,
+                                "complete" to rec.complete,
+                            )
+                        }
+                    } finally {
+                        key.fill(0)
+                    }
+                }
+                "discard" -> inBackground(result) {
+                    val f = stagedFile(call.argument<String>("id")!!)
+                    if (f.exists() && f != RecorderService.activeFile) RecordingFormat.shred(f)
+                    true
+                }
+                "stagingPath" -> result.success(RecorderService.stagingDir(this).absolutePath)
+                else -> result.notImplemented()
+            }
+        } catch (e: Exception) {
+            result.error("recorder", e.message, null)
+        }
+    }
+
+    /** A staged recording by name, refusing anything outside its folder. */
+    private fun stagedFile(id: String): File {
+        require(STAGED_NAME.matches(id)) { "bad id" }
+        return File(RecorderService.stagingDir(this), id)
+    }
+
+    private val STAGED_NAME = Regex("^[0-9a-f]{24}[.]bin$")
 
     // ─── Bulk chunk crypto ──────────────────────────────────────────
     //
