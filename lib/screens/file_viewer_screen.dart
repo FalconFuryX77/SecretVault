@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_item.dart';
@@ -176,7 +176,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
             backgroundColor: const Color(0xFF059669),
             content: Text(
               'Exported to ${result.path}',
-              style: GoogleFonts.outfit(color: Colors.white),
+              style: AppFonts.outfit(color: Colors.white),
             ),
           ),
         );
@@ -188,7 +188,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           backgroundColor: const Color(0xFFE11D48),
           content: Text(
             'Export failed: $e',
-            style: GoogleFonts.outfit(color: Colors.white),
+            style: AppFonts.outfit(color: Colors.white),
           ),
         ),
       );
@@ -204,7 +204,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           'Rename File',
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             color: Colors.white,
             fontWeight: FontWeight.bold,
           ),
@@ -212,7 +212,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
         content: TextField(
           controller: controller,
           autofocus: true,
-          style: GoogleFonts.outfit(color: Colors.white),
+          style: AppFonts.outfit(color: Colors.white),
           decoration: InputDecoration(
             filled: true,
             fillColor: const Color(0xFF21262D),
@@ -227,7 +227,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
             onPressed: () => Navigator.pop(ctx),
             child: Text(
               'Cancel',
-              style: GoogleFonts.outfit(color: Colors.white54),
+              style: AppFonts.outfit(color: Colors.white54),
             ),
           ),
           ElevatedButton(
@@ -238,7 +238,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             child: Text(
               'Rename',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              style: AppFonts.outfit(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -266,21 +266,21 @@ class _FileViewerScreenState extends State<FileViewerScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           'Shred & Delete File',
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             color: Colors.white,
             fontWeight: FontWeight.bold,
           ),
         ),
         content: Text(
           'Permanently wipe this file from encrypted storage? This action cannot be undone.',
-          style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(
               'Cancel',
-              style: GoogleFonts.outfit(color: Colors.white54),
+              style: AppFonts.outfit(color: Colors.white54),
             ),
           ),
           ElevatedButton(
@@ -290,7 +290,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
               'Shred Permanently',
-              style: GoogleFonts.outfit(
+              style: AppFonts.outfit(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
@@ -331,7 +331,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           children: [
             Text(
               _currentItem.title,
-              style: GoogleFonts.outfit(
+              style: AppFonts.outfit(
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -346,12 +346,18 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                   size: 12,
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  'FLAG_SECURE • RAM Sandbox',
-                  style: GoogleFonts.outfit(
-                    fontSize: 10,
-                    color: const Color(0xFF34D399),
-                    fontWeight: FontWeight.w600,
+                // Flexible + ellipsis: the title bar is narrow once the
+                // action buttons take their space (overflowed on a 1080p phone).
+                Flexible(
+                  child: Text(
+                    'Protected view · no screenshots',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppFonts.outfit(
+                      fontSize: 10,
+                      color: const Color(0xFF34D399),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -395,7 +401,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                 padding: const EdgeInsets.all(24),
                 child: Text(
                   _errorMessage!,
-                  style: GoogleFonts.outfit(color: const Color(0xFFFB7185)),
+                  style: AppFonts.outfit(color: const Color(0xFFFB7185)),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -404,7 +410,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           ? Center(
               child: Text(
                 'Empty encrypted file payload.',
-                style: GoogleFonts.outfit(color: Colors.white54),
+                style: AppFonts.outfit(color: Colors.white54),
               ),
             )
           : isImage
@@ -432,7 +438,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           errorBuilder: (context, error, stackTrace) => Center(
             child: Text(
               'Failed to render image format.',
-              style: GoogleFonts.outfit(color: Colors.white54),
+              style: AppFonts.outfit(color: Colors.white54),
             ),
           ),
         ),
@@ -492,7 +498,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
 
           Text(
             _currentItem.title,
-            style: GoogleFonts.outfit(
+            style: AppFonts.outfit(
               fontSize: 18,
               fontWeight: FontWeight.bold,
               color: Colors.white,
@@ -502,7 +508,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           const SizedBox(height: 6),
           Text(
             '${ext.toUpperCase()} • ${DeviceFileService.formatBytes(bytes.length)} • Decrypted in RAM',
-            style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
+            style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
           ),
 
           const SizedBox(height: 28),
@@ -563,14 +569,14 @@ class _FileViewerScreenState extends State<FileViewerScreen>
               children: [
                 Text(
                   formatTime(currentSeconds),
-                  style: GoogleFonts.firaCode(
+                  style: AppFonts.firaCode(
                     fontSize: 11,
                     color: Colors.white54,
                   ),
                 ),
                 Text(
                   formatTime(estimatedSeconds),
-                  style: GoogleFonts.firaCode(
+                  style: AppFonts.firaCode(
                     fontSize: 11,
                     color: Colors.white54,
                   ),
@@ -658,7 +664,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                 },
                 child: Text(
                   '${_playbackSpeed}x',
-                  style: GoogleFonts.firaCode(
+                  style: AppFonts.firaCode(
                     color: const Color(0xFFA78BFA),
                     fontWeight: FontWeight.bold,
                   ),
@@ -699,7 +705,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                       const SizedBox(height: 12),
                       Text(
                         _currentItem.title,
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
                         ),
@@ -708,7 +714,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                       const SizedBox(height: 4),
                       Text(
                         '${DeviceFileService.formatBytes(bytes.length)} • Encrypted RAM Feed',
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           color: Colors.white38,
                           fontSize: 11,
                         ),
@@ -743,7 +749,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                       const SizedBox(width: 8),
                       Text(
                         '${(_playbackPosition * 100).toInt()}%',
-                        style: GoogleFonts.firaCode(
+                        style: AppFonts.firaCode(
                           fontSize: 10,
                           color: Colors.white70,
                         ),
@@ -772,8 +778,8 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  'Anti-Forensic Ephemeral Sandbox',
-                  style: GoogleFonts.outfit(
+                  'Opened in memory only',
+                  style: AppFonts.outfit(
                     fontSize: 12,
                     color: const Color(0xFF34D399),
                     fontWeight: FontWeight.w600,
@@ -823,7 +829,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                   const SizedBox(width: 8),
                   Text(
                     'Page $_currentPdfPage of $_totalPdfPages',
-                    style: GoogleFonts.outfit(
+                    style: AppFonts.outfit(
                       fontSize: 13,
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -889,7 +895,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                     Center(
                       child: Text(
                         _currentItem.title,
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
@@ -900,7 +906,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                     Center(
                       child: Text(
                         '${DeviceFileService.formatBytes(bytes.length)} • Encrypted PDF Document',
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 11,
                           color: Colors.white38,
                         ),
@@ -910,7 +916,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                     if (extractedText != null && extractedText.isNotEmpty)
                       SelectableText(
                         extractedText,
-                        style: GoogleFonts.firaCode(
+                        style: AppFonts.firaCode(
                           fontSize: 12,
                           color: Colors.white70,
                           height: 1.4,
@@ -920,7 +926,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                       Center(
                         child: Text(
                           'Encrypted PDF stream loaded in memory.\nScreenshots and captures are blocked.',
-                          style: GoogleFonts.outfit(
+                          style: AppFonts.outfit(
                             fontSize: 13,
                             color: Colors.white54,
                           ),
@@ -959,7 +965,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
               children: [
                 Text(
                   '${lines.length} lines • ${DeviceFileService.formatBytes(bytes.length)}',
-                  style: GoogleFonts.firaCode(
+                  style: AppFonts.firaCode(
                     fontSize: 11,
                     color: Colors.white54,
                   ),
@@ -1024,7 +1030,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                           width: 38,
                           child: Text(
                             '${index + 1}',
-                            style: GoogleFonts.firaCode(
+                            style: AppFonts.firaCode(
                               fontSize: _textFontSize - 2,
                               color: Colors.white24,
                             ),
@@ -1035,7 +1041,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                         Expanded(
                           child: SelectableText(
                             lines[index],
-                            style: GoogleFonts.firaCode(
+                            style: AppFonts.firaCode(
                               fontSize: _textFontSize,
                               color: Colors.white.withValues(alpha: 0.9),
                               height: 1.4,
@@ -1066,7 +1072,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           const SizedBox(height: 16),
           Text(
             _currentItem.title,
-            style: GoogleFonts.outfit(
+            style: AppFonts.outfit(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: Colors.white,
@@ -1075,7 +1081,7 @@ class _FileViewerScreenState extends State<FileViewerScreen>
           const SizedBox(height: 6),
           Text(
             '${(bytes.length / 1024).toStringAsFixed(1)} KB • In-Memory Decrypted Binary',
-            style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
+            style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
           ),
           const SizedBox(height: 20),
           Container(
@@ -1097,8 +1103,8 @@ class _FileViewerScreenState extends State<FileViewerScreen>
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  'Zero-Disk-Leak RAM Sandbox',
-                  style: GoogleFonts.outfit(
+                  'Opened in memory only',
+                  style: AppFonts.outfit(
                     fontSize: 12,
                     color: const Color(0xFF34D399),
                     fontWeight: FontWeight.w600,

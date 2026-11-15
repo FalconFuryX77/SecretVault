@@ -356,7 +356,7 @@ No number goes in the README or a résumé until the harness has produced it.
 
 | # | Deliverable |
 |---|---|
-| M0 | Commit the container work; test it on a real phone (biometrics, keystore, decoy). **PIN path verified on an Android 16 emulator by automated tests; gesture + fingerprint still need a real phone** |
+| M0 | Commit the container work; test it on a real phone (keystore, decoy). **Done: core and UI flow pass on a Galaxy M34 (Android 16). Gesture and fingerprint unlock were removed; unlock is PIN-only** |
 | M1 | Server skeleton (Compose: FastAPI, Postgres, MinIO), piece + log API, Toxiproxy harness, CLI client that backs up a folder. **Server + API + 21 tests done; Compose file written but not yet run; harness and CLI client pending** |
 | M2 | `sync_core`: keyed chunking, piece encoding, journal, scheduler logic; integrated into the app in mode A. **Engine done and tested end to end against the server through a failure-injecting proxy; app integration and the Android scheduler pending** |
 | M3 | Restore, recovery phrase, pairing, revocation, SRK rotation |

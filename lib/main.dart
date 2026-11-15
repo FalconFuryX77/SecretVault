@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'theme/app_fonts.dart';
 import 'package:provider/provider.dart';
 import 'providers/device_files_provider.dart';
-import 'providers/gesture_unlock_provider.dart';
+import 'providers/unlock_provider.dart';
 import 'providers/vault_provider.dart';
 import 'services/vault_service.dart';
 import 'screens/normal_files_screen.dart';
@@ -35,7 +35,7 @@ class SecretVaultApp extends StatelessWidget {
       providers: [
         Provider<VaultService>.value(value: vaultService),
         ChangeNotifierProvider(
-          create: (_) => GestureUnlockProvider(vaultService: vaultService),
+          create: (_) => UnlockProvider(vaultService: vaultService),
         ),
         ChangeNotifierProvider(
           create: (_) => VaultProvider(vaultService: vaultService),
@@ -51,7 +51,7 @@ class SecretVaultApp extends StatelessWidget {
             theme: ThemeData(
               brightness: Brightness.dark,
               scaffoldBackgroundColor: const Color(0xFF090D16),
-              textTheme: GoogleFonts.outfitTextTheme(
+              textTheme: AppFonts.outfitTextTheme(
                 ThemeData.dark().textTheme,
               ),
               useMaterial3: true,
@@ -62,7 +62,7 @@ class SecretVaultApp extends StatelessWidget {
                 child: Listener(
                   behavior: HitTestBehavior.translucent,
                   onPointerDown: (_) {
-                    ctx.read<GestureUnlockProvider>().onUserActivity();
+                    ctx.read<UnlockProvider>().onUserActivity();
                   },
                   child: child ?? const SizedBox(),
                 ),
@@ -102,10 +102,10 @@ class _AppLifecycleScopeState extends State<AppLifecycleScope>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final unlock = context.read<GestureUnlockProvider>();
+    final unlock = context.read<UnlockProvider>();
     // Only lock when the app is really backgrounded. `inactive` also fires
-    // for the fingerprint dialog and the notification shade, and locking
-    // there would cut off biometric enrolment mid-way. FLAG_SECURE keeps the
+    // for system dialogs and the notification shade, and locking there
+    // would cut off whatever the user is doing. FLAG_SECURE keeps the
     // vault out of the recent-apps thumbnail in the meantime.
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {

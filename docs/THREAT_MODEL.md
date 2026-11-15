@@ -37,8 +37,8 @@ possibly for a few minutes. No tools, no prior knowledge of this app.
 | Defence | Status |
 |---|---|
 | App opens as a working cover app (currently a file manager) with no vault UI, buttons or wording | Built |
-| Vault entry is a covert gesture (triple-tap on the header) | Built |
-| Lock screen shows only dots, never gesture directions | Built |
+| Vault entry is a covert triple-tap on the cover app's header | Built |
+| The motion sensor is read only while a vault is open; the cover app never reacts to movement | Built |
 | Vault screens set `FLAG_SECURE` (no screenshots, blank in the recents list) | Built |
 | Vault locks when the app is backgrounded, on inactivity, and on a hard shake | Built |
 
@@ -50,7 +50,8 @@ Forces you to "open the vault" or hand over the PIN, under threat.
 
 | Defence | Status |
 |---|---|
-| Decoy vault opened by its own PIN (and optionally its own gesture) | Built |
+| Decoy vault opened by its own PIN, typed into the same field as the real one | Built |
+| No fingerprint unlock: a finger can be pressed to the sensor by force, and a fingerprint can't choose between the real vault and the decoy | Built |
 | Nothing in the decoy's UI, settings or storage shows that another vault exists | Built |
 | Container has 4 key records whether 1 or 2 are in use; unused ones are random bytes | Built |
 | Decoy can never be made to reveal the real vault's key: only the real vault knows about the decoy, not the other way round | Built |
@@ -71,10 +72,8 @@ after forcing an unlock of the phone itself, with time and tools.
 |---|---|
 | All vault data in one file of AES-256-GCM ciphertext and random filler; no headers, magic bytes or plaintext fields | Built |
 | File size reveals neither how much is stored nor how many vaults exist (pre-allocated, grows in 256 MiB random-filled steps) | Built |
-| PIN and gesture are never stored; they derive keys via Argon2id and then an HMAC under a non-exportable hardware key (Android Keystore / StrongBox) | Built |
+| The PIN is never stored; it derives keys via Argon2id and then an HMAC under a non-exportable hardware key (Android Keystore / StrongBox) | Built |
 | Offline brute force is impossible: every guess must run on this phone's secure hardware | Built |
-| Gesture alone unlocks nothing: the vault key is released only after a strong biometric, by the hardware keystore | Built |
-| Enrolling a new fingerprint permanently invalidates the biometric key | Built |
 | Deleted files' ciphertext and old index copies are overwritten with random data; their keys are dropped | Built |
 | App data excluded from Android cloud backup and device-to-device transfer | Built |
 
@@ -153,15 +152,15 @@ downloaded or what was on the phone.
   Nothing an app does survives that.
 - **Hardware attacks on the secure element** beyond what the vendor defends against.
 - **Being watched while unlocking** the real vault (camera, shoulder-surfing
-  the PIN). The lock screen avoids showing gesture directions, but the PIN keypad
-  can be observed.
+  the PIN). The PIN field hides what is typed, but the keyboard can be
+  observed. A long passphrase is harder to shoulder-surf than 6 digits.
 - **Proving the decoy is the only vault.** Deniability means "can't be proven",
   not "will be believed".
 - **iOS.** It currently runs PIN-only, with a software device-binding secret.
 
 ## 5. Assumptions
 
-- The phone has a secure lock screen. Android requires this for biometric-bound keys.
+- The phone has a secure lock screen, so the hardware keystore is protected at rest.
 - The hardware keystore behaves as documented by the vendor.
 - The real and decoy PINs are different from each other and from the phone's
   own unlock PIN. (The app rejects a decoy PIN equal to the real one.)

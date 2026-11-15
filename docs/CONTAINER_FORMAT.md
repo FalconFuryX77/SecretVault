@@ -22,10 +22,9 @@ composition itself has not been externally reviewed.
 | Purpose | Primitive | Parameters |
 |---|---|---|
 | Authenticated encryption | AES-256-GCM | 96-bit random nonce, 128-bit tag |
-| Password stretching | Argon2id | PIN: 64 MiB, 3 passes, p=1 · Gesture: 16 MiB, 3 passes, p=1 · 32-byte output |
+| Password stretching | Argon2id | 64 MiB, 3 passes, p=1 · 32-byte output |
 | Device binding | HMAC-SHA256 under a non-exportable Android Keystore key (`db0`, StrongBox if available) | |
 | Key derivation | HKDF-SHA256 | 32-byte output |
-| Biometric release | AES-256-GCM key in Android Keystore (`k0`–`k3`), auth-per-use with `BIOMETRIC_STRONG`, invalidated on new enrolment | |
 | Random filler | AES-256-GCM keystream under a throwaway random key | |
 
 `seal(key, plaintext, aad)` produces `nonce(12) ‖ ciphertext ‖ tag(16)`, a
@@ -48,8 +47,7 @@ Chunk 0 (header, 65536 bytes)
 
 Record r (8192 bytes, at 0x40 + r·8192)
   +0      PIN slot         60 bytes   seal(KEK_pin, VK, aad=[0x01, r])
-  +64     Gesture slot    156 bytes   seal(KEK_gesture, P, aad=[0x02, r])
-                                      P = len(2, big-endian) ‖ keystore blob ‖ random pad, 128 bytes
+  +64     (reserved)      156 bytes   random filler (see §12)
   +256    Superblock A   2076 bytes   seal(K_super, S, aad=[0x03, r, 0])
   +2332   Superblock B   2076 bytes   seal(K_super, S, aad=[0x03, r, 1])
   rest    random
@@ -64,27 +62,17 @@ created, and they can't be told apart from used ones.
 salt          = header[0:32]
 KEK_pin       = HKDF( HMAC_device( Argon2id("p:" ‖ PIN, salt, pin params) ),
                       salt, info="sv/pin-kek" )
-KEK_gesture   = HKDF( HMAC_device( Argon2id("g:" ‖ moves joined by ",", salt, gesture params) ),
-                      salt, info="sv/gesture-kek" )
 VK            = 32 random bytes per vault (never stored in the clear)
 K_super       = HKDF(VK, salt="sv/vault", info="superblock")
 K_index       = HKDF(VK, salt="sv/vault", info="index")
 K_file        = 32 random bytes per stored file, kept in the index
 ```
 
-The gesture slot doesn't contain VK. It contains a blob that only the
-biometric-bound keystore key `k<r>` can decrypt into VK. The gesture
-identifies the record; the biometric releases the key.
-
 ## 5. Unlocking
 
-**PIN:** derive `KEK_pin` once, then try to open the PIN slot of **all 4
+Derive `KEK_pin` once, then try to open the PIN slot of **all 4
 records**. Every record is always tried, so timing doesn't reveal which one
 matched. The first success yields `(r, VK)`.
-
-**Gesture:** derive `KEK_gesture` and try all 4 gesture slots. On a match,
-unwrap the blob with keystore key `k<r>` behind a `BiometricPrompt`. A failed
-or cancelled biometric yields nothing.
 
 Then read both superblocks of record `r` and keep the valid one with the
 higher generation.
@@ -173,5 +161,15 @@ the guarantee rests on the key being gone.
 - **PIN is not Unicode-normalised.**
 - **Versioning:** the format version lives only inside encrypted structures
   (`v` in the index). A future v2 must be detectable by trial decryption.
-- **Gesture entropy is low** (5 moves, length 4–8). Its protection comes from
-  the device binding and the biometric requirement, not from Argon2id.
+
+## 12. History: the removed gesture slot
+
+An earlier version stored a second slot at record offset +64 (156 bytes):
+a blob sealed under a key derived from a motion gesture, which a
+biometric-bound Android Keystore key (`k0`–`k3`) then unwrapped into VK.
+Gesture and fingerprint unlock were removed; unlock is PIN-only.
+
+The format did not change. New containers leave those bytes as random
+filler. Containers created by the old version may still hold a sealed blob
+there; it is never read, and the app deletes the `k0`–`k3` keystore keys on
+startup, so the blob can no longer be opened by anyone.

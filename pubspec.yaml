@@ -41,7 +41,6 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   uuid: ^4.5.1
   intl: ^0.19.0
-  google_fonts: ^6.2.1
   path_provider: ^2.1.5
   file_picker: ^8.1.4
   permission_handler: ^11.3.1
@@ -72,6 +71,15 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Bundled so the app never fetches fonts over the network (SIL OFL 1.1).
+  fonts:
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit-Variable.ttf
+    - family: FiraCode
+      fonts:
+        - asset: assets/fonts/FiraCode-Variable.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

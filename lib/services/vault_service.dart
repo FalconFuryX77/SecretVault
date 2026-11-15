@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import '../models/gesture.dart';
 import '../vault/platform_keys.dart';
 import 'security_channel_service.dart';
 import '../vault/vault_container.dart';
@@ -27,10 +26,7 @@ class VaultService {
   VaultService({VaultCrypto? crypto, Future<Directory> Function()? storageDir})
     : crypto =
           crypto ??
-          VaultCrypto(
-            binding: defaultDeviceBinding(),
-            biometrics: defaultBiometricKeystore(),
-          ),
+          VaultCrypto(binding: defaultDeviceBinding()),
       _dirProvider = storageDir ?? getApplicationSupportDirectory;
 
   VaultSession? get session => (_session?.isOpen ?? false) ? _session : null;
@@ -62,7 +58,6 @@ class VaultService {
   Future<VaultContainer> _container() async =>
       VaultContainer(await containerFile(), crypto);
 
-  Future<bool> biometricsAvailable() => crypto.biometrics.isAvailable();
 
   Future<VaultSession> create({
     required String pin,
@@ -85,20 +80,6 @@ class VaultService {
   Future<VaultSession?> unlockWithPin(String pin) async {
     await lock();
     final s = await (await _container()).unlockWithPin(pin);
-    _session = s;
-    if (s != null) await SecurityChannelService.setVaultOpen(true);
-    return s;
-  }
-
-  Future<VaultSession?> unlockWithGesture(
-    List<Gesture> gestures, {
-    required String reason,
-  }) async {
-    await lock();
-    final s = await (await _container()).unlockWithGesture(
-      gestures,
-      reason: reason,
-    );
     _session = s;
     if (s != null) await SecurityChannelService.setVaultOpen(true);
     return s;

@@ -4,9 +4,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Persists unlock throttling and lock preferences.
 ///
-/// Credentials are NOT stored here any more: the PIN and gesture are never
-/// stored at all. They derive the keys that open the vault container, so
-/// the only way to check one is to try to decrypt with it.
+/// Credentials are NOT stored here: a PIN is never stored at all. It derives
+/// the key that opens the vault container, so the only way to check one is
+/// to try to decrypt with it.
 class AuthService {
   static const _lockoutEndKey = 'lockout_end_time';
   static const _failedAttemptsKey = 'failed_attempts';

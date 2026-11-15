@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
-import '../models/gesture.dart';
+import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
