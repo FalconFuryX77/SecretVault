@@ -76,7 +76,9 @@ void main() {
       await s.close();
       final raw = String.fromCharCodes(await containerFile.readAsBytes());
       expect(raw.contains('TOPSECRET'), isFalse);
-      expect(raw.contains('"v"'), isFalse);
+      // A plaintext index would start like this. (A 3-byte probe such as
+      // '"v"' turns up by chance in a megabyte of random filler ~6% of runs.)
+      expect(raw.contains('{"v":'), isFalse);
     });
 
     test('a different device cannot unlock even with the right PIN', () async {
@@ -294,6 +296,104 @@ void main() {
       ).unlockWithPin('482913'))!;
       expect(s2.entries.length, 30);
       await s2.close();
+    });
+  });
+
+  group('review fixes', () {
+    Future<VaultSession> reopen(String pin) async =>
+        (await VaultContainer(containerFile, crypto).unlockWithPin(pin))!;
+
+    test("the decoy keeps its space after the real vault writes", () async {
+      // Before: the decoy's own new index chunk counted as a real-vault chunk,
+      // so its ceiling dropped to just above its index and its next import
+      // had to grow the file.
+      final s = await createVault(chunks: 64);
+      await s.importFile(await sourceFile('r1', 65508 * 4), _meta('r1', 'r1'));
+      await s.createDecoy(pin: '111222');
+      await s.importFile(await sourceFile('r2', 65508 * 4, seed: 2), _meta('r2', 'r2'));
+      await s.importFile(await sourceFile('r3', 65508 * 2, seed: 3), _meta('r3', 'r3'));
+      await s.close();
+      final size = await containerFile.length();
+      final d = await reopen('111222');
+      await d.importFile(await sourceFile('d1', 65508 * 10, seed: 4), _meta('d1', 'd1'));
+      await d.close();
+      expect(await containerFile.length(), size, reason: 'room below the ceiling, no growth');
+      final r = await reopen('482913');
+      expect(await r.readAll(r.entryById('r2')!), await File('${tmp.path}/r2').readAsBytes());
+      await r.close();
+    });
+
+    test('a lock arriving mid-save never loses the edit (with a decoy)', () async {
+      for (var round = 0; round < 6; round++) {
+        final s = await createVault(chunks: 32);
+        await s.createDecoy(pin: '111222');
+        await s.importBytes(Uint8List.fromList(List.filled(90000, 1)), _meta('t', 't.txt'));
+        final edited = Uint8List.fromList(List.filled(70000 + round, 2));
+        final item = s.entryById('t')!.item;
+        // Lock while the save is in flight; delay the lock a little more
+        // each round to land at different points.
+        final save = s.replaceContent('t', edited, item);
+        await Future<void>.delayed(Duration(milliseconds: round * 3));
+        final closing = s.close();
+        Object? err;
+        try {
+          await save;
+        } catch (e) {
+          err = e;
+        }
+        await closing;
+        final r = await reopen('482913');
+        final got = await r.readAll(r.entryById('t')!);
+        // Either the save happened or it didn't start: never a broken file.
+        expect(err == null ? got : null, err == null ? edited : null);
+        if (err != null) expect(got, Uint8List.fromList(List.filled(90000, 1)));
+        await r.close();
+        await containerFile.delete();
+      }
+    });
+
+    test('a file that changes size during import is refused, the vault intact', () async {
+      final s = await createVault(chunks: 80);
+      final src = await sourceFile('grows', 65508 * 40);
+      var shrunk = false;
+      await expectLater(
+        s.importFile(src, _meta('g', 'g'), onProgress: (_) {
+          if (!shrunk) {
+            shrunk = true;
+            final raf = src.openSync(mode: FileMode.append);
+            raf.truncateSync(65508 * 20 + 7);
+            raf.closeSync();
+          }
+        }),
+        throwsA(isA<StateError>()),
+      );
+      expect(s.entryById('g'), isNull);
+      await s.close();
+      final r = await reopen('482913');
+      expect(r.entries, isEmpty);
+      await r.close();
+    });
+
+    test('locking during a long import stops it and leaves the vault openable', () async {
+      final s = await createVault(chunks: 80);
+      final src = await sourceFile('big', 65508 * 60);
+      final import = s.importFile(src, _meta('big', 'big'));
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      final closing = s.close();
+      await expectLater(import, throwsA(anything));
+      await closing;
+      final r = await reopen('482913');
+      expect(r.entryById('big'), isNull);
+      await r.close();
+    });
+
+    test('the container grows in whole steps, whatever the import size', () async {
+      final s = await createVault(chunks: 4);
+      final size0 = await containerFile.length();
+      await s.importFile(await sourceFile('a', 65508 * 21), _meta('a', 'a'));
+      final grown = (await containerFile.length() - size0) ~/ ContainerLayout.chunkSize;
+      expect(grown % crypto.growChunks, 0, reason: 'grew by $grown chunks');
+      await s.close();
     });
   });
 
