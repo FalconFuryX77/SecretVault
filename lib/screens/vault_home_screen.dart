@@ -62,12 +62,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   void _showImportOptions() {
     showModalBottomSheet(
       context: context,
+      // A plain sheet is capped at 9/16 of the screen, which cut off the
+      // last option on smaller phones; let it size to its content and
+      // scroll if the screen is shorter still.
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF161B22),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
