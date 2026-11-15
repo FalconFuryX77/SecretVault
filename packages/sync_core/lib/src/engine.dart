@@ -92,8 +92,11 @@ class MemoryJournalStore implements JournalStore {
 /// Is this a "the connection dropped" error, as opposed to a real refusal?
 bool isTransient(Object e) =>
     e is SocketException ||
-    e is HandshakeException ||
-    e is TlsException ||
+    // A handshake cut off by a signal drop, but never a certificate the
+    // client refused: retrying that for hours would hide an interception.
+    ((e is HandshakeException || e is TlsException) &&
+        e is! CertificateException &&
+        !e.toString().contains('CERTIFICATE_VERIFY_FAILED')) ||
     e is TimeoutException ||
     e is http.ClientException ||
     e is HttpException ||
@@ -434,12 +437,20 @@ class SyncEngine {
   }
 
   /// Marks a file deleted in the log (pieces stay until pruning).
-  Future<void> deleteFile(String fileId, String version) async {
+  Future<void> deleteFile(String fileId, String version) => deleteVersions(fileId, [version]);
+
+  /// Marks [versions] of a file deleted, in one log record. A delete for a
+  /// version that isn't the live one changes nothing, so when it isn't known
+  /// which of several is live on the server, delete them all.
+  Future<void> deleteVersions(String fileId, List<String> versions) async {
+    if (versions.isEmpty) return;
+    final version = versions.first;
     await _withRetry(() async {
       for (var tries = 0;; tries++) {
         final j = await journal.load();
         final chain = ChainState.fromJson(((j['chain'] as Map?) ?? {'c': 0, 'h': ''}).cast<String, dynamic>());
-        final (counter, sealed) = await sealer.next(_device, chain, [LogOp.del(file: fileId, version: version)]);
+        final (counter, sealed) =
+            await sealer.next(_device, chain, [for (final v in versions) LogOp.del(file: fileId, version: v)]);
         try {
           await api.appendLog(counter, sealed);
         } on ApiException catch (e) {
@@ -484,8 +495,12 @@ class SyncEngine {
       try {
         final mSealed = await _withRetry(() => api.getPiece(op.manifestId!), () {});
         final m = Manifest.decode(await codec.open(op.manifestId!, mSealed, manifest: true));
-        final name = _uniqueName(_safeName((m.meta['title'] as String?) ?? m.file), used);
-        final t = File('${out.path}${Platform.pathSeparator}$name');
+        final name = _uniqueName(_safeName((m.meta['title'] as String?) ?? m.file), used, out);
+        final finalFile = File('${out.path}${Platform.pathSeparator}$name');
+        // Written beside its final name and renamed when verified, so a
+        // failure (or a killed process) never truncates or removes a file
+        // that was already there, e.g. from an earlier restore.
+        final t = File('${finalFile.path}.part');
         target = t;
         final sink = await t.open(mode: FileMode.write);
         final macSink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
@@ -503,7 +518,7 @@ class SyncEngine {
         if (hex((await macSink.mac()).bytes) != m.mac) {
           throw IntegrityException('file ${m.file} failed its end-to-end check');
         }
-        restored.add(t);
+        restored.add(await t.rename(finalFile.path));
       } catch (e) {
         final t = target;
         if (t != null && await t.exists()) await t.delete();
@@ -514,12 +529,14 @@ class SyncEngine {
     return restored;
   }
 
-  static String _uniqueName(String name, Set<String> used) {
+  static String _uniqueName(String name, Set<String> used, Directory dir) {
     var candidate = name;
     final dot = name.lastIndexOf('.');
     final stem = dot > 0 ? name.substring(0, dot) : name;
     final ext = dot > 0 ? name.substring(dot) : '';
-    for (var n = 2; used.contains(candidate.toLowerCase()); n++) {
+    bool taken(String c) =>
+        used.contains(c.toLowerCase()) || File('${dir.path}${Platform.pathSeparator}$c').existsSync();
+    for (var n = 2; taken(candidate); n++) {
       candidate = '$stem ($n)$ext';
     }
     used.add(candidate.toLowerCase());

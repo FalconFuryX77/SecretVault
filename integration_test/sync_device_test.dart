@@ -80,7 +80,12 @@ void main() {
     final sync = VaultSync();
     late final String secret;
     try {
-      secret = await sync.connect(session, server: serverUrl, invite: invite);
+      secret = await sync.connect(
+        session,
+        server: serverUrl,
+        invite: invite,
+        recoverySecret: VaultSync.newRecoverySecret(),
+      );
     } on SyncSetupException catch (e) {
       // ignore: avoid_print
       print('[sync] connect failed: ${e.message} | cause: ${e.cause}');

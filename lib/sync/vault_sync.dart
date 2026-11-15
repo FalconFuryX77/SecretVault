@@ -135,24 +135,30 @@ class VaultSync {
     return [for (var i = 0; i < h.length; i += 4) h.substring(i, i + 4)].join(' ');
   }
 
-  /// Creates an account on [server] for this vault and stores the device's
-  /// identity inside the vault. Returns the recovery secret, which is shown
-  /// to the user once and never stored on the phone.
-  Future<String> connect(VaultSession session, {required String server, String? invite}) async {
+  /// A new 32-byte recovery secret. Show it ([formatRecoverySecret]) and
+  /// have the user confirm it *before* calling [connect] with it, so an
+  /// account never exists without a recovery secret the user has.
+  static Uint8List newRecoverySecret() => randomBytes(32);
+
+  /// Creates an account on [server] for this vault, using [recoverySecret],
+  /// and stores the device's identity inside the vault. The recovery secret
+  /// is never stored on the phone. Returns it formatted.
+  Future<String> connect(
+    VaultSession session, {
+    required String server,
+    String? invite,
+    required Uint8List recoverySecret,
+  }) async {
     final uri = normalizeServer(server);
     final api = SyncApi(uri, timeout: const Duration(seconds: 20));
     try {
-      final (identity, secret) = await createAccount(api, invite: (invite ?? '').trim().isEmpty ? null : invite!.trim());
-      final formatted = formatRecoverySecret(secret);
-      // The recovery code is kept (inside the encrypted vault) until the
-      // user confirms writing it down: leaving the screen mid-connect must
-      // not lose the only way to recover the backup.
-      await session.putExtra(_configKey, {
-        'server': uri.toString(),
-        'identity': identity.toJson(),
-        'pendingSecret': formatted,
-      });
-      return formatted;
+      final (identity, secret) = await createAccount(
+        api,
+        invite: (invite ?? '').trim().isEmpty ? null : invite!.trim(),
+        recoverySecret: recoverySecret,
+      );
+      await session.putExtra(_configKey, {'server': uri.toString(), 'identity': identity.toJson()});
+      return formatRecoverySecret(secret);
     } on ApiException catch (e) {
       if (e.status == 403) throw SyncSetupException('The server refused that invite code.');
       throw SyncSetupException('The server answered with an error (${e.status}).');
@@ -167,16 +173,6 @@ class VaultSync {
     } finally {
       api.close();
     }
-  }
-
-  /// A recovery code not yet confirmed as written down, if any.
-  String? pendingRecoverySecret(VaultSession session) =>
-      (session.extras[_configKey] as Map?)?['pendingSecret'] as String?;
-
-  /// The user wrote the recovery code down: stop keeping it.
-  Future<void> confirmRecoverySecret(VaultSession session) async {
-    final cfg = Map<String, dynamic>.from((session.extras[_configKey] as Map?) ?? const {});
-    if (cfg.remove('pendingSecret') != null) await session.putExtra(_configKey, cfg);
   }
 
   /// Forgets the backup account on this phone. Nothing on the server is
@@ -255,11 +251,14 @@ class VaultSync {
       for (final id in jobs.keys.toList()) {
         if (current.contains(id)) continue;
         final job = jobs[id] as Map;
-        // A committed version, or (for an item deleted while a new version
-        // was half-sent) the committed version that one would have replaced.
-        final version = job['state'] == 'committed' ? job['version'] as String? : job['parent'] as String?;
-        if (version != null) {
-          await engine.deleteFile(id, version);
+        // Committed: that version. Half-sent: the new version may have
+        // reached the server's log even though this phone never heard back,
+        // so delete it and the version it replaced (whichever is live).
+        final versions = job['state'] == 'committed'
+            ? [job['version'] as String]
+            : [job['version'] as String?, job['parent'] as String?].whereType<String>().toList();
+        if (versions.isNotEmpty) {
+          await engine.deleteVersions(id, versions);
           removed++;
         }
         final fresh = await journal.load();
