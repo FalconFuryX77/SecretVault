@@ -80,11 +80,14 @@ after forcing an unlock of the phone itself, with time and tools.
 | Offline brute force is impossible: every guess must run on this phone's secure hardware | Built |
 | Deleted files' ciphertext and old index copies are overwritten with random data; their keys are dropped | Built |
 | App data excluded from Android cloud backup and device-to-device transfer | Built |
+| Viewing a file never writes a decrypted copy to storage: media is streamed from memory, documents are opened in memory (checked on a phone: no new files after every viewer ran) | Built |
+| The keyboard is asked not to learn anything typed in the vault (`IME_FLAG_NO_PERSONALIZED_LEARNING`), so notes don't end up in its suggestions. Gboard and most keyboards honour this; a keyboard app is free to ignore it | Built |
 
 **What the examiner still learns:**
 - The app is installed, and it holds a large high-entropy file. We don't hide
   that encrypted data exists, only how much and how many vaults.
-- The keystore holds a fixed set of keys (`db0`, `k0`–`k3`) regardless of setup.
+- The keystore holds one key (`db0`) regardless of setup. (Keys from the old
+  fingerprint unlock, `k0`–`k3`, are deleted on start.)
 - If the phone is seized **while the vault is unlocked**, keys are in RAM.
   Dart can't guarantee every copy is wiped. Locking (or the panic shake) closes
   the session and wipes the copies we control.
@@ -125,7 +128,7 @@ ISP, state-level monitoring, or a hostile Wi-Fi network.
 
 | Defence | Status |
 |---|---|
-| Release builds accept only `https://` servers (the server needs a TLS proxy in front; the reference stack doesn't include one) | Built |
+| Release builds accept only `https://` servers (the server needs a TLS proxy in front; the reference stack doesn't include one). The one exception is plain `http://` to the phone's own `127.0.0.1`, which only reaches a server through a USB tunnel and never crosses a network | Built |
 | Padded piece sizes | Built |
 | Routing over Tor | Not planned yet |
 
@@ -148,6 +151,25 @@ and the device's credentials.
 **Residual risk:** anything the seized device could already read stays exposed.
 Revocation stops *future* access; it can't take back what was already
 downloaded or what was on the phone.
+
+### A8. Booby-trapped file
+Someone sends you a document or recording crafted to exploit the software
+that opens it, hoping to reach the vault's keys.
+
+| Defence | Status |
+|---|---|
+| Vault files are only ever opened inside the app, never handed to another app | Built |
+| PDFs are parsed and drawn in an **isolated process**: its own throwaway uid, no permissions, no network, no access to the app's files, the vault or its keys. It receives the document as an in-memory file, returns pixels through shared memory, and is killed when the viewer closes | Built (verified on a phone: the renderer runs as `u0_i…`, the app as `u0_a…`) |
+| Word documents and text are parsed by memory-safe Dart code, with size limits against zip bombs and no DTD processing | Built |
+| Audio and video are unpacked by ExoPlayer's Java extractors (memory-safe) and decoded by Android's media codecs, which run in their own sandboxed system process | Built (platform) |
+| A file that fails its integrity check is refused, not opened | Built |
+| Images are decoded inside the app process by Flutter's native codecs | **Not sandboxed yet** |
+
+**What the attacker still gets:** a PDF renderer exploit can read the one
+document it was given. Reaching the vault would take a second bug that
+escapes Android's process sandbox. While media plays, a socket listens on a
+random 127.0.0.1 port; other apps on the phone could notice it, but without
+the 256-bit path in the URL they can't read from it.
 
 ## 4. Out of scope
 
@@ -177,6 +199,7 @@ downloaded or what was on the phone.
 | Duress PIN | Would destroy the real vault's key on entry. Risky if the coercer notices data vanished, so opt-in only, with a clear warning. Not built. |
 | Rollback of the container file | Restoring an older copy of the file isn't detected locally. |
 | PIN Unicode normalisation | Passphrases with accented characters aren't NFC-normalised yet, so different keyboards could produce different keys. |
+| Image decoding is not sandboxed | Images are decoded by Flutter's native codecs in the app process. Moving them to the isolated renderer, like PDFs, is planned. |
 | Decoy can't host its own decoy | By design; a decoy opened alone can't see the real vault, so a nested one could overwrite real data. |
 | Container format needs external review | It is a composition of standard primitives (see [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md)) and hasn't been reviewed by a third party. |
 | Locked background upload vs deniability | See decision D1 in [SYNC_DESIGN.md](SYNC_DESIGN.md#9-decision-d1-uploading-while-the-vault-is-locked). |

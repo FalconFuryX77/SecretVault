@@ -92,9 +92,14 @@ class VaultSync {
   static const String _configKey = 'sync.config';
   static const String _lastKey = 'sync.last';
 
-  /// Plain http:// is refused in release builds (Android blocks it there
-  /// too); debug builds allow it for testing against a local server.
+  /// Plain http:// is refused in release builds, except to this phone's
+  /// own loopback address (a server reached through a USB tunnel such as
+  /// `adb reverse`), where nothing crosses a network. Debug builds allow it
+  /// anywhere for testing. Android's network policy matches this.
   static const bool _allowHttp = !bool.fromEnvironment('dart.vm.product');
+
+  static bool _isLoopback(String host) =>
+      host == '127.0.0.1' || host == 'localhost' || host == '::1' || host == '[::1]';
 
   SyncStatus status(VaultSession session) {
     final extras = session.extras;
@@ -109,13 +114,13 @@ class VaultSync {
     );
   }
 
-  static Uri normalizeServer(String input) {
+  static Uri normalizeServer(String input, {bool allowHttp = _allowHttp}) {
     var text = input.trim();
     if (text.isEmpty) throw SyncSetupException('Enter the server address.');
     if (!text.contains('://')) text = 'https://$text';
     final uri = Uri.tryParse(text);
     if (uri == null || uri.host.isEmpty) throw SyncSetupException('That address is not valid.');
-    if (uri.scheme == 'http' && !_allowHttp) {
+    if (uri.scheme == 'http' && !allowHttp && !_isLoopback(uri.host)) {
       throw SyncSetupException('Use an https:// address. Plain http:// would expose who you are talking to.');
     }
     if (uri.scheme != 'https' && uri.scheme != 'http') {

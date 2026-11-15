@@ -223,4 +223,14 @@ void main() {
       api.close();
     });
   });
+
+  test('release builds take https, or http only to this phone itself', () {
+    Uri n(String s) => VaultSync.normalizeServer(s, allowHttp: false);
+    expect(n('backup.example.org').toString(), 'https://backup.example.org/');
+    expect(n('http://127.0.0.1:8080').toString(), 'http://127.0.0.1:8080/');
+    expect(n('http://localhost:8080').scheme, 'http');
+    expect(() => n('http://192.168.1.41:8080'), throwsA(isA<SyncSetupException>()));
+    expect(() => n('http://backup.example.org'), throwsA(isA<SyncSetupException>()));
+    expect(() => n('ftp://backup.example.org'), throwsA(isA<SyncSetupException>()));
+  });
 }
