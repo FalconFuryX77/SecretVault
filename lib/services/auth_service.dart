@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import 'security_channel_service.dart';
 
 /// Persists unlock throttling and lock preferences.
 ///
@@ -12,6 +15,7 @@ class AuthService {
   static const _failedAttemptsKey = 'failed_attempts';
   static const _lockoutCountKey = 'lockout_count';
   static const _lastFailureKey = 'last_failure';
+  static const _lockoutAnchorKey = 'lockout_anchor';
 
   /// Failed attempts and the lockout escalation are forgotten this long
   /// after the last failure, never by a successful unlock: otherwise anyone
@@ -33,9 +37,40 @@ class AuthService {
 
   Future<void> setLockoutEndTime(DateTime endTime) async {
     await _storage.write(key: _lockoutEndKey, value: endTime.toIso8601String());
+    // Also anchored to time since boot, so moving the phone's clock forward
+    // doesn't end a lockout early.
+    final clock = await SecurityChannelService.monotonicClock();
+    if (clock != null) {
+      final dur = endTime.difference(DateTime.now()).inMilliseconds;
+      await _storage.write(
+        key: _lockoutAnchorKey,
+        value: jsonEncode({'boot': clock.boot, 'end': clock.elapsed + dur, 'dur': dur}),
+      );
+    }
   }
 
   Future<DateTime?> getLockoutEndTime() async {
+    final anchorRaw = await _storage.read(key: _lockoutAnchorKey);
+    final clock = anchorRaw == null ? null : await SecurityChannelService.monotonicClock();
+    if (anchorRaw != null && clock != null) {
+      final a = jsonDecode(anchorRaw) as Map<String, dynamic>;
+      var remaining = (a['end'] as int) - clock.elapsed;
+      if (a['boot'] != clock.boot) {
+        // After a restart the clock since boot starts again from zero, so
+        // the lockout starts again too, in full.
+        remaining = a['dur'] as int;
+        await _storage.write(
+          key: _lockoutAnchorKey,
+          value: jsonEncode({'boot': clock.boot, 'end': clock.elapsed + remaining, 'dur': remaining}),
+        );
+      }
+      if (remaining <= 0) {
+        await _storage.delete(key: _lockoutAnchorKey);
+        await _storage.delete(key: _lockoutEndKey);
+        return null;
+      }
+      return DateTime.now().add(Duration(milliseconds: remaining));
+    }
     final val = await _storage.read(key: _lockoutEndKey);
     if (val == null) return null;
     final dt = DateTime.tryParse(val);
@@ -50,6 +85,7 @@ class AuthService {
   /// counter is kept so the next lockout is longer.
   Future<void> clearLockout() async {
     await _storage.delete(key: _lockoutEndKey);
+    await _storage.delete(key: _lockoutAnchorKey);
     await _storage.write(key: _failedAttemptsKey, value: '0');
   }
 

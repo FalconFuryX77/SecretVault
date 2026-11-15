@@ -147,11 +147,15 @@ class VaultContainer {
       throw ArgumentError('container needs at least 2 chunks');
     }
     await file.parent.create(recursive: true);
-    final raf = await file.open(mode: FileMode.write);
+    // Built under a temporary name and moved into place only when complete:
+    // the app treats an existing container as "set up", and one cut off
+    // half-way (before its PIN slot or first index) could never be opened.
+    final tmp = File('${file.path}.tmp');
+    final raf = await tmp.open(mode: FileMode.write);
     try {
       await crypto.bulk.fillRandom(
         raf,
-        file,
+        tmp,
         0,
         initialChunks * ContainerLayout.chunkSize,
         onProgress: onProgress,
@@ -161,21 +165,36 @@ class VaultContainer {
       await raf.close();
     }
 
-    final container = VaultContainer(file, crypto);
-    final session = await container._openSession();
+    final record = Random.secure().nextInt(ContainerLayout.recordCount);
+    final vk = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
+    final building = await VaultContainer(tmp, crypto)._openSession();
     try {
-      final record = Random.secure().nextInt(ContainerLayout.recordCount);
-      final vk = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
-      final kek = await crypto.pinKek(pin, session._salt);
-      await session._writePinSlot(record, kek, vk);
+      final kek = await crypto.pinKek(pin, building._salt);
+      await building._writePinSlot(record, kek, vk);
       CryptoPrimitives.wipe(kek);
       final root = await _OpenVault.fresh(
         record,
-        vk,
+        Uint8List.fromList(vk),
         VaultIndex(topDown: true, ceiling: initialChunks),
       );
-      session._root = root;
-      await session._writeIndex(root);
+      building._root = root;
+      await building._writeIndex(root);
+    } catch (_) {
+      await building.close();
+      try {
+        await tmp.delete();
+      } catch (_) {}
+      CryptoPrimitives.wipe(vk);
+      rethrow;
+    }
+    await building.close();
+    await tmp.rename(file.path);
+
+    // Reopen the finished file with the keys we already have (no second
+    // PIN derivation).
+    final session = await VaultContainer(file, crypto)._openSession();
+    try {
+      await session._loadRoot(record, vk);
       return session;
     } catch (_) {
       await session.close();
