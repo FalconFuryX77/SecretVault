@@ -178,7 +178,11 @@ void main() {
 
       final sync = VaultSync();
       expect(sync.status(session).isConnected, isFalse);
-      final secretText = await sync.connect(session, server: serverUrl.toString());
+      final secretText = await sync.connect(
+        session,
+        server: serverUrl.toString(),
+        recoverySecret: VaultSync.newRecoverySecret(),
+      );
       expect(secretText.split(' ').length, 16);
       final status = sync.status(session);
       expect(status.isConnected, isTrue);

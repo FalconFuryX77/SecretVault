@@ -96,7 +96,13 @@ class LogRecord(Base):
 
 
 def make_sessionmaker(db_url: str):
-    connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+    if db_url.startswith("sqlite"):
+        connect_args = {"check_same_thread": False}
+    elif db_url.startswith("postgresql"):
+        # A request stuck behind a lock fails instead of hanging the worker.
+        connect_args = {"options": "-c lock_timeout=10000 -c statement_timeout=60000"}
+    else:
+        connect_args = {}
     engine = create_engine(db_url, connect_args=connect_args, future=True)
     Base.metadata.create_all(engine)
     _migrate(engine)
@@ -104,9 +110,17 @@ def make_sessionmaker(db_url: str):
 
 
 def _migrate(engine) -> None:
-    """In-place upgrades for databases created by older versions."""
+    """In-place upgrades for databases created by older versions. Each runs
+    only when needed (an ALTER takes an exclusive lock on the table)."""
     if engine.dialect.name == "postgresql":
         from sqlalchemy import text
 
         with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE accounts ALTER COLUMN bytes_used TYPE BIGINT"))
+            kind = conn.execute(
+                text(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_name = 'accounts' AND column_name = 'bytes_used'"
+                )
+            ).scalar()
+            if kind == "integer":
+                conn.execute(text("ALTER TABLE accounts ALTER COLUMN bytes_used TYPE BIGINT"))

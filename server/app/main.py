@@ -85,6 +85,7 @@ class AppendLog(BaseModel):
 
 
 MAX_OPEN_UPLOADS = 64
+LOG_HEADROOM_BYTES = 16 * 1024 * 1024
 STAGING_TTL_SECONDS = 24 * 3600
 
 
@@ -426,13 +427,13 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
     def staging_path(account_id: str, piece_id: str) -> Path:
         return staging_root / account_id / piece_id
 
-    def reserve_quota(db: Session, account_id: str, n: int) -> None:
+    def reserve_quota(db: Session, account_id: str, n: int, headroom: int = 0) -> None:
         """Adds [n] bytes to the account's usage in one SQL statement, so
         concurrent uploads can't overwrite each other's update and slip past
         the quota. Part of the caller's transaction: a rollback releases it."""
         res = db.execute(
             update(Account)
-            .where(Account.id == account_id, Account.bytes_used + n <= settings.max_account_bytes)
+            .where(Account.id == account_id, Account.bytes_used + n <= settings.max_account_bytes + headroom)
             .values(bytes_used=Account.bytes_used + n)
         )
         if res.rowcount != 1:
@@ -553,23 +554,13 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
             # Same content name → already stored. Idempotent: never overwritten.
             response.status_code = 200
             return {"sha256": existing.sha256, "created": False}
-        account_or_404(db, account_id)
-        reserve_quota(db, account_id, len(data))
-        try:
-            await run_in_threadpool(blobs.put, account_id, piece_id, data)
-        except Exception:
-            db.rollback()
-            raise
-        db.add(Piece(account_id=account_id, id=piece_id, size=len(data), sha256=digest.hex()))
-        try:
-            db.commit()
-        except IntegrityError:  # a concurrent upload of the same piece won
-            db.rollback()
-            existing = db.get(Piece, (account_id, piece_id))
-            response.status_code = 200
-            return {"sha256": existing.sha256 if existing else digest.hex(), "created": False}
-        response.status_code = 201
-        return {"sha256": digest.hex(), "created": True}
+        acct = account_or_404(db, account_id)
+        # One worker thread does reserve → write → commit: the quota UPDATE
+        # holds the account row's lock until the commit, and holding it across
+        # an await let a second upload block the event loop on that lock.
+        result = await run_in_threadpool(store_piece, db, acct, piece_id, data, digest)
+        response.status_code = 201 if result["created"] else 200
+        return {"sha256": result["sha256"], "created": result["created"]}
 
     @app.get("/v1/pieces/{piece_id}")
     async def get_piece(
@@ -625,20 +616,25 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         if acct.append_only:
             # A seized phone must not be able to erase what already got out.
             require_recovery(db, acct, x_recovery_auth, "delete-pieces", raw)
-        deleted = 0
         for pid in body.ids:
             check_piece_id(pid)
-            p = db.get(Piece, (acct.id, pid))
-            if p is None:
-                continue
-            await run_in_threadpool(blobs.delete, acct.id, pid)
-            db.execute(
-                update(Account).where(Account.id == acct.id).values(bytes_used=Account.bytes_used - p.size)
-            )
-            db.delete(p)
-            deleted += 1
-        db.commit()
-        return {"deleted": deleted}
+
+        def _delete() -> int:
+            deleted = 0
+            for pid in body.ids:
+                p = db.get(Piece, (acct.id, pid))
+                if p is None:
+                    continue
+                blobs.delete(acct.id, pid)
+                db.execute(
+                    update(Account).where(Account.id == acct.id).values(bytes_used=Account.bytes_used - p.size)
+                )
+                db.delete(p)
+                deleted += 1
+            db.commit()
+            return deleted
+
+        return {"deleted": await run_in_threadpool(_delete)}
 
     # ── change log ──
 
@@ -656,7 +652,8 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         if body.counter != expected:
             raise HTTPException(409, {"error": "counter out of order", "expected": expected})
         # Log records take space too; they count toward the quota.
-        reserve_quota(db, account_id, len(record))
+        # Headroom so that, at quota, deletions can still be recorded.
+        reserve_quota(db, account_id, len(record), headroom=LOG_HEADROOM_BYTES)
         rec = LogRecord(account_id=account_id, device_id=device_id, counter=body.counter, record=record)
         db.add(rec)
         dev.last_counter = body.counter

@@ -35,24 +35,40 @@ class _BackupScreenState extends State<BackupScreen> {
     super.dispose();
   }
 
+  /// A code the user has confirmed but whose account couldn't be created
+  /// yet (no signal). Kept in memory only, so trying again doesn't need a
+  /// new code; gone when this screen closes or the vault locks.
+  Uint8List? _confirmedSecret;
+
   Future<void> _connect() async {
     final session = context.read<VaultService>().session;
     if (session == null || _busy) return;
     FocusScope.of(context).unfocus();
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
+    setState(() => _error = null);
+    try {
+      VaultSync.normalizeServer(_server.text);
+    } on SyncSetupException catch (e) {
+      setState(() => _error = e.message);
+      return;
+    }
+    // The code comes first: shown, written down and confirmed before the
+    // account exists. Nothing is created if the user backs out, and the
+    // code is never stored on the phone.
+    var secret = _confirmedSecret;
+    if (secret == null) {
+      final fresh = VaultSync.newRecoverySecret();
+      if (!await _confirmRecoverySecret(VaultSync.formatRecoverySecret(fresh)) || !mounted) return;
+      secret = fresh;
+      _confirmedSecret = fresh;
+    }
+    setState(() => _busy = true);
     try {
       // Busy: the inactivity lock waits for the account to be created.
-      final secret = await context.read<VaultService>().whileBusy(
-        () =>
-            _sync.connect(session, server: _server.text, invite: _invite.text),
-      );
-      if (!mounted) return;
-      setState(() => _busy = false);
-      await _showRecoverySecret(secret);
-      if (mounted) setState(() {});
+      await context.read<VaultService>().whileBusy(
+            () => _sync.connect(session, server: _server.text, invite: _invite.text, recoverySecret: secret!),
+          );
+      _confirmedSecret = null;
+      if (mounted) setState(() => _busy = false);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -63,78 +79,14 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
-  Future<void> _showRecoverySecret(String secret) {
-    return showDialog<void>(
+  /// Shows the code and asks for its last group back. True once confirmed.
+  Future<bool> _confirmRecoverySecret(String code) async {
+    final ok = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'Write this down now',
-          style: AppFonts.outfit(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This recovery code is the only way to get your backup onto a new phone, '
-                'or to cut off a phone that was taken. It is not stored on this phone and '
-                'will not be shown again. Keep it on paper, away from the phone.',
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0D1117),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: const Color(0xFFA78BFA).withValues(alpha: 0.4),
-                  ),
-                ),
-                // Not selectable: the clipboard (and keyboard clipboard
-                // history) is the last place this code should end up.
-                child: Text(
-                  secret,
-                  style: AppFonts.firaCode(
-                    fontSize: 15,
-                    color: Colors.white,
-                    height: 1.7,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFA78BFA),
-              foregroundColor: const Color(0xFF090D16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            onPressed: () async {
-              final session = context.read<VaultService>().session;
-              if (session != null) await _sync.confirmRecoverySecret(session);
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: Text(
-              'I wrote it down',
-              style: AppFonts.outfit(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
+      builder: (_) => _RecoveryCodeDialog(code: code),
     );
+    return ok == true;
   }
 
   Future<void> _backupNow() async {
@@ -239,11 +191,8 @@ class _BackupScreenState extends State<BackupScreen> {
   Widget build(BuildContext context) {
     final session = context.watch<VaultService>().session;
     final status = session == null ? const SyncStatus() : _sync.status(session);
-    final pendingSecret = session == null
-        ? null
-        : _sync.pendingRecoverySecret(session);
 
-    // No leaving mid-connect: the recovery code arrives at the end of it.
+    // No leaving while the account is being created.
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
@@ -278,45 +227,6 @@ class _BackupScreenState extends State<BackupScreen> {
                 style: AppFonts.outfit(fontSize: 13, color: Colors.white60),
               ),
               const SizedBox(height: 20),
-              if (status.isConnected && pendingSecret != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A1B0B),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF59E0B).withValues(alpha: 0.5),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Your recovery code hasn't been confirmed yet. Without it this backup can't be "
-                        'restored on another phone.',
-                        style: AppFonts.outfit(
-                          fontSize: 13,
-                          color: const Color(0xFFFCD34D),
-                        ),
-                      ),
-                      TextButton(
-                        key: const Key('show-recovery'),
-                        onPressed: () async {
-                          await _showRecoverySecret(pendingSecret);
-                          if (mounted) setState(() {});
-                        },
-                        child: Text(
-                          'Show recovery code',
-                          style: AppFonts.outfit(
-                            color: const Color(0xFFF59E0B),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
               if (!status.isConnected)
                 ..._buildConnectForm()
               else
@@ -510,4 +420,102 @@ class _BackupScreenState extends State<BackupScreen> {
       ),
     ),
   );
+}
+
+/// Shows the recovery code once and asks for its last group back. Owns its
+/// text controller, so it lives exactly as long as the dialog (including its
+/// closing animation).
+class _RecoveryCodeDialog extends StatefulWidget {
+  final String code;
+  const _RecoveryCodeDialog({required this.code});
+
+  @override
+  State<_RecoveryCodeDialog> createState() => _RecoveryCodeDialogState();
+}
+
+class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
+  final TextEditingController _typed = TextEditingController();
+
+  @override
+  void dispose() {
+    _typed.dispose();
+    super.dispose();
+  }
+
+  bool get _matches => _typed.text.trim().toLowerCase() == widget.code.split(' ').last;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF161B22),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text('Write this down first', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This recovery code is the only way to get your backup onto a new phone, '
+              'or to cut off a phone that was taken. It is never stored on this phone. '
+              'Keep it on paper, away from the phone.',
+              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0D1117),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.4)),
+              ),
+              // Not selectable: the clipboard (and keyboard clipboard
+              // history) is the last place this code should end up.
+              child: Text(
+                widget.code,
+                key: const Key('recovery-code'),
+                style: AppFonts.firaCode(fontSize: 15, color: Colors.white, height: 1.7),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'To confirm you have it, type its last four characters:',
+              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('recovery-confirm'),
+              controller: _typed,
+              autocorrect: false,
+              enableSuggestions: false,
+              enableIMEPersonalizedLearning: false,
+              onChanged: (_) => setState(() {}),
+              style: AppFonts.firaCode(color: Colors.white),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: const Color(0xFF0D1117),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text('Cancel', style: AppFonts.outfit(color: Colors.white54)),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFA78BFA),
+            foregroundColor: const Color(0xFF090D16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          onPressed: _matches ? () => Navigator.pop(context, true) : null,
+          child: Text('I wrote it down', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
 }

@@ -381,3 +381,35 @@ def test_quota_holds_under_concurrent_uploads(settings):
         codes = list(ex.map(put, blobs))
     assert codes.count(201) == 2, codes
     assert codes.count(413) == 6, codes
+
+
+def test_concurrent_uploads_to_one_account_do_not_stall_the_server(settings):
+    # From the second review: the quota UPDATE held the account row's lock
+    # across an await, so a second upload blocked the event loop forever.
+    # One TestClient context = one event loop, like a single uvicorn worker.
+    import concurrent.futures
+    import time
+
+    from app.blobstore import LocalBlobStore
+
+    class SlowBlobs(LocalBlobStore):
+        def put(self, account_id, piece_id, data):
+            time.sleep(0.4)
+            super().put(account_id, piece_id, data)
+
+    app = create_app(settings, blobs=SlowBlobs(settings.blob_dir))
+    with TestClient(app) as client:
+        acct = Account(client)
+        dev = acct.add_device()
+        auth = acct.login(dev)
+        blobs = [os.urandom(1000) for _ in range(4)]
+        start = time.time()
+
+        def put(data):
+            return client.put(f"/v1/pieces/{piece_id(data)}", content=data, headers=auth).status_code
+
+        with concurrent.futures.ThreadPoolExecutor(4) as ex:
+            codes = list(ex.map(put, blobs))
+        assert codes == [201] * 4
+        assert time.time() - start < 6
+        assert client.get("/health").status_code == 200

@@ -232,10 +232,12 @@ void main() {
       await t.enterText(find.widgetWithText(TextField, 'Server address'), syncServer);
       await t.enterText(find.widgetWithText(TextField, 'Invite code (if the server needs one)'), syncInvite);
       await tapWhenReady(t, find.text('Connect'));
-      await waitFor(t, find.text('I wrote it down'), timeout: const Duration(seconds: 40));
-      // The recovery code is on screen exactly once: 16 groups of 4 characters.
-      final code = t.widget<SelectableText>(find.byType(SelectableText)).data!;
+      // The code is shown and confirmed before the account is created.
+      await waitFor(t, find.byKey(const Key('recovery-code')));
+      final code = t.widget<Text>(find.byKey(const Key('recovery-code'))).data!;
       expect(RegExp(r'^([0-9a-f]{4} ){15}[0-9a-f]{4}$').hasMatch(code), isTrue);
+      await t.enterText(find.byKey(const Key('recovery-confirm')), code.split(' ').last);
+      await t.pump();
       await tapWhenReady(t, find.text('I wrote it down'));
       await waitFor(t, find.text('Not backed up yet'));
       final backupClock = Stopwatch()..start();
