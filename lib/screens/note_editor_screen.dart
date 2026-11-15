@@ -41,10 +41,22 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _contentController = TextEditingController(
       text: widget.existingItem?.content ?? '',
     );
+    _unlock = context.read<UnlockProvider>()..addBeforeLock(_flush);
+  }
+
+  late final UnlockProvider _unlock;
+
+  /// Saves pending typing now (system back, or the vault is locking).
+  void _flush() {
+    if (_autoSaveTimer?.isActive ?? false) {
+      _autoSaveTimer!.cancel();
+      _saveNote();
+    }
   }
 
   @override
   void dispose() {
+    _unlock.removeBeforeLock(_flush);
     _autoSaveTimer?.cancel();
     _titleController.dispose();
     _contentController.dispose();
@@ -93,7 +105,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   Widget build(BuildContext context) {
     final isSeed = widget.category == VaultCategory.keySecret;
 
-    return Scaffold(
+    return PopScope(
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) _flush();
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
         backgroundColor: const Color(0xFF161B22),
@@ -186,6 +202,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 }

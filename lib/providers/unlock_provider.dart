@@ -89,10 +89,20 @@ class UnlockProvider extends ChangeNotifier {
 
   bool get _shouldLockInBackground => _autoLockOnSwitch && _suppressAutoLock == 0;
 
+  Timer? _suppressedPauseTimer;
+
   void onAppPaused() {
     _backgrounded = true;
     if (_shouldLockInBackground) {
       lockVault();
+    } else if (_autoLockOnSwitch && _suppressAutoLock > 0 && state == UnlockState.unlocked) {
+      // A system screen (file picker, permission prompt) is up. If the user
+      // leaves it with Home instead of coming back, the vault must not stay
+      // open in the background indefinitely.
+      _suppressedPauseTimer?.cancel();
+      _suppressedPauseTimer = Timer(const Duration(minutes: 3), () {
+        if (_backgrounded && state == UnlockState.unlocked) lockVault();
+      });
     }
   }
 
@@ -111,6 +121,8 @@ class UnlockProvider extends ChangeNotifier {
     // The app never prompts on resume: an unprompted dialog would give away
     // that this is not a regular Files app.
     _backgrounded = false;
+    _suppressedPauseTimer?.cancel();
+    if (state == UnlockState.unlocked) _resetInactivityTimer();
   }
 
   // ─── Shake-to-lock ───────────────────────────────────────
@@ -242,9 +254,25 @@ class UnlockProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  final List<VoidCallback> _beforeLock = [];
+
+  /// Editors register here to save unsaved text when the vault locks. A
+  /// callback that starts a vault write synchronously gets it in before the
+  /// session closes (close waits for queued writes).
+  void addBeforeLock(VoidCallback cb) => _beforeLock.add(cb);
+  void removeBeforeLock(VoidCallback cb) => _beforeLock.remove(cb);
+
   void _resetLockState() {
     _inactivityTimer?.cancel();
+    _suppressedPauseTimer?.cancel();
     _stopShakeWatch();
+    if (_vault.isUnlocked) {
+      for (final cb in List.of(_beforeLock)) {
+        try {
+          cb();
+        } catch (_) {}
+      }
+    }
     _vault.lock();
   }
 
@@ -285,8 +313,9 @@ class UnlockProvider extends ChangeNotifier {
 
     _inactivityTimer = Timer(Duration(seconds: _inactivityTimeoutSeconds), () {
       if (state != UnlockState.unlocked) return;
-      if (_vault.isBusy) {
-        _resetInactivityTimer(); // don't cut off an import in progress
+      if (_vault.isBusy || _suppressAutoLock > 0) {
+        // Don't cut off an import, an export, or the user picking files.
+        _resetInactivityTimer();
       } else {
         lockVault();
       }

@@ -91,11 +91,12 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
     final c = _controller;
     if (c == null || _disposed) return;
     final v = c.value;
-    if (v.isPlaying) {
+    if (v.isPlaying && !v.isLooping) {
       // Watching or listening is activity: don't auto-lock mid-playback.
+      // A loop would keep the vault open forever, so it doesn't count.
       _unlock.onUserActivity();
     }
-    final wantScreenOn = widget.isVideo && v.isPlaying;
+    final wantScreenOn = widget.isVideo && v.isPlaying && !v.isLooping;
     if (wantScreenOn != _screenKeptOn) {
       _screenKeptOn = wantScreenOn;
       SecurityChannelService.setKeepScreenOn(wantScreenOn);

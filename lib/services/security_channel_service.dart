@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import '../config/features.dart';
 
@@ -29,9 +29,24 @@ class SecurityChannelService {
   static bool get isSecure => _vaultOpen || _holders > 0;
 
   /// Called by VaultService whenever a session opens or closes.
+  ///
+  /// On close, the window stays protected until a frame has been drawn
+  /// without the vault: the app may be in the background (no frames), and
+  /// the next frame shown on wake, or the recent-apps snapshot, must not
+  /// be an unprotected picture of the vault.
   static Future<void> setVaultOpen(bool open) async {
     _vaultOpen = open;
-    await _apply();
+    if (open) {
+      await _apply();
+      return;
+    }
+    try {
+      final binding = WidgetsBinding.instance;
+      binding.addPostFrameCallback((_) => _apply());
+      binding.scheduleFrame();
+    } catch (_) {
+      await _apply(); // no Flutter binding (plain unit tests)
+    }
   }
 
   /// `true` acquires a hold, `false` releases one (lock screen).
