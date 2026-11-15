@@ -34,10 +34,19 @@ class PdfSandbox(private val activity: Activity) {
     private val executor = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
-    // Touched only on [executor].
+    // Touched only on [executor], except [connection], which close() and
+    // the watchdog also clear from the main thread.
     private var binder: IBinder? = null
-    private var connection: ServiceConnection? = null
+    private val connection = java.util.concurrent.atomic.AtomicReference<ServiceConnection?>(null)
     private var pixels: SharedMemory? = null
+
+    companion object {
+        /** Treat everything the renderer says as hostile: it parses the PDF. */
+        const val MAX_PAGES = 20_000
+        const val MAX_POINTS = 14_400f // 200 inches, the PDF limit
+        const val OPEN_TIMEOUT_MS = 60_000L
+        const val RENDER_TIMEOUT_MS = 30_000L
+    }
 
     private class SandboxError(val code: String, message: String) : Exception(message)
 
@@ -47,9 +56,15 @@ class PdfSandbox(private val activity: Activity) {
             "render" -> run(result) {
                 render(call.argument<Int>("page")!!, call.argument<Int>("width")!!, call.argument<Int>("height")!!)
             }
-            "close" -> run(result) {
-                close()
-                true
+            "close" -> {
+                // Unbind right away on this (main) thread, not behind a call
+                // that may be stuck: Android then kills the isolated process,
+                // and a stuck transact fails with DeadObjectException.
+                unbindNow()
+                run(result) {
+                    close()
+                    true
+                }
             }
             else -> result.notImplemented()
         }
@@ -89,23 +104,30 @@ class PdfSandbox(private val activity: Activity) {
             activity.bindService(Intent(activity, PdfRenderService::class.java), conn, Context.BIND_AUTO_CREATE)
         }
         if (!ready.await(15, TimeUnit.SECONDS)) {
-            main.post { activity.unbindService(conn) }
+            main.post {
+                try {
+                    activity.unbindService(conn)
+                } catch (_: Exception) {
+                }
+            }
             throw SandboxError("failed", "the renderer did not start")
         }
-        connection = conn
+        connection.set(conn)
         binder = service
         return service!!
     }
 
     private fun unbind() {
-        val conn = connection ?: return
-        connection = null
         binder = null
-        main.post {
-            try {
-                activity.unbindService(conn)
-            } catch (_: Exception) {
-            }
+        main.post { unbindNow() }
+    }
+
+    /** Main thread only. */
+    private fun unbindNow() {
+        val conn = connection.getAndSet(null) ?: return
+        try {
+            activity.unbindService(conn)
+        } catch (_: Exception) {
         }
     }
 
@@ -113,16 +135,22 @@ class PdfSandbox(private val activity: Activity) {
         val b = connect()
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
+        // A renderer that never answers (an exploit, or a pathological file)
+        // is cut off: unbinding kills it and the call below then throws.
+        val watchdog = Runnable { unbindNow() }
+        main.postDelayed(watchdog, if (code == PdfRenderService.OPEN) OPEN_TIMEOUT_MS else RENDER_TIMEOUT_MS)
         try {
             data.writeInterfaceToken(PdfRenderService.DESCRIPTOR)
             write(data)
             b.transact(code, data, reply, 0)
+            main.removeCallbacks(watchdog)
             when (reply.readInt()) {
                 PdfRenderService.OK -> return read(reply)
                 PdfRenderService.PASSWORD -> throw SandboxError("password", "password-protected")
                 else -> throw SandboxError("broken", "the renderer could not read this document")
             }
         } finally {
+            main.removeCallbacks(watchdog)
             data.recycle()
             reply.recycle()
         }
@@ -145,9 +173,21 @@ class PdfSandbox(private val activity: Activity) {
                 @Suppress("UNCHECKED_CAST")
                 return transact(PdfRenderService.OPEN, { it.writeFileDescriptor(shared.fileDescriptor) }) { r ->
                     val count = r.readInt()
-                    val sizes = FloatArray(count * 2)
-                    r.readFloatArray(sizes)
-                    sizes.map { it.toDouble() }
+                    // Check before allocating anything the renderer sized:
+                    // writeFloatArray put a length int, then 2 floats a page.
+                    if (count !in 0..MAX_PAGES || r.dataAvail() < 4 + count * 8) {
+                        throw SandboxError("broken", "bad reply from the renderer")
+                    }
+                    if (r.readInt() != count * 2) throw SandboxError("broken", "bad reply from the renderer")
+                    val sizes = DoubleArray(count * 2)
+                    for (i in 0 until count * 2) {
+                        val v = r.readFloat()
+                        if (!v.isFinite() || v <= 0f || v > MAX_POINTS) {
+                            throw SandboxError("broken", "bad page size from the renderer")
+                        }
+                        sizes[i] = v.toDouble()
+                    }
+                    sizes.toList()
                 } as List<Double>
             } finally {
                 shared.close()
