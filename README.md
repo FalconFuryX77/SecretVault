@@ -2,6 +2,8 @@
 
 An encrypted file vault for Android, hidden inside a working file manager, built with Flutter. It is for people whose phones may be searched or seized: one PIN opens the real vault, a second PIN opens a harmless decoy.
 
+Website: **https://falconfuryx77.github.io/SecretVault/**
+
 **Status: v2.0.0, an early release.** It works end to end on real phones and is covered by the tests below, but it has not been independently audited. Don't make it the only copy of anything that matters yet.
 
 ## Install 📲

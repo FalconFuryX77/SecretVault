@@ -50,3 +50,6 @@ server/*.db
 server/**/__pycache__/
 server/.pytest_cache/
 server/staging/
+
+# Built landing page (site/build.sh)
+_site/
