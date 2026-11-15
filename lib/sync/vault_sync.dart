@@ -143,8 +143,16 @@ class VaultSync {
     final api = SyncApi(uri, timeout: const Duration(seconds: 20));
     try {
       final (identity, secret) = await createAccount(api, invite: (invite ?? '').trim().isEmpty ? null : invite!.trim());
-      await session.putExtra(_configKey, {'server': uri.toString(), 'identity': identity.toJson()});
-      return formatRecoverySecret(secret);
+      final formatted = formatRecoverySecret(secret);
+      // The recovery code is kept (inside the encrypted vault) until the
+      // user confirms writing it down: leaving the screen mid-connect must
+      // not lose the only way to recover the backup.
+      await session.putExtra(_configKey, {
+        'server': uri.toString(),
+        'identity': identity.toJson(),
+        'pendingSecret': formatted,
+      });
+      return formatted;
     } on ApiException catch (e) {
       if (e.status == 403) throw SyncSetupException('The server refused that invite code.');
       throw SyncSetupException('The server answered with an error (${e.status}).');
@@ -159,6 +167,16 @@ class VaultSync {
     } finally {
       api.close();
     }
+  }
+
+  /// A recovery code not yet confirmed as written down, if any.
+  String? pendingRecoverySecret(VaultSession session) =>
+      (session.extras[_configKey] as Map?)?['pendingSecret'] as String?;
+
+  /// The user wrote the recovery code down: stop keeping it.
+  Future<void> confirmRecoverySecret(VaultSession session) async {
+    final cfg = Map<String, dynamic>.from((session.extras[_configKey] as Map?) ?? const {});
+    if (cfg.remove('pendingSecret') != null) await session.putExtra(_configKey, cfg);
   }
 
   /// Forgets the backup account on this phone. Nothing on the server is
@@ -237,8 +255,11 @@ class VaultSync {
       for (final id in jobs.keys.toList()) {
         if (current.contains(id)) continue;
         final job = jobs[id] as Map;
-        if (job['state'] == 'committed') {
-          await engine.deleteFile(id, job['version'] as String);
+        // A committed version, or (for an item deleted while a new version
+        // was half-sent) the committed version that one would have replaced.
+        final version = job['state'] == 'committed' ? job['version'] as String? : job['parent'] as String?;
+        if (version != null) {
+          await engine.deleteFile(id, version);
           removed++;
         }
         final fresh = await journal.load();

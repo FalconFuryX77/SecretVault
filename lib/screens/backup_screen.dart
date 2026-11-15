@@ -44,7 +44,11 @@ class _BackupScreenState extends State<BackupScreen> {
       _error = null;
     });
     try {
-      final secret = await _sync.connect(session, server: _server.text, invite: _invite.text);
+      // Busy: the inactivity lock waits for the account to be created.
+      final secret = await context.read<VaultService>().whileBusy(
+        () =>
+            _sync.connect(session, server: _server.text, invite: _invite.text),
+      );
       if (!mounted) return;
       setState(() => _busy = false);
       await _showRecoverySecret(secret);
@@ -68,7 +72,10 @@ class _BackupScreenState extends State<BackupScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(
           'Write this down now',
-          style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+          style: AppFonts.outfit(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         content: SingleChildScrollView(
           child: Column(
@@ -88,11 +95,19 @@ class _BackupScreenState extends State<BackupScreen> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF0D1117),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.4)),
+                  border: Border.all(
+                    color: const Color(0xFFA78BFA).withValues(alpha: 0.4),
+                  ),
                 ),
-                child: SelectableText(
+                // Not selectable: the clipboard (and keyboard clipboard
+                // history) is the last place this code should end up.
+                child: Text(
                   secret,
-                  style: AppFonts.firaCode(fontSize: 15, color: Colors.white, height: 1.7),
+                  style: AppFonts.firaCode(
+                    fontSize: 15,
+                    color: Colors.white,
+                    height: 1.7,
+                  ),
                 ),
               ),
             ],
@@ -103,10 +118,19 @@ class _BackupScreenState extends State<BackupScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFA78BFA),
               foregroundColor: const Color(0xFF090D16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('I wrote it down', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+            onPressed: () async {
+              final session = context.read<VaultService>().session;
+              if (session != null) await _sync.confirmRecoverySecret(session);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: Text(
+              'I wrote it down',
+              style: AppFonts.outfit(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -134,7 +158,9 @@ class _BackupScreenState extends State<BackupScreen> {
             if (!mounted) return;
             setState(() {
               _progressValue = total == 0 ? 1 : done / total;
-              _progress = done >= total ? 'Finishing…' : 'Backing up ${done + 1} of $total: $title';
+              _progress = done >= total
+                  ? 'Finishing…'
+                  : 'Backing up ${done + 1} of $total: $title';
             });
           },
         ),
@@ -167,17 +193,26 @@ class _BackupScreenState extends State<BackupScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF161B22),
-        title: Text('Disconnect backup?', style: AppFonts.outfit(color: Colors.white)),
+        title: Text(
+          'Disconnect backup?',
+          style: AppFonts.outfit(color: Colors.white),
+        ),
         content: Text(
           'This phone forgets the backup account. Nothing already on the server is deleted, '
           'and you can still restore it with your recovery code.',
           style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Disconnect', style: TextStyle(color: Color(0xFFFB7185))),
+            child: const Text(
+              'Disconnect',
+              style: TextStyle(color: Color(0xFFFB7185)),
+            ),
           ),
         ],
       ),
@@ -204,66 +239,147 @@ class _BackupScreenState extends State<BackupScreen> {
   Widget build(BuildContext context) {
     final session = context.watch<VaultService>().session;
     final status = session == null ? const SyncStatus() : _sync.status(session);
+    final pendingSecret = session == null
+        ? null
+        : _sync.pendingRecoverySecret(session);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
-          onPressed: _busy ? null : () => Navigator.pop(context),
-        ),
-        title: Text('Backup', style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-          children: [
-            Text(
-              'Files are encrypted on this phone before they leave it. The server stores '
-              'scrambled pieces and never receives a key, a file name or anything readable.',
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white60),
+    // No leaving mid-connect: the recovery code arrives at the end of it.
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF090D16),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF161B22),
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white70,
+              size: 18,
             ),
-            const SizedBox(height: 20),
-            if (!status.isConnected) ..._buildConnectForm() else ..._buildConnected(status),
-            if (_progress != null) ...[
-              const SizedBox(height: 20),
-              LinearProgressIndicator(value: _progressValue, color: const Color(0xFFA78BFA)),
-              const SizedBox(height: 8),
+            onPressed: _busy ? null : () => Navigator.pop(context),
+          ),
+          title: Text(
+            'Backup',
+            style: AppFonts.outfit(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            children: [
               Text(
-                _progress!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                'Files are encrypted on this phone before they leave it. The server stores '
+                'scrambled pieces and never receives a key, a file name or anything readable.',
+                style: AppFonts.outfit(fontSize: 13, color: Colors.white60),
               ),
-            ],
-            if (_lastRun != null) ...[
               const SizedBox(height: 20),
-              _resultCard(_lastRun!),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE11D48).withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE11D48).withValues(alpha: 0.4)),
+              if (status.isConnected && pendingSecret != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A1B0B),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Your recovery code hasn't been confirmed yet. Without it this backup can't be "
+                        'restored on another phone.',
+                        style: AppFonts.outfit(
+                          fontSize: 13,
+                          color: const Color(0xFFFCD34D),
+                        ),
+                      ),
+                      TextButton(
+                        key: const Key('show-recovery'),
+                        onPressed: () async {
+                          await _showRecoverySecret(pendingSecret);
+                          if (mounted) setState(() {});
+                        },
+                        child: Text(
+                          'Show recovery code',
+                          style: AppFonts.outfit(
+                            color: const Color(0xFFF59E0B),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Text(_error!, style: AppFonts.outfit(color: const Color(0xFFFB7185), fontSize: 13)),
-              ),
+                const SizedBox(height: 16),
+              ],
+              if (!status.isConnected)
+                ..._buildConnectForm()
+              else
+                ..._buildConnected(status),
+              if (_progress != null) ...[
+                const SizedBox(height: 20),
+                LinearProgressIndicator(
+                  value: _progressValue,
+                  color: const Color(0xFFA78BFA),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _progress!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                ),
+              ],
+              if (_lastRun != null) ...[
+                const SizedBox(height: 20),
+                _resultCard(_lastRun!),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE11D48).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFFE11D48).withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Text(
+                    _error!,
+                    style: AppFonts.outfit(
+                      color: const Color(0xFFFB7185),
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
   }
 
   List<Widget> _buildConnectForm() => [
-    _field(_server, 'Server address', 'https://backup.example.org', TextInputType.url),
+    _field(
+      _server,
+      'Server address',
+      'https://backup.example.org',
+      TextInputType.url,
+    ),
     const SizedBox(height: 12),
-    _field(_invite, 'Invite code (if the server needs one)', '', TextInputType.text),
+    _field(
+      _invite,
+      'Invite code (if the server needs one)',
+      '',
+      TextInputType.text,
+    ),
     const SizedBox(height: 16),
     _primaryButton('Connect', _busy ? null : _connect),
     const SizedBox(height: 10),
@@ -284,11 +400,18 @@ class _BackupScreenState extends State<BackupScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Connected to', style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+          Text(
+            'Connected to',
+            style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+          ),
           const SizedBox(height: 2),
           Text(
             status.server ?? '',
-            style: AppFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+            style: AppFonts.outfit(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(height: 10),
           Text(
@@ -308,7 +431,10 @@ class _BackupScreenState extends State<BackupScreen> {
       alignment: Alignment.centerLeft,
       child: TextButton(
         onPressed: _busy ? null : _disconnect,
-        child: Text('Disconnect', style: AppFonts.outfit(color: Colors.white54, fontSize: 13)),
+        child: Text(
+          'Disconnect',
+          style: AppFonts.outfit(color: Colors.white54, fontSize: 13),
+        ),
       ),
     ),
   ];
@@ -324,7 +450,9 @@ class _BackupScreenState extends State<BackupScreen> {
       decoration: BoxDecoration(
         color: const Color(0xFF059669).withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.4)),
+        border: Border.all(
+          color: const Color(0xFF059669).withValues(alpha: 0.4),
+        ),
       ),
       child: Text(
         'Backup finished: ${parts.join(', ')}. '
@@ -334,8 +462,14 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
-  Widget _field(TextEditingController c, String label, String hint, TextInputType type) => TextField(
-    enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
+  Widget _field(
+    TextEditingController c,
+    String label,
+    String hint,
+    TextInputType type,
+  ) => TextField(
+    enableIMEPersonalizedLearning:
+        false, // keep vault text out of keyboard learning
     controller: c,
     enabled: !_busy,
     keyboardType: type,
@@ -350,7 +484,10 @@ class _BackupScreenState extends State<BackupScreen> {
       hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
       filled: true,
       fillColor: const Color(0xFF161B22),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
     ),
   );
 
@@ -367,7 +504,10 @@ class _BackupScreenState extends State<BackupScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(vertical: 14),
       ),
-      child: Text(label, style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold)),
+      child: Text(
+        label,
+        style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold),
+      ),
     ),
   );
 }

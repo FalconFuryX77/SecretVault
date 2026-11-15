@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -38,7 +39,9 @@ class Account(Base):
     recovery_keys: Mapped[list] = mapped_column(JSON)
     #: Exactly N opaque fixed-size slots (base64): SRKs wrapped under RS.
     escrow: Mapped[list] = mapped_column(JSON)
-    bytes_used: Mapped[int] = mapped_column(Integer, default=0)
+    #: 64-bit: a 32-bit column overflowed at 2 GiB on PostgreSQL, so every
+    #: account stopped backing up there (the default quota is 20 GiB).
+    bytes_used: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class Device(Base):
@@ -96,4 +99,14 @@ def make_sessionmaker(db_url: str):
     connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
     engine = create_engine(db_url, connect_args=connect_args, future=True)
     Base.metadata.create_all(engine)
+    _migrate(engine)
     return sessionmaker(engine, expire_on_commit=False, future=True)
+
+
+def _migrate(engine) -> None:
+    """In-place upgrades for databases created by older versions."""
+    if engine.dialect.name == "postgresql":
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE accounts ALTER COLUMN bytes_used TYPE BIGINT"))

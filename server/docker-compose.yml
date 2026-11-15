@@ -1,12 +1,16 @@
 # Reference deployment: API + PostgreSQL + MinIO, plus Toxiproxy for the
 # failure-injection harness (docs/SYNC_DESIGN.md §14).
 #
-#   docker compose up -d --build
-#   API direct:            http://localhost:8080
-#   API through Toxiproxy: http://localhost:18080  (inject drops/latency here)
+#   docker compose up -d --build                       API on :8080
+#   docker compose --profile harness up -d --build     plus Toxiproxy on 127.0.0.1:18080
 #
-# Change every password below before running anywhere but your own machine,
-# and put TLS in front of the API (e.g. Caddy) for real use.
+# Before running anywhere but your own machine: change every password below,
+# set SYNC_INVITE_CODES to a secret of your own (the server warns while it is
+# the development code), and put TLS in front of the API (e.g. Caddy).
+#
+# Admin interfaces (MinIO console, Toxiproxy) listen on 127.0.0.1 only:
+# Toxiproxy's API has no authentication and can open a route to any service
+# on the internal network, including the database.
 
 services:
   db:
@@ -28,7 +32,7 @@ services:
       MINIO_ROOT_USER: sync
       MINIO_ROOT_PASSWORD: change-me-minio
     volumes: [miniodata:/data]
-    ports: ["9001:9001"]
+    ports: ["127.0.0.1:9001:9001"]
 
   api:
     build: .
@@ -49,9 +53,10 @@ services:
 
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:2.9.0
+    profiles: [harness]
     command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
     volumes: ["./harness/toxiproxy.json:/config/toxiproxy.json:ro"]
-    ports: ["8474:8474", "18080:18080"]
+    ports: ["127.0.0.1:8474:8474", "127.0.0.1:18080:18080"]
     depends_on: [api]
 
 volumes:
