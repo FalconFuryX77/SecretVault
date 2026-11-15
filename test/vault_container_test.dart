@@ -303,6 +303,16 @@ void main() {
     Future<VaultSession> reopen(String pin) async =>
         (await VaultContainer(containerFile, crypto).unlockWithPin(pin))!;
 
+    test('setup builds the container under a temporary name and leaves none behind', () async {
+      final s = await createVault();
+      expect(await File('${containerFile.path}.tmp').exists(), isFalse);
+      await s.importBytes(Uint8List.fromList([1, 2, 3]), _meta('x', 'x'));
+      await s.close();
+      final r = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+      expect(await r.readAll(r.entryById('x')!), [1, 2, 3]);
+      await r.close();
+    });
+
     test("the decoy keeps its space after the real vault writes", () async {
       // Before: the decoy's own new index chunk counted as a real-vault chunk,
       // so its ceiling dropped to just above its index and its next import

@@ -89,6 +89,18 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                // For lockouts: time since boot can't be moved from Settings
+                // the way the wall clock can.
+                "clock" -> result.success(
+                    mapOf(
+                        "elapsed" to android.os.SystemClock.elapsedRealtime(),
+                        "boot" to android.provider.Settings.Global.getInt(
+                            contentResolver,
+                            android.provider.Settings.Global.BOOT_COUNT,
+                            -1,
+                        ),
+                    ),
+                )
                 "setKeepScreenOn" -> {
                     if (call.argument<Boolean>("on") == true) {
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -294,6 +306,7 @@ class MainActivity : FlutterActivity() {
         chunkSize: Int,
     ): List<ByteArray> {
         val k = SecretKeySpec(key, "AES")
+        key.fill(0) // SecretKeySpec keeps its own copy
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         return plains.mapIndexed { i, plain ->
             val out = ByteArray(chunkSize)
@@ -315,6 +328,7 @@ class MainActivity : FlutterActivity() {
 
     private fun gcmOpenChunks(key: ByteArray, sealed: List<ByteArray>, aads: List<ByteArray>): List<ByteArray> {
         val k = SecretKeySpec(key, "AES")
+        key.fill(0) // SecretKeySpec keeps its own copy
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         return sealed.mapIndexed { i, s ->
             if (s.size < GCM_IV_LEN + GCM_TAG_BITS / 8) throw ChunkAuthException(i)

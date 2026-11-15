@@ -62,6 +62,19 @@ class SecurityChannelService {
     await _apply();
   }
 
+  /// Milliseconds since boot and the boot count, which, unlike the wall
+  /// clock, can't be changed from Settings. Null where unavailable.
+  static Future<({int elapsed, int boot})?> monotonicClock() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>('clock');
+      if (m == null) return null;
+      return (elapsed: (m['elapsed'] as num).toInt(), boot: (m['boot'] as num).toInt());
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Keeps the screen on while a video plays. Audio doesn't: when the
   /// screen goes off the app is backgrounded, the vault locks and playback
   /// stops, which is the point.
