@@ -104,6 +104,15 @@ void main() {
     // ignore: avoid_print
     print('[rec] in-app: ${recordings().single.title}, ${recordings().single.fileSizeBytes} bytes');
 
+    // ── 1b. Long recordings are split into parts (here every ~2.8 s) ──
+    await VaultRecorder.record(pub, rotateFrames: 120);
+    await until((s) => s.recording, 'the split recording to start');
+    await hold(5);
+    await VaultRecorder.stop();
+    await until((s) => !s.recording, 'the split recording to stop');
+    expect(await vault.importRecordings(), 2, reason: 'two parts moved in');
+    expect(recordings(), hasLength(3));
+
     // ── 2. Volume-down ×3, and recording on after the vault locks ──
     await VaultRecorder.arm(pub, vibrate: false, alwaysListen: true);
     await until((s) => s.armed && s.armedKey == myId, 'arming');
@@ -129,7 +138,7 @@ void main() {
     session = (await svc.unlockWithPin(pin))!;
     expect(await vault.importRecordings(), 1);
     expect(await VaultRecorder.pending(), isEmpty);
-    expect(recordings(), hasLength(2));
+    expect(recordings(), hasLength(4));
 
     // The locked recording plays in the vault's own player.
     final locked = recordings().firstWhere((i) => i.createdAt.isAfter(started.startedAt!.add(const Duration(seconds: 2))));
@@ -156,7 +165,7 @@ void main() {
       print('[rec] wake');
       await hold(2, pump: false);
       expect(await vault.importRecordings(), 1);
-      expect(recordings(), hasLength(3));
+      expect(recordings(), hasLength(5));
     }
 
     await VaultRecorder.disarm();

@@ -45,7 +45,18 @@ class OpenedRecording {
   /// False if the recording was cut short (the phone died or the app was
   /// killed mid-recording); everything up to the last second is kept.
   final bool complete;
-  const OpenedRecording(this.data, this.ext, this.startedAt, this.duration, this.complete);
+
+  /// This vault's recording, but with no audio in it (the recorder failed
+  /// before it captured anything): discard it.
+  final bool empty;
+  const OpenedRecording(this.data, this.ext, this.startedAt, this.duration, this.complete) : empty = false;
+  OpenedRecording.empty()
+      : data = Uint8List(0),
+        ext = '',
+        startedAt = DateTime.fromMillisecondsSinceEpoch(0),
+        duration = Duration.zero,
+        complete = false,
+        empty = true;
 }
 
 /// The native recorder (RecorderService.kt): records into files encrypted
@@ -83,7 +94,10 @@ class VaultRecorder {
 
   static Future<void> disarm() => _channel.invokeMethod('disarm');
 
-  static Future<void> record(Uint8List publicKey) => _channel.invokeMethod('record', {'key': publicKey});
+  /// [rotateFrames] is for tests: start a new file after that many frames
+  /// instead of every 30 minutes.
+  static Future<void> record(Uint8List publicKey, {int? rotateFrames}) =>
+      _channel.invokeMethod('record', {'key': publicKey, 'rotateFrames': ?rotateFrames});
 
   static Future<void> stop() => _channel.invokeMethod('stop');
 
@@ -106,6 +120,7 @@ class VaultRecorder {
   static Future<OpenedRecording?> open(String id, Uint8List privateKey) async {
     final m = await _channel.invokeMapMethod<String, Object?>('open', {'id': id, 'key': privateKey});
     if (m == null) return null;
+    if (m['empty'] == true) return OpenedRecording.empty();
     return OpenedRecording(
       m['data'] as Uint8List,
       m['ext'] as String,

@@ -36,6 +36,7 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
     super.initState();
     final session = context.read<VaultService>().session;
     if (session != null) _vibrate = RecordingKeys.vibrate(session);
+    _poll = Timer.periodic(const Duration(seconds: 1), (_) => _refresh());
     _init();
   }
 
@@ -43,7 +44,10 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
     final session = context.read<VaultService>().session;
     if (session != null) _myKey = await RecordingKeys.id(session);
     await _refresh();
-    _poll = Timer.periodic(const Duration(seconds: 1), (_) => _refresh());
+  }
+
+  void _setError(String? e) {
+    if (mounted) setState(() => _error = e);
   }
 
   Future<void> _refresh() async {
@@ -66,7 +70,7 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
     try {
       if (on) {
         if (!await ensureMicrophone(context)) {
-          setState(() => _error = 'The microphone permission is needed.');
+          _setError('The microphone permission is needed.');
           return;
         }
         if (!mounted) return;
@@ -83,9 +87,9 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
         if (_armedHere == on) break;
         await Future<void>.delayed(const Duration(milliseconds: 150));
       }
-      if (on && !_armedHere) setState(() => _error = 'Could not arm: ${_status.error ?? 'unknown error'}');
+      if (on && !_armedHere) _setError('Could not arm: ${_status.error ?? 'unknown error'}');
     } catch (e) {
-      setState(() => _error = 'Could not change it: $e');
+      _setError('Could not change it: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -185,6 +189,9 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
                       'play it back; it moves into this vault the next time you unlock it. The other vault never sees it.'),
                   _point('Stays armed', 'until you turn it off, the phone restarts, or Android stops the app. On '
                       'Samsung phones, set the app\'s battery use to Unrestricted so it isn\'t stopped.'),
+                  _point('Unlock soon after:', 'until you unlock this vault, its recordings wait, encrypted, '
+                      'in the app\'s storage. Nobody can play them, but a forensic examination of the phone could '
+                      'show that recordings exist that the vault you opened can\'t read.'),
                   _point('Android shows it:', 'the green microphone dot appears while recording, and the system '
                       'lists the app as running. If music or a video is playing, the volume keys control that instead.'),
                 ],

@@ -60,7 +60,9 @@ class MainActivity : FlutterActivity() {
                 mainHandler.post { result.success(value) }
             } catch (e: ChunkAuthException) {
                 mainHandler.post { result.error("auth", e.index.toString(), null) }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: an OutOfMemoryError here would
+                // otherwise kill the app.
                 mainHandler.post { result.error("bulk", e.message, null) }
             }
         }
@@ -207,20 +209,22 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "disarm" -> {
-                    if (RecorderService.armed || RecorderService.recording) {
-                        startService(recorderIntent(RecorderService.ACTION_DISARM))
-                    }
+                    if (RecorderService.running) startService(recorderIntent(RecorderService.ACTION_DISARM))
                     result.success(true)
                 }
                 "record" -> {
                     startRecorderService(
                         recorderIntent(RecorderService.ACTION_RECORD)
-                            .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!),
+                            .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!)
+                            .putExtra(
+                                RecorderService.EXTRA_ROTATE_FRAMES,
+                                call.argument<Int>("rotateFrames") ?: RecorderThread.FRAMES_PER_FILE,
+                            ),
                     )
                     result.success(true)
                 }
                 "stop" -> {
-                    if (RecorderService.recording) startService(recorderIntent(RecorderService.ACTION_STOP))
+                    if (RecorderService.running) startService(recorderIntent(RecorderService.ACTION_STOP))
                     result.success(true)
                 }
                 "pending" -> {
@@ -240,6 +244,8 @@ class MainActivity : FlutterActivity() {
                         val rec = if (file.exists()) RecordingReader.open(file, key) else null
                         if (rec == null) {
                             null
+                        } else if (rec.frames.isEmpty() || rec.sampleRate == 0) {
+                            mapOf("empty" to true)
                         } else {
                             val (data, ext) = RecordingPacker.pack(rec)
                             rec.wipe()

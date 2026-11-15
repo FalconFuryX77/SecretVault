@@ -57,6 +57,9 @@ class RecorderService : Service() {
         const val EXTRA_VIBRATE = "vibrate"
         const val EXTRA_ALWAYS_LISTEN = "alwaysListen"
 
+        /** Tests only: start a new file after this many frames. */
+        const val EXTRA_ROTATE_FRAMES = "rotateFrames"
+
         private const val NOTIFICATION_ID = 7
         private const val CHANNEL_ID = "background"
         private const val PRESS_WINDOW_MS = 1500L
@@ -67,6 +70,9 @@ class RecorderService : Service() {
         @Volatile var activeFile: File? = null
         @Volatile var lastError: String? = null
         @Volatile var triggers = 0
+
+        /** Whether a service instance exists (stop/disarm only make sense then). */
+        @Volatile var running = false
 
         /** Short hashes of the keys in use, so each vault sees only its own state. */
         @Volatile var armedKeyId: String? = null
@@ -87,6 +93,14 @@ class RecorderService : Service() {
     private var worker: RecorderThread? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private val presses = ArrayDeque<Long>()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var destroyed = false
+    private var rotateFrames = RecorderThread.FRAMES_PER_FILE
+
+    override fun onCreate() {
+        super.onCreate()
+        running = true
+    }
 
     /** Debug builds only: release builds log nothing about the recorder. */
     private fun debug(msg: String) {
@@ -100,7 +114,7 @@ class RecorderService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_ARM -> {
-                goForeground()
+                if (!goForeground()) return START_NOT_STICKY
                 armedKey = intent.getByteArrayExtra(EXTRA_KEY)
                 vibrate = intent.getBooleanExtra(EXTRA_VIBRATE, true)
                 alwaysListen = intent.getBooleanExtra(EXTRA_ALWAYS_LISTEN, false)
@@ -116,9 +130,10 @@ class RecorderService : Service() {
                 stopIfIdle()
             }
             ACTION_RECORD -> {
-                goForeground()
+                if (!goForeground()) return START_NOT_STICKY
+                rotateFrames = intent.getIntExtra(EXTRA_ROTATE_FRAMES, RecorderThread.FRAMES_PER_FILE)
                 val key = intent.getByteArrayExtra(EXTRA_KEY)
-                if (key != null) startRecording(key) else stopIfIdle()
+                if (key == null || !startRecording(key)) stopIfIdle()
             }
             ACTION_STOP -> {
                 stopRecording()
@@ -131,16 +146,22 @@ class RecorderService : Service() {
     }
 
     override fun onDestroy() {
-        stopRecording()
+        destroyed = true
+        // The recorder thread finishes its file on its own and then clears
+        // the recording state (recorderEnded).
+        worker?.requestStop()
         stopListening()
         armed = false
         armedKey = null
+        armedKeyId = null
+        running = false
         super.onDestroy()
     }
 
     // ─── Foreground notification ────────────────────────────────────
 
-    private fun goForeground() {
+    /** False if Android refused (no microphone permission, not on screen). */
+    private fun goForeground(): Boolean {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
@@ -169,16 +190,18 @@ class RecorderService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, n)
             }
+            return true
         } catch (e: Exception) {
             // No microphone permission, or not started from the screen.
             lastError = "could not start: ${e.message}"
             armed = false
             stopSelf()
+            return false
         }
     }
 
     private fun stopIfIdle() {
-        if (armed || recording) return
+        if (armed || recording || destroyed) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -273,23 +296,26 @@ class RecorderService : Service() {
     // ─── Recording ──────────────────────────────────────────────────
 
     private fun startRecording(vaultKey: ByteArray): Boolean {
-        if (recording) return true
+        if (recording) {
+            if (recordingKeyId == keyId(vaultKey)) return true
+            // Another vault's recording holds the microphone. Say so the way
+            // any busy microphone would, without naming who has it.
+            lastError = "microphone busy"
+            return false
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             lastError = "microphone permission missing"
             return false
         }
-        val name = ByteArray(12).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-        val file = File(stagingDir(this), "$name.bin")
-        val t = RecorderThread(file, vaultKey) { error ->
-            lastError = error
-            // The recorder stopped on its own (e.g. the mic was taken).
-            recording = false
-            activeFile = null
-            releaseWakeLock()
-        }
+        val t = RecorderThread(
+            stagingDir(this),
+            vaultKey,
+            framesPerFile = rotateFrames,
+            onFile = { file -> activeFile = file },
+            onEnded = { thread, error -> main.post { recorderEnded(thread, error) } },
+        )
         lastError = null
         worker = t
-        activeFile = file
         recordingKeyId = keyId(vaultKey)
         startedAtMs = System.currentTimeMillis()
         recording = true
@@ -298,13 +324,21 @@ class RecorderService : Service() {
         return true
     }
 
+    /** Asks the recorder to finish; [recorderEnded] runs once it has. */
     private fun stopRecording() {
-        val t = worker ?: return
+        worker?.requestStop()
+    }
+
+    /** On the main thread, after the recorder thread has closed its file. */
+    private fun recorderEnded(t: RecorderThread, error: String?) {
+        if (worker !== t) return
         worker = null
-        t.finish()
+        if (error != null) lastError = error
         recording = false
         activeFile = null
+        recordingKeyId = null
         releaseWakeLock()
+        stopIfIdle()
     }
 
     private fun acquireWakeLock() {
@@ -325,27 +359,40 @@ class RecorderService : Service() {
 }
 
 /**
- * Microphone → AAC encoder → encrypted segments. [finish] stops it and waits
- * for the file to be completed.
+ * Microphone → AAC encoder → encrypted segments. Starts a new file every
+ * [FRAMES_PER_FILE] frames (30 minutes), so no single recording is too big
+ * to decrypt in memory when it moves into the vault, and a finished part
+ * can move in while recording goes on. [requestStop] asks it to finish.
  */
 class RecorderThread(
-    private val file: File,
+    private val dir: File,
     private val vaultKey: ByteArray,
-    private val onFailed: (String) -> Unit,
+    private val framesPerFile: Int = FRAMES_PER_FILE,
+    private val onFile: (File) -> Unit,
+    private val onEnded: (RecorderThread, String?) -> Unit,
 ) : Thread("recorder") {
     @Volatile private var running = true
 
     companion object {
         const val SAMPLE_RATE = 44100
         const val BIT_RATE = 64000
+        const val FRAMES_PER_FILE = 30 * 60 * SAMPLE_RATE / 1024
 
         /** Stop before the phone runs out of space. */
         const val MIN_FREE_BYTES = 200L * 1024 * 1024
     }
 
-    fun finish() {
+    fun requestStop() {
         running = false
-        join(10_000)
+    }
+
+    private fun newWriter(): RecordingWriter {
+        val name = ByteArray(12).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+        val file = File(dir, "$name.bin")
+        // Marked active before it exists, so it's never offered for import
+        // while it's being written.
+        onFile(file)
+        return RecordingWriter(file, vaultKey)
     }
 
     override fun run() {
@@ -354,8 +401,10 @@ class RecorderThread(
         var codec: MediaCodec? = null
         var failed: String? = null
         try {
-            writer = RecordingWriter(file, vaultKey)
-            val startedAt = System.currentTimeMillis()
+            writer = newWriter()
+            var fileStartedAt = System.currentTimeMillis()
+            var csd: ByteArray? = null
+            var framesInFile = 0
             val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             @Suppress("MissingPermission")
             val rec = AudioRecord(
@@ -382,6 +431,7 @@ class RecorderThread(
             val info = MediaCodec.BufferInfo()
             var samples = 0L
             var eosSent = false
+            var eosDeadline = 0L
             var done = false
             var frameBuf = ByteArray(2048)
             var lastSpaceCheck = 0L
@@ -406,59 +456,74 @@ class RecorderThread(
                         if (idx >= 0) {
                             enc.queueInputBuffer(idx, 0, 0, samples * 1_000_000L / SAMPLE_RATE, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             eosSent = true
+                            eosDeadline = SystemClock.elapsedRealtime() + 3000
                         }
                     }
+                } else if (SystemClock.elapsedRealtime() > eosDeadline) {
+                    // An encoder that never reports end-of-stream mustn't
+                    // hold the file open forever.
+                    break
                 }
                 var out = enc.dequeueOutputBuffer(info, if (eosSent) 10_000 else 0)
                 while (out != MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (out == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         val csdBuf = enc.outputFormat.getByteBuffer("csd-0")
-                        val csd = ByteArray(csdBuf?.remaining() ?: 0).also { csdBuf?.get(it) }
-                        writer.config(startedAt, SAMPLE_RATE, 1, csd)
+                        val c = ByteArray(csdBuf?.remaining() ?: 0).also { csdBuf?.get(it) }
+                        csd = c
+                        writer!!.config(fileStartedAt, SAMPLE_RATE, 1, c)
                     } else if (out >= 0) {
                         val buf = enc.getOutputBuffer(out)!!
                         if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 && info.size > 0) {
                             if (frameBuf.size < info.size) frameBuf = ByteArray(info.size)
                             buf.position(info.offset)
                             buf.get(frameBuf, 0, info.size)
-                            writer.frame(frameBuf, 0, info.size)
+                            writer!!.frame(frameBuf, 0, info.size)
+                            framesInFile++
                         }
                         enc.releaseOutputBuffer(out, false)
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             done = true
                             break
                         }
+                        val c = csd
+                        if (framesInFile >= framesPerFile && c != null && running) {
+                            writer!!.finish()
+                            fileStartedAt = System.currentTimeMillis()
+                            writer = newWriter()
+                            writer.config(fileStartedAt, SAMPLE_RATE, 1, c)
+                            framesInFile = 0
+                        }
                     }
                     out = enc.dequeueOutputBuffer(info, 0)
                 }
-                writer.flushIfDue()
+                writer!!.flushIfDue()
                 val now = SystemClock.elapsedRealtime()
                 if (running && now - lastSpaceCheck > 10_000) {
                     lastSpaceCheck = now
-                    if (file.parentFile!!.usableSpace < MIN_FREE_BYTES) {
+                    if (dir.usableSpace < MIN_FREE_BYTES) {
                         failed = "storage almost full"
                         running = false
                     }
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             failed = e.message ?: e.toString()
         } finally {
             try {
                 record?.stop()
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
             }
             record?.release()
             try {
                 codec?.stop()
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
             }
             codec?.release()
             try {
                 writer?.finish()
-            } catch (_: Exception) {
+            } catch (_: Throwable) {
             }
         }
-        if (failed != null) onFailed(failed!!)
+        onEnded(this, failed)
     }
 }
