@@ -1,9 +1,12 @@
 <title>SecretVault</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="A file manager on the outside. An encrypted vault, a decoy and hardware-bound keys on the inside. Built for people whose phones get searched.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<!-- Fonts are served from this site (the app's own typefaces, SIL OFL), so
+     a visit doesn't tell a font service who is reading about this app. -->
+<style>
+@font-face { font-family: "Outfit"; src: url("fonts/Outfit-Variable.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Fira Code"; src: url("fonts/FiraCode-Variable.ttf") format("truetype"); font-weight: 300 700; font-display: swap; }
+</style>
 <style>
 /* Layout: a dossier. The hero holds a phone you can actually unlock; below it the layers peel from outside in, then specs, then limits. */
 :root {
@@ -17,9 +20,9 @@
   --decoy: #9a6411;
   --redact: #14181e;
 
-  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-display: "Outfit", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Outfit", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, "Cascadia Code", Consolas, monospace;
 
   --step--1: 0.8125rem;
   --step-0: 1rem;
@@ -312,7 +315,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="ctas">
         <a class="btn btn-primary" href="https://github.com/FalconFuryX77/SecretVault/releases/latest">Download v2.0.0 for Android</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault">See the source</a>
-        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/THREAT_MODEL.md">Read the threat model</a>
+        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
       <div class="facts">
         <span>AES-256-GCM</span><span>Argon2id + hardware keystore</span><span>Decoy PIN</span><span>Backs up only to your server</span>
@@ -466,7 +469,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="eyebrow">Specs</div>
       <h2>Standard parts, documented</h2>
       <p>No home-made ciphers. Every piece is a well-studied building block, and the way they fit together is written down byte by byte so anyone can check it.</p>
-      <p><a href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/CONTAINER_FORMAT.md">Read the container format</a></p>
+      <p><a href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/CONTAINER_FORMAT.md">Read the container format</a></p>
     </div>
     <div class="table-scroll">
       <table>
@@ -528,8 +531,8 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
     <nav aria-label="Documents">
       <a href="https://github.com/FalconFuryX77/SecretVault/releases/latest">Download</a>
       <a href="https://github.com/FalconFuryX77/SecretVault">Source</a>
-      <a href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/THREAT_MODEL.md">Threat model</a>
-      <a href="https://github.com/FalconFuryX77/SecretVault/blob/feat/real-crypto-container/docs/SYNC_DESIGN.md">Sync design</a>
+      <a href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/THREAT_MODEL.md">Threat model</a>
+      <a href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/SYNC_DESIGN.md">Sync design</a>
     </nav>
   </div>
 </footer>
