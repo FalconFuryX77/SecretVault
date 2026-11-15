@@ -4,8 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
+import 'export_dialog.dart';
 import 'recorder_screen.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
 import '../models/vault_item.dart';
@@ -820,25 +820,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (action == 'open') {
       _openItem(item);
     } else if (action == 'export') {
-      Directory? exportDir = await getDownloadsDirectory();
-      exportDir ??= await getApplicationDocumentsDirectory();
-      if (!mounted) return;
-      final res = await context.read<VaultProvider>().exportFile(
-        item,
-        exportDir,
-      );
-      if (!mounted) return;
-      if (res != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF059669),
-            content: Text(
-              'Exported to ${res.path}',
-              style: AppFonts.outfit(color: Colors.white),
-            ),
-          ),
-        );
-      }
+      await exportWithConfirmation(context, item);
     } else if (action == 'rename') {
       final controller = TextEditingController(text: item.title);
       final newName = await showDialog<String>(
@@ -896,7 +878,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         await context.read<VaultProvider>().renameItem(item, newName);
       }
     } else if (action == 'delete') {
-      if (!mounted) return;
+      if (!mounted || !await confirmShred(context, item.title) || !mounted) return;
       await context.read<VaultProvider>().deleteItem(item);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

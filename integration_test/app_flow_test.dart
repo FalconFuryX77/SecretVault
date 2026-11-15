@@ -176,8 +176,11 @@ void main() {
     expect(find.text(noteTitle), findsNothing);
     await tapWhenReady(t, find.byTooltip('Settings'));
     await waitFor(t, find.text('Change PIN'));
-    expect(find.text('DECOY VAULT'), findsNothing);
-    expect(find.text('Set Up Decoy Vault'), findsNothing);
+    // The decoy's Settings look like a lone real vault's: the same decoy
+    // section, offering to set one up (it can't be told apart at a glance).
+    expect(find.text('DECOY VAULT'), findsOneWidget);
+    expect(find.text('Set Up Decoy Vault'), findsOneWidget);
+    expect(find.text('Change Decoy PIN'), findsNothing);
     await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
     await waitFor(t, find.text('Add File'));
     await lock(t);

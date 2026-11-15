@@ -298,10 +298,25 @@ class VaultProvider extends ChangeNotifier {
   /// Writes a decrypted copy to [destinationDir]. This deliberately leaves
   /// plaintext outside the vault, so only call it on explicit user request.
   Future<File?> exportFile(VaultItem item, Directory destinationDir) async {
-    final entry = _session.entryById(item.id);
+    final session = _session;
+    final entry = session.entryById(item.id);
     if (entry == null || entry.fileKey == null) return null;
-    final out = File(p.join(destinationDir.path, p.basename(item.title)));
-    await _session.exportTo(entry, out);
+    // Never overwrite an earlier export with the same name.
+    final base = p.basenameWithoutExtension(item.title);
+    final ext = p.extension(item.title);
+    var out = File(p.join(destinationDir.path, '$base$ext'));
+    for (var n = 1; await out.exists(); n++) {
+      out = File(p.join(destinationDir.path, '$base ($n)$ext'));
+    }
+    try {
+      await _vault.whileBusy(() => session.exportTo(entry, out));
+    } catch (_) {
+      // Don't leave half a plaintext file behind.
+      try {
+        if (await out.exists()) await out.delete();
+      } catch (_) {}
+      rethrow;
+    }
     return out;
   }
 
