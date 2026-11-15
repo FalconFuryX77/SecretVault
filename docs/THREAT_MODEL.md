@@ -60,6 +60,7 @@ Forces you to "open the vault" or hand over the PIN, under threat.
 | Container has 4 key records whether 1 or 2 are in use; unused ones are random bytes | Built |
 | Decoy can never be made to reveal the real vault's key: only the real vault knows about the decoy, not the other way round | Built |
 | Optional duress PIN that silently destroys the real vault's key | Not built (would be opt-in; see §6) |
+| Each vault has its own recording key and sees only its own recordings and recorder state; opening the decoy never reveals the real vault's recordings | Built |
 
 **Residual risk:** the coercer may not believe there is only one vault. The
 cryptography can't prove that a second vault *doesn't* exist, but it also
@@ -81,11 +82,17 @@ after forcing an unlock of the phone itself, with time and tools.
 | Deleted files' ciphertext and old index copies are overwritten with random data; their keys are dropped | Built |
 | App data excluded from Android cloud backup and device-to-device transfer | Built |
 | Viewing a file never writes a decrypted copy to storage: media is streamed from memory, documents are opened in memory (checked on a phone: no new files after every viewer ran) | Built |
+| Recordings made while the vault is locked are encrypted to the vault's public key (ECDH P-256 + AES-256-GCM, a fresh key per recording). The phone can write them but can't read them back; the private key exists only inside the encrypted vault index | Built |
 | The keyboard is asked not to learn anything typed in the vault (`IME_FLAG_NO_PERSONALIZED_LEARNING`), so notes don't end up in its suggestions. Gboard and most keyboards honour this; a keyboard app is free to ignore it | Built |
 
 **What the examiner still learns:**
 - The app is installed, and it holds a large high-entropy file. We don't hide
   that encrypted data exists, only how much and how many vaults.
+- Recordings waiting to move into a vault sit encrypted in the app's private
+  storage until the next unlock, so their number and sizes show that
+  something was recorded (not what, or for which vault).
+- While the hidden recorder is armed, Android lists the app as running, and
+  the system privacy log records microphone use.
 - The keystore holds one key (`db0`) regardless of setup. (Keys from the old
   fingerprint unlock, `k0`–`k3`, are deleted on start.)
 - If the phone is seized **while the vault is unlocked**, keys are in RAM.
