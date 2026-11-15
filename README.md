@@ -21,6 +21,7 @@ Download the APK from the [latest release](https://github.com/FalconFuryX77/Secr
   * **PDFs** are drawn by Android's PDF engine in an *isolated process*: its own throwaway user id with no permissions, no network and no access to the vault. A booby-trapped PDF that compromises the renderer gets nothing.
   * **Word documents and text** are read by memory-safe Dart code, with limits against zip bombs. Text files can be edited and saved in place.
   * **Images** are shown from memory.
+* **Record straight into the vault.** Record audio from inside the vault, or arm the *hidden recorder*: with the screen off, press volume-down three times to start recording and three more to stop, without unlocking or looking at the phone. Recordings are encrypted as they're captured to a key only the vault can open, so recording works with the vault locked, the phone can't play them back, and they move into the vault the next time you unlock it. The decoy never sees the real vault's recordings.
 * **No screenshots, no keyboard learning.** Vault screens are blocked from screenshots, screen recording and the recent-apps preview, and the keyboard is told not to learn anything typed in the vault.
 * **Authenticated encryption.** Files are streamed in 64 KB chunks, each sealed with AES-256-GCM under a per-file key. Any modified, swapped, reordered or truncated chunk is detected and refused, never shown. Large files never have to fit in memory.
 * **One container, no tells.** Everything (both vaults, all metadata) lives in a single pre-allocated file of ciphertext and random filler. It has no headers or markers, its size doesn't track how much you store, and there are always 4 key slots whether 1 or 2 are in use.
@@ -38,6 +39,7 @@ Download the APK from the [latest release](https://github.com/FalconFuryX77/Secr
 * The app needs the internet permission for backup. It makes no connections until backup is set up, and then only to the server you entered. Release builds accept `https://` servers, or plain `http://` only to the phone's own `127.0.0.1` (a server reached through a USB tunnel such as `adb reverse`).
 * Images are decoded by Flutter's built-in image codecs inside the app process; unlike PDFs they are not sandboxed yet.
 * Not viewable inside the app yet: spreadsheets, slides, old `.doc` files, password-protected PDFs.
+* The hidden recorder shows up the way Android requires: the green microphone dot while recording, and the app listed as running while armed. It must be armed from inside the vault, and again after a restart. If music or a video is playing, the volume keys control that instead. On Samsung phones, set the app's battery use to Unrestricted so Android doesn't stop it.
 
 ### Design docs
 * [Threat model](docs/THREAT_MODEL.md): who this protects against, what each adversary still learns, and what's out of scope.
@@ -61,6 +63,7 @@ flutter run
 | On-device core | `flutter test integration_test/vault_device_test.dart -d <device>` | Real Android Keystore binding, native AES-GCM, production Argon2id, timings |
 | In-vault viewers | `bash tool/device_test.sh integration_test/viewers_device_test.dart <device>` | Video/audio via private 127.0.0.1 stream, seek, PDF in isolated process, Word, text edit+save, tampered file refused, no files left behind |
 | On-device UI flow | `bash tool/device_test.sh integration_test/app_flow_test.dart <device> [--dart-define=SYNC_SERVER=http://127.0.0.1:8080]` | Setup → note → lock → covert reopen → wrong PIN → decoy → file viewer, FLAG_SECURE state; with a server, the Backup screen too |
+| Recorder | `bash tool/recorder_phone_test.sh <device>` | Recording in the vault, volume-down ×3 with the screen on and off, recording while locked, another vault's key refused, move into the vault on unlock, playback |
 | Per-chunk benchmarks | `flutter test integration_test/bench_test.dart -d <device>` | Channel/IO/crypto costs |
 | Sync server | `cd server && python -m pytest -q -s` | API, auth, append-only, log ordering, resumability under a flaky link |
 | Phone → server → restore | `bash tool/sync_phone_test.sh <device>` | Backs up a vault from the phone to a running server, restores it on the PC from the recovery code, compares SHA-256 |

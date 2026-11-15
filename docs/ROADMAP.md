@@ -5,16 +5,11 @@ Collected from the project discussions; last updated 2026-11-16, at v2.0.0.
 
 ## Next up
 
-- [ ] **Audio recorder inside the vault.** Record straight into encrypted
-      storage; recordings play in the in-vault player.
-- [ ] **Screen-off recording trigger.** Arm it from inside the vault; then
-      volume-down ×3 starts and stops recording with the screen off. Needs a
-      background service with a notification while armed, and has to be armed
-      while the app is open (Android 14+). Replaces the original "draw MIC on a
-      dark screen" idea, which Android doesn't allow apps to detect.
-- [ ] **Record while the vault is locked.** Recordings made while locked are
-      encrypted to a key only the vault can open, and move into the vault on
-      the next unlock. The decoy never sees them.
+- [x] **Audio recorder inside the vault** (v2.1.0).
+- [x] **Screen-off recording trigger**: volume-down ×3 (v2.1.0). Replaces the
+      original "draw MIC on a dark screen" idea, which Android doesn't let
+      apps detect. Still to confirm by hand on more phone makers.
+- [x] **Record while the vault is locked** (v2.1.0).
 - [ ] **Camera capture into the vault.** Photos (and later video) taken
       straight into encrypted storage, never touching the gallery.
 
