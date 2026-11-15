@@ -1,17 +1,15 @@
 package com.example.gesture_unlock
 
+import android.app.usage.StorageStatsManager
 import android.os.Build
+import android.os.Environment
+import android.os.StatFs
+import android.os.storage.StorageManager
 import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.view.WindowManager
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
-import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import android.os.Handler
 import android.os.Looper
@@ -29,15 +27,19 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-class MainActivity : FlutterFragmentActivity() {
+class MainActivity : FlutterActivity() {
     companion object {
         private const val SECURITY_CHANNEL = "com.example.secretvault/security"
         private const val KEYS_CHANNEL = "app.vault/keys"
+        private const val PDF_CHANNEL = "app.vault/pdf"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
         // Neutral alias names: nothing in the keystore says "vault".
         private const val DEVICE_HMAC_ALIAS = "db0"
-        private const val BIO_ALIAS_PREFIX = "k"
+
+        // Biometric-bound keys from an earlier version (gesture + fingerprint
+        // unlock, since removed). Deleted on startup so old slots are dead.
+        private val LEGACY_BIO_ALIASES = listOf("k0", "k1", "k2", "k3")
         private const val GCM_IV_LEN = 12
         private const val GCM_TAG_BITS = 128
     }
@@ -65,6 +67,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     private class ChunkAuthException(val index: Int) : Exception()
 
+    private val pdfSandbox by lazy { PdfSandbox(this) }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -82,7 +86,44 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     result.success(true)
                 }
+                "setKeepScreenOn" -> {
+                    if (call.argument<Boolean>("on") == true) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    result.success(true)
+                }
+                // Real storage totals for the cover file manager, the same
+                // figures the system's own Settings shows.
+                "storageStats" -> {
+                    try {
+                        val totals = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            val ssm = getSystemService(StorageStatsManager::class.java)
+                            ssm.getTotalBytes(StorageManager.UUID_DEFAULT) to
+                                ssm.getFreeBytes(StorageManager.UUID_DEFAULT)
+                        } else {
+                            val fs = StatFs(Environment.getDataDirectory().path)
+                            fs.totalBytes to fs.availableBytes
+                        }
+                        result.success(mapOf("total" to totals.first, "free" to totals.second))
+                    } catch (e: Exception) {
+                        result.error("storage", e.message, null)
+                    }
+                }
                 else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(messenger, PDF_CHANNEL).setMethodCallHandler { call, result ->
+            pdfSandbox.handle(call, result)
+        }
+
+        worker.execute {
+            try {
+                LEGACY_BIO_ALIASES.forEach { if (keyStore.containsAlias(it)) keyStore.deleteEntry(it) }
+            } catch (_: Exception) {
+                // Best effort; nothing depends on these keys any more.
             }
         }
 
@@ -90,19 +131,6 @@ class MainActivity : FlutterFragmentActivity() {
             try {
                 when (call.method) {
                     "deviceHmac" -> result.success(deviceHmac(call.argument<ByteArray>("data")!!))
-                    "bioAvailable" -> result.success(
-                        BiometricManager.from(this).canAuthenticate(BIOMETRIC_STRONG) ==
-                            BiometricManager.BIOMETRIC_SUCCESS
-                    )
-                    "bioEnsureSlots" -> {
-                        val count = call.argument<Int>("count") ?: 0
-                        for (i in 0 until count) {
-                            if (!keyStore.containsAlias(bioAlias(i))) generateBioKey(i)
-                        }
-                        result.success(true)
-                    }
-                    "bioWrap" -> bioWrap(call, result)
-                    "bioUnwrap" -> bioUnwrap(call, result)
                     "gcmSealChunks" -> inBackground(result) {
                         gcmSealChunks(
                             call.argument<ByteArray>("key")!!,
@@ -233,113 +261,5 @@ class MainActivity : FlutterFragmentActivity() {
             gen.init(spec(strongBox = false))
             gen.generateKey()
         }
-    }
-
-    // ─── Biometric-bound vault keys ─────────────────────────────────
-    //
-    // One AES key per container record. The hardware only lets it be used
-    // after a strong biometric, and it's destroyed if a new fingerprint is
-    // enrolled (so adding someone else's finger can't open the vault).
-
-    private fun bioAlias(slot: Int) = "$BIO_ALIAS_PREFIX$slot"
-
-    private fun generateBioKey(slot: Int): SecretKey {
-        val b = KeyGenParameterSpec.Builder(
-            bioAlias(slot),
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .setUserAuthenticationRequired(true)
-            .setInvalidatedByBiometricEnrollment(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            b.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-        } else {
-            @Suppress("DEPRECATION")
-            b.setUserAuthenticationValidityDurationSeconds(-1)
-        }
-        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        gen.init(b.build())
-        return gen.generateKey()
-    }
-
-    private fun bioKey(slot: Int): SecretKey =
-        (keyStore.getKey(bioAlias(slot), null) as? SecretKey) ?: generateBioKey(slot)
-
-    private fun bioWrap(call: MethodCall, result: MethodChannel.Result) {
-        val slot = call.argument<Int>("slot")!!
-        val data = call.argument<ByteArray>("data")!!
-        val reason = call.argument<String>("reason") ?: ""
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        try {
-            cipher.init(Cipher.ENCRYPT_MODE, bioKey(slot))
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            // Enrolling a fresh gesture: replace the dead key.
-            keyStore.deleteEntry(bioAlias(slot))
-            cipher.init(Cipher.ENCRYPT_MODE, generateBioKey(slot))
-        }
-        prompt(cipher, reason, result) { c -> c.iv + c.doFinal(data) }
-    }
-
-    private fun bioUnwrap(call: MethodCall, result: MethodChannel.Result) {
-        val slot = call.argument<Int>("slot")!!
-        val blob = call.argument<ByteArray>("data")!!
-        val reason = call.argument<String>("reason") ?: ""
-        if (blob.size <= GCM_IV_LEN) {
-            result.error("bad_blob", null, null)
-            return
-        }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        try {
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                bioKey(slot),
-                GCMParameterSpec(GCM_TAG_BITS, blob.copyOfRange(0, GCM_IV_LEN))
-            )
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            result.error("invalidated", "biometric enrollment changed", null)
-            return
-        }
-        prompt(cipher, reason, result) { c -> c.doFinal(blob.copyOfRange(GCM_IV_LEN, blob.size)) }
-    }
-
-    private fun prompt(
-        cipher: Cipher,
-        reason: String,
-        result: MethodChannel.Result,
-        onAuthenticated: (Cipher) -> ByteArray,
-    ) {
-        var replied = false
-        fun reply(block: () -> Unit) {
-            if (!replied) {
-                replied = true
-                block()
-            }
-        }
-        val callback = object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(r: BiometricPrompt.AuthenticationResult) {
-                reply {
-                    try {
-                        val c = r.cryptoObject?.cipher ?: throw IllegalStateException("no cipher")
-                        result.success(onAuthenticated(c))
-                    } catch (e: Exception) {
-                        result.error("crypto", e.message, null)
-                    }
-                }
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                reply { result.error("cancelled", errString.toString(), null) }
-            }
-            // onAuthenticationFailed = one bad finger; the prompt stays open.
-        }
-        val info = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(reason)
-            .setNegativeButtonText("Cancel")
-            .setAllowedAuthenticators(BIOMETRIC_STRONG)
-            .build()
-        BiometricPrompt(this, ContextCompat.getMainExecutor(this), callback)
-            .authenticate(info, BiometricPrompt.CryptoObject(cipher))
     }
 }

@@ -1,22 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:vibration/vibration.dart';
-import '../config/features.dart';
-import '../models/gesture.dart';
-import '../services/gesture_detector.dart';
+import '../models/vault_state.dart';
 import '../services/auth_service.dart';
+import '../services/shake_detector.dart';
 import '../services/vault_service.dart';
-import '../vault/platform_keys.dart';
 
-/// Drives the lock screen: collects motion gestures, unlocks the vault with
-/// gesture + biometric or with the PIN, and handles lockout, auto-lock and
-/// the panic shake.
+/// Drives unlocking and locking: PIN entry, lockout after failed attempts,
+/// auto-lock, and the hard-shake lock.
 ///
-/// The gesture is never compared against a stored value. It derives a key
-/// that can open a vault's gesture slot; that slot then needs the biometric
-/// before it releases the vault key. So the gesture alone unlocks nothing.
-class GestureUnlockProvider extends ChangeNotifier {
-  final GestureDetectorService _detector;
+/// The PIN is never compared against a stored value. It derives the key that
+/// opens a vault, so the only way to check a PIN is to try to decrypt with
+/// it. The real PIN opens the real vault; the decoy PIN opens the decoy.
+class UnlockProvider extends ChangeNotifier {
+  final ShakeDetector _shake;
   final AuthService _authService;
   final VaultService _vault;
 
@@ -26,26 +23,12 @@ class GestureUnlockProvider extends ChangeNotifier {
   bool _isSetupComplete = false;
   bool get isSetupComplete => _isSetupComplete;
 
-  bool _isAuthenticatingBiometrics = false;
-  bool get isAuthenticatingBiometrics => _isAuthenticatingBiometrics;
-
   final _unlockEventController = StreamController<VaultType>.broadcast();
   Stream<VaultType> get onVaultUnlocked => _unlockEventController.stream;
 
-  StreamSubscription? _panicSub;
+  StreamSubscription? _shakeSub;
   StreamSubscription? _lockedSub;
   bool _disposed = false;
-  StreamSubscription? _discreteSub;
-
-  /// Gesture sequences are 4–8 moves long. The sequence is submitted after a
-  /// short pause, or as soon as it reaches the maximum length.
-  static const int minPatternLength = 4;
-  static const int maxPatternLength = 8;
-  static const Duration submitPause = Duration(milliseconds: 1500);
-  List<Gesture> inputTrail = [];
-  Timer? _trailTimer;
-
-  static const String biometricReason = 'Confirm it\'s you';
 
   // Lockout State
   static const int maxFailedAttempts = 5;
@@ -62,14 +45,15 @@ class GestureUnlockProvider extends ChangeNotifier {
   int get inactivityTimeoutSeconds => _inactivityTimeoutSeconds;
   Timer? _inactivityTimer;
 
-  GestureUnlockProvider({
+  UnlockProvider({
     required VaultService vaultService,
-    GestureDetectorService? detector,
+    ShakeDetector? shakeDetector,
     AuthService? authService,
   }) : _vault = vaultService,
-       _detector = detector ?? GestureDetectorService(),
+       _shake = shakeDetector ?? ShakeDetector(),
        _authService = authService ?? AuthService() {
     _lockedSub = _vault.onLocked.listen((_) {
+      _stopShakeWatch();
       if (state == UnlockState.unlocked) {
         state = UnlockState.locked;
         notifyListeners();
@@ -90,12 +74,7 @@ class GestureUnlockProvider extends ChangeNotifier {
         _startLockoutCountdown(remaining);
       }
     }
-
     notifyListeners();
-
-    if (_isSetupComplete && state != UnlockState.lockout) {
-      _startListening();
-    }
   }
 
   Future<void> reloadSettings() async {
@@ -105,9 +84,13 @@ class GestureUnlockProvider extends ChangeNotifier {
   }
 
   int _suppressAutoLock = 0;
+  bool _backgrounded = false;
+
+  bool get _shouldLockInBackground => _autoLockOnSwitch && _suppressAutoLock == 0;
 
   void onAppPaused() {
-    if (_autoLockOnSwitch && _suppressAutoLock == 0) {
+    _backgrounded = true;
+    if (_shouldLockInBackground) {
       lockVault();
     }
   }
@@ -124,98 +107,27 @@ class GestureUnlockProvider extends ChangeNotifier {
   }
 
   void onAppResumed() {
-    // Never prompt biometrics on resume: an unprompted fingerprint dialog
-    // gives away that this is not a regular Files app.
+    // The app never prompts on resume: an unprompted dialog would give away
+    // that this is not a regular Files app.
+    _backgrounded = false;
   }
 
-  void _startListening() {
-    _stopListening();
-    if (!Features.gestures) return; // motion module switched off at build time
-    _detector.start();
+  // ─── Shake-to-lock ───────────────────────────────────────
+  //
+  // The motion sensor is read only while a vault is open. The cover app
+  // never touches it, and a shake while locked does nothing at all (no
+  // vibration, no state change) so it can't give the app away.
 
-    _panicSub = _detector.onPanicTriggered.listen((_) {
-      triggerPanicLock();
-    });
-
-    _discreteSub = _detector.gestures.listen((gesture) {
-      if (state == UnlockState.locked || state == UnlockState.recording) {
-        _onDiscreteGesture(gesture);
-      }
-    });
+  void _startShakeWatch() {
+    _stopShakeWatch();
+    _shake.start();
+    _shakeSub = _shake.onShake.listen((_) => triggerPanicLock());
   }
 
-  void _stopListening() {
-    _panicSub?.cancel();
-    _panicSub = null;
-    _discreteSub?.cancel();
-    _discreteSub = null;
-    _detector.stop();
-  }
-
-  // ─── Gesture entry ───────────────────────────────────────
-
-  void _onDiscreteGesture(Gesture gesture) {
-    if (state == UnlockState.lockout || state == UnlockState.authenticating) {
-      return;
-    }
-
-    _trailTimer?.cancel();
-    inputTrail.add(gesture);
-    _vibrateShort();
-
-    if (inputTrail.length >= maxPatternLength) {
-      _submitGesture();
-      return;
-    }
-    state = UnlockState.recording;
-    notifyListeners();
-    _trailTimer = Timer(submitPause, () {
-      if (inputTrail.length >= minPatternLength) {
-        _submitGesture();
-      } else {
-        inputTrail.clear();
-        state = UnlockState.locked;
-        notifyListeners();
-      }
-    });
-  }
-
-  Future<void> _submitGesture() async {
-    _trailTimer?.cancel();
-    final attempt = List<Gesture>.from(inputTrail);
-    state = UnlockState.authenticating;
-    _isAuthenticatingBiometrics = true;
-    notifyListeners();
-
-    bool ok = false;
-    try {
-      final session = await _vault.unlockWithGesture(
-        attempt,
-        reason: biometricReason,
-      );
-      if (session != null) {
-        ok = true;
-        await _onSuccessfulUnlock(session.type);
-      }
-    } on BiometricInvalidatedException {
-      // A new fingerprint was enrolled on the device; the vault's biometric
-      // key is gone by design. The PIN still works, then re-enroll.
-    } catch (_) {}
-
-    _isAuthenticatingBiometrics = false;
-    inputTrail.clear();
-    if (!ok) await _onFailedAttempt();
-  }
-
-  void addManualGesture(Gesture gesture) {
-    _onDiscreteGesture(gesture);
-  }
-
-  void clearInputTrail() {
-    _trailTimer?.cancel();
-    inputTrail.clear();
-    state = UnlockState.locked;
-    notifyListeners();
+  void _stopShakeWatch() {
+    _shakeSub?.cancel();
+    _shakeSub = null;
+    _shake.stop();
   }
 
   // ─── PIN ─────────────────────────────────────────────────
@@ -230,6 +142,14 @@ class GestureUnlockProvider extends ChangeNotifier {
     try {
       final session = await _vault.unlockWithPin(pin);
       if (session != null) {
+        if (_backgrounded && _shouldLockInBackground) {
+          // The app was sent to the background while the PIN was being
+          // checked. Don't leave a vault open behind the user's back.
+          await _vault.lock();
+          state = UnlockState.locked;
+          notifyListeners();
+          return false;
+        }
         await _onSuccessfulUnlock(session.type);
         return true;
       }
@@ -250,6 +170,7 @@ class GestureUnlockProvider extends ChangeNotifier {
     state = UnlockState.unlocked;
     _vibrateSuccess();
     _resetInactivityTimer();
+    _startShakeWatch();
     notifyListeners();
     if (announce && !_unlockEventController.isClosed) {
       _unlockEventController.add(vaultType);
@@ -277,8 +198,10 @@ class GestureUnlockProvider extends ChangeNotifier {
 
   // ─── Locking ─────────────────────────────────────────────
 
-  /// Instant lock from the hard-shake gesture: keys wiped from memory.
+  /// Instant lock (hard shake, or the panic button): keys wiped from memory.
+  /// Does nothing unless a vault is open.
   void triggerPanicLock() {
+    if (state != UnlockState.unlocked) return;
     _resetLockState();
     state = UnlockState.panicLocked;
     _vibratePanic();
@@ -294,14 +217,15 @@ class GestureUnlockProvider extends ChangeNotifier {
 
   void lockVault() {
     _resetLockState();
-    state = UnlockState.locked;
+    if (state == UnlockState.unlocked || state == UnlockState.panicLocked) {
+      state = UnlockState.locked;
+    }
     notifyListeners();
   }
 
   void _resetLockState() {
     _inactivityTimer?.cancel();
-    _trailTimer?.cancel();
-    inputTrail.clear();
+    _stopShakeWatch();
     _vault.lock();
   }
 
@@ -310,7 +234,6 @@ class GestureUnlockProvider extends ChangeNotifier {
   void _startLockoutCountdown(int seconds) {
     state = UnlockState.lockout;
     _lockoutRemaining = seconds;
-    _stopListening();
     notifyListeners();
 
     _lockoutTimer?.cancel();
@@ -322,7 +245,6 @@ class GestureUnlockProvider extends ChangeNotifier {
         _failedAttempts = 0;
         await _authService.clearLockout();
         state = UnlockState.locked;
-        if (_isSetupComplete) _startListening();
         notifyListeners();
       } else {
         notifyListeners();
@@ -354,11 +276,10 @@ class GestureUnlockProvider extends ChangeNotifier {
 
   // ─── Setup Callback ──────────────────────────────────────
 
-  /// Called when the setup wizard has created the vault. The new vault is
-  /// left unlocked; the wizard navigates into it itself.
+  /// Called when setup has created the vault. The new vault is left
+  /// unlocked; the setup screen navigates into it itself.
   Future<void> onSetupComplete() async {
     _isSetupComplete = true;
-    _startListening();
     if (_vault.isUnlocked) {
       await _onSuccessfulUnlock(_vault.session!.type, announce: false);
     } else {
@@ -367,14 +288,6 @@ class GestureUnlockProvider extends ChangeNotifier {
   }
 
   // ─── Haptics ─────────────────────────────────────────────
-
-  void _vibrateShort() async {
-    try {
-      if (await Vibration.hasVibrator()) {
-        Vibration.vibrate(duration: 40);
-      }
-    } catch (_) {}
-  }
 
   void _vibrateSuccess() async {
     try {
@@ -410,11 +323,10 @@ class GestureUnlockProvider extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _lockedSub?.cancel();
-    _stopListening();
-    _detector.dispose();
+    _stopShakeWatch();
+    _shake.dispose();
     _lockoutTimer?.cancel();
     _inactivityTimer?.cancel();
-    _trailTimer?.cancel();
     _unlockEventController.close();
     super.dispose();
   }

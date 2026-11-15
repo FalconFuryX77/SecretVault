@@ -25,11 +25,6 @@ class KdfParams {
   /// For the PIN / passphrase.
   static const pin = KdfParams(memoryKiB: 64 * 1024, iterations: 3);
 
-  /// For the motion gesture. Gestures carry little entropy, so the real
-  /// barrier against offline guessing is the hardware device binding;
-  /// this just keeps the unlock snappy.
-  static const gesture = KdfParams(memoryKiB: 16 * 1024, iterations: 3);
-
   /// Cheap parameters for unit tests only.
   static const testing = KdfParams(memoryKiB: 64, iterations: 1);
 }

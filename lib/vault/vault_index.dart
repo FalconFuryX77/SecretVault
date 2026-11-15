@@ -112,14 +112,20 @@ class VaultIndex {
   final List<IndexEntry> entries;
   final List<LinkedVault> links;
 
+  /// Small settings that belong to this vault and must stay encrypted with
+  /// it, such as its sync account and upload journal. JSON values only.
+  final Map<String, dynamic> extras;
+
   VaultIndex({
     required this.topDown,
     required this.ceiling,
     this.grownFrom,
     List<IndexEntry>? entries,
     List<LinkedVault>? links,
+    Map<String, dynamic>? extras,
   }) : entries = entries ?? [],
-       links = links ?? [];
+       links = links ?? [],
+       extras = extras ?? {};
 
   Uint8List encode() => Uint8List.fromList(
     utf8.encode(
@@ -130,6 +136,7 @@ class VaultIndex {
         if (grownFrom != null) 'g': grownFrom,
         'e': entries.map((e) => e.toJson()).toList(),
         'l': links.map((l) => l.toJson()).toList(),
+        if (extras.isNotEmpty) 'x': extras,
       }),
     ),
   );
@@ -146,6 +153,7 @@ class VaultIndex {
       links: (j['l'] as List)
           .map((e) => LinkedVault.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
+      extras: j['x'] == null ? null : Map<String, dynamic>.from(j['x'] as Map),
     );
   }
 }

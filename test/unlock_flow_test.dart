@@ -1,56 +1,61 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gesture_unlock/models/gesture.dart';
+import 'package:gesture_unlock/models/vault_state.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
-import 'package:gesture_unlock/providers/gesture_unlock_provider.dart';
+import 'package:gesture_unlock/providers/unlock_provider.dart';
 import 'package:gesture_unlock/providers/vault_provider.dart';
 import 'package:gesture_unlock/services/auth_service.dart';
-import 'package:gesture_unlock/services/gesture_detector.dart';
+import 'package:gesture_unlock/services/shake_detector.dart';
 import 'package:gesture_unlock/services/vault_service.dart';
 import 'package:gesture_unlock/vault/crypto_primitives.dart';
 import 'package:gesture_unlock/vault/platform_keys.dart';
 import 'package:gesture_unlock/vault/vault_container.dart';
-
-import 'support/fake_biometrics.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const pin = 'correct horse';
-  const gesture = [Gesture.left, Gesture.up, Gesture.right, Gesture.shake];
 
   late Directory tmp;
-  late FakeBiometrics bio;
   late VaultService vault;
   late AuthService auth;
 
-  GestureUnlockProvider newUnlock() => GestureUnlockProvider(
+  UnlockProvider newUnlock({Stream<AccelerometerEvent>? accel}) => UnlockProvider(
         vaultService: vault,
         authService: auth,
-        detector: GestureDetectorService(accelStream: const Stream.empty(), gyroStream: const Stream.empty()),
+        shakeDetector: ShakeDetector(accelStream: accel ?? const Stream.empty()),
       );
 
   Future<void> settle() => Future.delayed(const Duration(milliseconds: 50));
 
+  /// Waits until [cond] holds (polling), instead of sleeping a fixed time
+  /// and hoping the work finished: key derivation can be slow on a busy
+  /// machine, which made fixed sleeps flaky.
+  Future<void> eventually(bool Function() cond, String what, {Duration timeout = const Duration(seconds: 15)}) async {
+    final end = DateTime.now().add(timeout);
+    while (!cond()) {
+      if (DateTime.now().isAfter(end)) fail('timed out waiting for: $what');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
     tmp = await Directory.systemTemp.createTemp('unlock_flow');
-    bio = FakeBiometrics();
     auth = AuthService();
     vault = VaultService(
       crypto: VaultCrypto(
         binding: FixedDeviceBinding(),
-        biometrics: bio,
         pinParams: KdfParams.testing,
-        gestureParams: KdfParams.testing,
         growChunks: 8,
       ),
       storageDir: () async => tmp,
     );
-    final s = await vault.create(pin: pin, initialChunks: 16);
-    await s.enrollGesture(gesture, reason: 't');
+    await vault.create(pin: pin, initialChunks: 16);
     await vault.lock();
   });
 
@@ -74,35 +79,66 @@ void main() {
     unlock.dispose();
   });
 
-  test('gesture then fingerprint unlocks; gesture with failed fingerprint does not', () async {
+  test('a hard shake locks an open vault; while locked it does nothing', () async {
+    final accel = StreamController<AccelerometerEvent>.broadcast();
+    final unlock = newUnlock(accel: accel.stream);
+    await settle();
+    var notifications = 0;
+    unlock.addListener(() => notifications++);
+
+    // Locked: the sensor isn't even listened to, so nothing can react.
+    expect(accel.hasListener, isFalse);
+    accel.add(AccelerometerEvent(32.0, 18.0, 9.8));
+    await settle();
+    expect(unlock.state, UnlockState.locked);
+    expect(notifications, 0);
+
+    expect(await unlock.verifyPin(pin), isTrue);
+    expect(accel.hasListener, isTrue);
+    accel.add(AccelerometerEvent(32.0, 18.0, 9.8));
+    await eventually(() => !vault.isUnlocked, 'the shake to lock the vault');
+    expect(accel.hasListener, isFalse, reason: 'sensor released again once locked');
+    unlock.dispose();
+    await accel.close();
+  });
+
+  test('sending the app to the background does not cancel a lockout', () async {
     final unlock = newUnlock();
     await settle();
-
-    bio.succeed = false;
-    for (final g in gesture) {
-      unlock.addManualGesture(g);
+    for (var i = 0; i < UnlockProvider.maxFailedAttempts; i++) {
+      await unlock.verifyPin('wrong$i');
+      if (i < UnlockProvider.maxFailedAttempts - 1) {
+        await eventually(() => unlock.state == UnlockState.locked, 'the failure message to clear');
+      }
     }
-    await Future.delayed(GestureUnlockProvider.submitPause + const Duration(milliseconds: 300));
+    expect(unlock.state, UnlockState.lockout);
+    unlock.onAppPaused();
+    unlock.onAppResumed();
+    expect(unlock.state, UnlockState.lockout);
+    expect(await unlock.verifyPin(pin), isFalse);
+    unlock.dispose();
+  });
+
+  test('an unlock that finishes after the app left the foreground is not left open', () async {
+    final unlock = newUnlock();
+    await settle();
+    final pending = unlock.verifyPin(pin);
+    unlock.onAppPaused();
+    expect(await pending, isFalse);
     expect(vault.isUnlocked, isFalse);
-    expect(unlock.failedAttempts, 1);
-
-    await Future.delayed(const Duration(milliseconds: 1300));
-    bio.succeed = true;
-    for (final g in gesture) {
-      unlock.addManualGesture(g);
-    }
-    await Future.delayed(GestureUnlockProvider.submitPause + const Duration(milliseconds: 300));
-    expect(vault.isUnlocked, isTrue);
-    expect(unlock.state, UnlockState.unlocked);
+    unlock.onAppResumed();
+    expect(await unlock.verifyPin(pin), isTrue);
     unlock.dispose();
   });
 
   test('five wrong PINs start a lockout, and repeat lockouts get longer', () async {
     final unlock = newUnlock();
     await settle();
-    for (var i = 0; i < GestureUnlockProvider.maxFailedAttempts; i++) {
+    for (var i = 0; i < UnlockProvider.maxFailedAttempts; i++) {
       expect(await unlock.verifyPin('wrong$i'), isFalse);
-      await Future.delayed(const Duration(milliseconds: 1300));
+      if (i < UnlockProvider.maxFailedAttempts - 1) {
+        await eventually(() => unlock.state == UnlockState.locked, 'the failure message to clear');
+      }
     }
     expect(unlock.state, UnlockState.lockout);
     expect(unlock.lockoutRemaining, inInclusiveRange(AuthService.baseLockoutSeconds - 3, AuthService.baseLockoutSeconds));
@@ -215,7 +251,7 @@ void main() {
   test('a fresh install with no container reports not set up', () async {
     final empty = await Directory.systemTemp.createTemp('empty');
     final v = VaultService(
-      crypto: VaultCrypto(binding: FixedDeviceBinding(), biometrics: UnavailableBiometricKeystore()),
+      crypto: VaultCrypto(binding: FixedDeviceBinding()),
       storageDir: () async => empty,
     );
     expect(await v.isSetUp(), isFalse);
@@ -240,9 +276,7 @@ void main() {
     final other = VaultService(
       crypto: VaultCrypto(
         binding: FixedDeviceBinding(CryptoPrimitives.randomBytes(32)),
-        biometrics: bio,
         pinParams: KdfParams.testing,
-        gestureParams: KdfParams.testing,
       ),
       storageDir: () async => tmp,
     );

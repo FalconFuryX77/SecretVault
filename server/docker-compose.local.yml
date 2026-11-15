@@ -1,0 +1,23 @@
+# Local / single-machine deployment: the API plus PostgreSQL, with what the
+# server stores kept as ordinary files in a folder you choose, so you can see
+# it and back it up. No object store needed.
+#
+#   docker compose -p vaultsync -f docker-compose.yml -f docker-compose.local.yml up -d --build db api
+#
+# SYNC_DATA_DIR defaults to D:/VaultSyncServer:
+#   pieces/<account>/..   the encrypted file pieces
+#   staging/              uploads that were interrupted and are waiting to resume
+#
+# PostgreSQL (accounts, device list, the encrypted change log) stays in a
+# Docker volume: Postgres refuses to keep its data folder on a Windows drive.
+
+services:
+  api:
+    depends_on: !override
+      db: { condition: service_healthy }
+    environment:
+      SYNC_S3_ENDPOINT: ""
+      SYNC_BLOB_DIR: /data/pieces
+      SYNC_STAGING_DIR: /data/staging
+    volumes: !override
+      - ${SYNC_DATA_DIR:-D:/VaultSyncServer}:/data

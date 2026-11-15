@@ -42,9 +42,3 @@ android {
 flutter {
     source = "../.."
 }
-
-dependencies {
-    // BiometricPrompt with a CryptoObject: the vault key is only released by
-    // the hardware keystore after a strong biometric.
-    implementation("androidx.biometric:biometric:1.1.0")
-}
