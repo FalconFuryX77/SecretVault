@@ -47,6 +47,18 @@ class SecurityChannelService {
     await _apply();
   }
 
+  /// Keeps the screen on while a video plays. Audio doesn't: when the
+  /// screen goes off the app is backgrounded, the vault locks and playback
+  /// stops, which is the point.
+  static Future<void> setKeepScreenOn(bool on) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('setKeepScreenOn', {'on': on});
+    } catch (e) {
+      debugPrint('SecurityChannelService error: $e');
+    }
+  }
+
   static Future<void> _apply() async {
     final enable = isSecure;
     if (_applied == enable) return;

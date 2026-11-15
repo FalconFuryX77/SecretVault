@@ -1,7 +1,11 @@
 # Threat Model
 
-Status legend: **Built** = in the code today · **Planned** = designed in
-[SYNC_DESIGN.md](SYNC_DESIGN.md), not built yet.
+Status legend: **Built** = in the code today · **Server** = built and tested
+on the server or in the sync engine, with no app screen for it yet ·
+**Planned** = designed in [SYNC_DESIGN.md](SYNC_DESIGN.md), not built yet.
+
+Backup in the app is manual today (Settings → Backup). Automatic background
+upload and in-app restore are Planned.
 
 ## 1. Who this is for
 
@@ -97,17 +101,17 @@ after forcing an unlock of the phone itself, with time and tools.
 ### A4. Thief / lost phone
 A weaker A3 with no particular interest in you. Covered by the A3 defences.
 
-### A5. Sync server operator, or someone who seizes the server (Planned)
+### A5. Sync server operator, or someone who seizes the server
 Runs or seizes the server that stores synced material.
 
 | Defence | Status |
 |---|---|
-| Client-side encryption; the server never sees keys, file names or contents | Planned |
-| Content pieces named by a keyed hash, so the server can't test whether you hold a known file | Planned |
-| Content-defined piece boundaries are keyed, so piece sizes don't fingerprint known files | Planned |
-| Piece sizes padded to buckets (Padmé) | Planned |
-| Change log records chained per device, so reordering or dropping records in the middle is detected | Planned |
-| Optional "append-only" server mode: phones can upload but not delete; only the recovery key can delete | Planned |
+| Client-side encryption; the server never sees keys, file names or contents | Built |
+| Content pieces named by a keyed hash, so the server can't test whether you hold a known file | Built |
+| Content-defined piece boundaries are keyed, so piece sizes don't fingerprint known files | Built |
+| Piece sizes padded to buckets (Padmé) | Built |
+| Change log records chained per device, so reordering or dropping records in the middle is detected (checked on restore) | Built |
+| "Append-only" server mode (the default): phones can upload but not delete; only the recovery key can delete | Built |
 
 **What the server learns:** the account, the registered devices, IP addresses
 and timing of every request, the number and padded sizes of stored pieces,
@@ -121,25 +125,25 @@ ISP, state-level monitoring, or a hostile Wi-Fi network.
 
 | Defence | Status |
 |---|---|
-| TLS to the sync server | Planned |
-| Padded piece sizes | Planned |
+| Release builds accept only `https://` servers (the server needs a TLS proxy in front; the reference stack doesn't include one) | Built |
+| Padded piece sizes | Built |
 | Routing over Tor | Not planned yet |
 
 **What the observer learns:** the phone talks to the sync server's address, when,
 and roughly how much. The cover app should have a plausible reason to talk to a
 server (e.g. a video app's cloud project backup).
 
-### A7. Seized phone used against the sync account (Planned)
+### A7. Seized phone used against the sync account
 The adversary has the phone and the real vault's PIN, so they hold the sync key
 and the device's credentials.
 
 | Defence | Status |
 |---|---|
-| Devices never hold the recovery secret; only the recovery phrase can revoke devices or let a revoked one back in | Planned |
-| Revocation lists every registered device, so any device the seized phone paired before revocation can be cut off too | Planned |
-| Revoking the seized device from another device stops all further server access | Planned |
+| Devices never hold the recovery secret (shown once when backup is set up); only it can revoke devices or let a revoked one back in | Built |
+| Revocation lists every registered device, so any device the seized phone paired before revocation can be cut off too | Server |
+| Revoking the seized device from another device stops all further server access | Server |
 | Rotating the sync key protects everything uploaded afterwards | Planned |
-| Append-only mode stops the seized device from deleting server copies | Planned |
+| Append-only mode stops the seized device from deleting server copies | Built |
 
 **Residual risk:** anything the seized device could already read stays exposed.
 Revocation stops *future* access; it can't take back what was already

@@ -107,6 +107,7 @@ class _LockScreenState extends State<LockScreen> {
               ),
               const SizedBox(height: 24),
               TextField(
+                enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
                 controller: _pinController,
                 focusNode: _pinFocus,
                 autofocus: true,

@@ -8,6 +8,8 @@ import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
+import '../viewers/file_kind.dart';
+import '../viewers/vault_media_server.dart';
 
 /// Thrown when a file is too large to decrypt into memory for preview.
 class PreviewTooLargeException implements Exception {
@@ -175,6 +177,40 @@ class VaultProvider extends ChangeNotifier {
       throw PreviewTooLargeException(entry.byteLength);
     }
     return _session.readAll(entry);
+  }
+
+  /// Starts a private loopback stream of [item] for the media player (see
+  /// [VaultMediaServer]). Unlike [readDecryptedBytes] there is no size limit:
+  /// only the chunks the player asks for are decrypted, as it asks.
+  Future<VaultMediaServer?> openMediaStream(
+    VaultItem item, {
+    void Function(Object error)? onReadError,
+  }) async {
+    final session = _session;
+    final entry = session.entryById(item.id);
+    if (entry == null || entry.fileKey == null) return null;
+    final dot = item.title.lastIndexOf('.');
+    // Items imported by older versions were often stored as octet-stream.
+    final mime = item.mimeType.startsWith('audio/') || item.mimeType.startsWith('video/')
+        ? item.mimeType
+        : mimeForName(item.title);
+    return VaultMediaServer.start(
+      length: entry.byteLength,
+      contentType: mime,
+      extension: dot < 0 ? 'bin' : item.title.substring(dot + 1).toLowerCase(),
+      read: (offset, length) => session.readRange(entry, offset, length),
+      onReadError: onReadError,
+    );
+  }
+
+  /// Saves new content for a file item (an edited text file). The old copy
+  /// is shredded once the new one is committed.
+  Future<VaultItem> saveFileContent(VaultItem item, Uint8List content) async {
+    final entry = await _vault.whileBusy(
+      () => _session.replaceContent(item.id, content, item.copyWith(updatedAt: DateTime.now())),
+    );
+    _refreshFromSession();
+    return entry.item;
   }
 
   /// Writes a decrypted copy to [destinationDir]. This deliberately leaves

@@ -21,6 +21,11 @@ import 'package:provider/provider.dart';
 import 'package:gesture_unlock/services/vault_service.dart';
 import 'package:integration_test/integration_test.dart';
 
+/// Optional: --dart-define=SYNC_SERVER=http://127.0.0.1:8080 also drives the
+/// Backup screen against a running sync server.
+const syncServer = String.fromEnvironment('SYNC_SERVER');
+const syncInvite = String.fromEnvironment('SYNC_INVITE', defaultValue: 'dev-invite');
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -214,6 +219,38 @@ void main() {
     await waitFor(t, find.text('Add File'));
     await settle(t, 600);
     expect(SecurityChannelService.isSecure, isTrue, reason: 'closing the viewer must keep the vault protected');
+
+    // ── Backup screen: connect to a server and back the vault up ──
+    if (syncServer.isNotEmpty) {
+      await tapWhenReady(t, find.byTooltip('Settings'));
+      await tapWhenReady(t, find.text('Backup'));
+      await waitFor(t, find.text('Connect'));
+      await settle(t, 500);
+      await t.enterText(find.widgetWithText(TextField, 'Server address'), syncServer);
+      await t.enterText(find.widgetWithText(TextField, 'Invite code (if the server needs one)'), syncInvite);
+      await tapWhenReady(t, find.text('Connect'));
+      await waitFor(t, find.text('I wrote it down'), timeout: const Duration(seconds: 40));
+      // The recovery code is on screen exactly once: 16 groups of 4 characters.
+      final code = t.widget<SelectableText>(find.byType(SelectableText)).data!;
+      expect(RegExp(r'^([0-9a-f]{4} ){15}[0-9a-f]{4}$').hasMatch(code), isTrue);
+      await tapWhenReady(t, find.text('I wrote it down'));
+      await waitFor(t, find.text('Not backed up yet'));
+      final backupClock = Stopwatch()..start();
+      await tapWhenReady(t, find.text('Back up now'));
+      await waitFor(t, find.textContaining('Backup finished: 2 sent'), timeout: const Duration(seconds: 90));
+      // ignore: avoid_print
+      print('[timing] Back up now → finished: ${backupClock.elapsedMilliseconds} ms');
+      // A second tap has nothing new to send.
+      await tapWhenReady(t, find.text('Back up now'));
+      await waitFor(t, find.textContaining('Backup finished: 0 sent, 2 already up to date'),
+          timeout: const Duration(seconds: 60));
+      await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
+      // Settings is still scrolled down to Backup, so look for its title.
+      await waitFor(t, find.text('Security & Settings'));
+      await waitFor(t, find.text('Back up now'), gone: true);
+      await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
+      await waitFor(t, find.text('Add File'));
+    }
 
     await lock(t);
     // Back on the cover app: protection off once the lock screen is gone.

@@ -181,15 +181,17 @@ void main() {
 
   test('a lost acknowledgement on the log append is recovered, not duplicated', () async {
     final (id, _) = await newAccount();
-    final journal = MemoryJournalStore();
+    final journal = _RecordingJournal();
     final engine = await engineFor(id, direct, journal: journal);
     await engine.backupFile(await writeFile('one.txt', noise(1000, 1)), fileId: 'one', meta: {'title': 'one.txt'});
-    final before = Map<String, dynamic>.from(jsonDecode(jsonEncode(journal.data)) as Map);
     await engine.backupFile(await writeFile('two.txt', noise(1000, 2)), fileId: 'two', meta: {'title': 'two.txt'});
     // Simulate: the append for "two" reached the server, but the phone crashed
-    // before saving its journal. It still thinks it's at the old position.
-    journal.data['chain'] = before['chain'];
-    (journal.data['jobs'] as Map)['two']['state'] = 'planned';
+    // before saving its journal. Put the journal back exactly as it was last
+    // saved before that commit: "two" planned, chain still at the old position.
+    final preCommit = journal.history.lastWhere(
+      (h) => ((jsonDecode(h) as Map)['jobs'] as Map?)?['two']?['state'] == 'planned',
+    );
+    journal.data = jsonDecode(preCommit) as Map<String, dynamic>;
     await engine.backupFile(await writeFile('two.txt', noise(1000, 2)), fileId: 'two', meta: {'title': 'two.txt'});
     await engine.backupFile(await writeFile('three.txt', noise(1000, 3)), fileId: 'three', meta: {'title': 'three.txt'});
 
@@ -234,4 +236,16 @@ void main() {
       throwsA(isA<IntegrityException>()),
     );
   });
+}
+
+/// Remembers every state the engine saved, so a test can roll the journal
+/// back to what was on disk at a chosen moment (a simulated crash).
+class _RecordingJournal extends MemoryJournalStore {
+  final List<String> history = [];
+
+  @override
+  Future<void> save(Map<String, dynamic> journal) async {
+    await super.save(journal);
+    history.add(jsonEncode(journal));
+  }
 }

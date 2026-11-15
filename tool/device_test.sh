@@ -3,13 +3,17 @@
 # granting the cover app's storage permissions as soon as
 # `flutter test` installs the app (so no system dialog interrupts the run).
 #
-# Usage:  tool/device_test.sh integration_test/app_flow_test.dart [device-id]
+# Usage:  tool/device_test.sh integration_test/app_flow_test.dart [device-id] [extra flutter args]
+# e.g.    tool/device_test.sh integration_test/app_flow_test.dart <id> --dart-define=SYNC_SERVER=http://127.0.0.1:8080
 set -euo pipefail
 
 TEST="${1:?test file}"
 DEVICE="${2:-emulator-5554}"
 PKG="com.example.gesture_unlock"
 ADB="${ADB:-adb}"
+
+source "$(dirname "$0")/phone_guard.sh"
+phone_guard "$ADB" "$DEVICE" "$PKG" || exit 1
 
 (
   for _ in $(seq 1 600); do
@@ -25,7 +29,7 @@ ADB="${ADB:-adb}"
 ) &
 GRANTER=$!
 
-flutter test "$TEST" -d "$DEVICE" --dart-define=SECURE_WINDOW=false
+flutter test "$TEST" -d "$DEVICE" --dart-define=SECURE_WINDOW=false "${@:3}"
 STATUS=$?
 kill "$GRANTER" 2>/dev/null || true
 exit $STATUS

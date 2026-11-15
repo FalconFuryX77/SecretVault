@@ -5,6 +5,7 @@ An encrypted file vault for Android, hidden inside a working file manager, built
 ## How it protects your files 🔐
 
 * **Your PIN is the key.** Nothing about your PIN is stored. The PIN goes through Argon2id (64 MiB) and then an HMAC under a non-exportable key in the phone's secure hardware (Android Keystore / StrongBox), so a copied vault can't be brute-forced on another machine.
+* **Everything opens inside the app.** Video and audio play from a private in-memory stream (no decrypted copy on storage); PDFs are drawn by an isolated Android process with no access to the vault; Word documents and text are read by memory-safe Dart code; text files can be edited in place. The keyboard is told not to learn anything typed in the vault.
 * **Authenticated encryption.** Files are streamed in 64 KB chunks, each sealed with AES-256-GCM under a per-file key. Any modified, swapped, reordered or truncated chunk is detected and refused, never shown. Large files never have to fit in memory.
 * **One container, no tells.** Everything (both vaults, all metadata) lives in a single pre-allocated file of ciphertext and random filler. It has no headers or markers, its size doesn't track how much you store, and there are always 4 key slots whether 1 or 2 are in use.
 * **Decoy vault.** A second PIN opens a separate, ordinary-looking vault. Nothing in the container shows that another vault exists. The real vault knows about the decoy and never overwrites it, and a decoy opened on its own stays out of the real vault's space.
@@ -17,7 +18,8 @@ An encrypted file vault for Android, hidden inside a working file manager, built
 * Rollback attacks (restoring an older copy of the container file) aren't detected.
 * Unlock is PIN-only by design. Fingerprint unlock was removed: a finger can be pressed to a sensor by force, and it can't tell the real vault from the decoy.
 * iOS uses a software device-binding secret; the hardware Keystore binding is Android-only.
-* There's no backup/export of the whole vault yet. The container is device-bound by design. Encrypted sync is designed but not built (see below).
+* Backup is manual for now: **Settings → Backup** sends encrypted copies of the open vault to a server you choose. Automatic background backup and restoring a backup inside the app are not built yet (restore works from the command-line client).
+* The app needs the internet permission for backup. It makes no connections until backup is set up, and then only to the server you entered. Release builds accept `https://` servers only.
 
 ### Design docs
 * [Threat model](docs/THREAT_MODEL.md): who this protects against, what each adversary still learns, and what's out of scope.
@@ -38,9 +40,11 @@ flutter run
 |---|---|---|
 | Unit / widget (desktop) | `flutter test` | Container format, crypto, decoy isolation, tamper detection, unlock flow, lockout, providers |
 | On-device core | `flutter test integration_test/vault_device_test.dart -d <device>` | Real Android Keystore binding, native AES-GCM, production Argon2id, timings |
+| In-vault viewers | `bash tool/device_test.sh integration_test/viewers_device_test.dart <device>` | Video/audio via private 127.0.0.1 stream, seek, PDF in isolated process, Word, text edit+save, tampered file refused, no files left behind |
 | On-device UI flow | `bash tool/device_test.sh integration_test/app_flow_test.dart <device>` | Setup → note → lock → covert reopen → wrong PIN → decoy → file viewer, FLAG_SECURE state |
 | Per-chunk benchmarks | `flutter test integration_test/bench_test.dart -d <device>` | Channel/IO/crypto costs |
 | Sync server | `cd server && python -m pytest -q -s` | API, auth, append-only, log ordering, resumability under a flaky link |
+| Phone → server → restore | `bash tool/sync_phone_test.sh <device>` | Backs up a vault from the phone to a running server, restores it on the PC from the recovery code, compares SHA-256 |
 
 For realistic timings, run the device tests in profile mode:
 `flutter drive --driver=test_driver/integration_test.dart --target=integration_test/vault_device_test.dart -d <device> --profile`

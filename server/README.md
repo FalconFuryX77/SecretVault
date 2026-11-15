@@ -57,20 +57,35 @@ re-sending after drops costs 1.21× bytes at a 30% drop rate and 1.07× at
 All on localhost, so bandwidth limits come from the proxy, not a real radio.
 Numbers on real mobile links come next.
 
-## Run the full stack
+## Run it in Docker
+
+**Single machine (tested):** the API and PostgreSQL, with the encrypted
+pieces kept as ordinary files in a folder you choose.
 
 ```bash
 cd server
-docker compose up -d --build
+docker compose -p vaultsync -f docker-compose.yml -f docker-compose.local.yml up -d --build db api
 ```
 
 - API: `http://localhost:8080` (`/health`, `/docs`)
-- Through Toxiproxy (for failure injection): `http://localhost:18080`
-- MinIO console: `http://localhost:9001`
+- Stored pieces: `D:/VaultSyncServer/pieces/<account>/` by default; set
+  `SYNC_DATA_DIR` to put them elsewhere. Every file there is ciphertext.
+- Stop it with `docker compose -p vaultsync down` (add `-v` to also drop the
+  database volume).
 
-Change every password in `docker-compose.yml` and put TLS in front of the API
-before using this anywhere but your own machine. Set `SYNC_INVITE_CODES` so
-only people you invite can create accounts.
+**With an object store:** `docker-compose.yml` on its own also starts MinIO
+and Toxiproxy. The MinIO image it names could not be pulled from Docker Hub
+when this was tested, so that variant is currently untested; point
+`SYNC_S3_ENDPOINT` at any S3-compatible store instead.
+
+Before using this anywhere but your own machine: change every password in
+`docker-compose.yml`, set `SYNC_INVITE_CODES` so only people you invite can
+create accounts, and put a TLS reverse proxy (for example Caddy) in front of
+the API. The app's release builds refuse plain `http://` servers.
+
+To reach a server on your PC from a phone on the same Wi-Fi, the PC's
+firewall has to allow incoming connections on port 8080. Without that, a
+phone connected by USB can use `adb reverse tcp:8080 tcp:8080`.
 
 ## Configuration
 
@@ -99,5 +114,6 @@ send `X-Recovery-Auth: <key index>.<nonce>.<base64 signature>`.
 - Pairing codes and the X25519 key-exchange relay (M3).
 - Cleanup of abandoned partial uploads in `SYNC_STAGING_DIR`.
 - Rate limiting, metrics, and structured audit logs.
-- Running the Compose stack (needs Docker running); the Toxiproxy scenarios
-  are covered without Docker by `harness/flaky_proxy.py` for now.
+- TLS: the stack has no HTTPS proxy of its own.
+- The MinIO / Toxiproxy Compose variant is untested (see above); failure
+  injection is covered by `harness/flaky_proxy.py`.

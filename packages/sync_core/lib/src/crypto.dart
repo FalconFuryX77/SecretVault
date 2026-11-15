@@ -56,8 +56,13 @@ Future<Uint8List> hmacSha256(List<int> key, List<int> data) async =>
 Future<Uint8List> sha256(List<int> data) async => Uint8List.fromList((await Sha256().hash(data)).bytes);
 
 Future<Uint8List> hkdf(List<int> ikm, String info, {List<int> salt = const []}) async {
+  // RFC 5869 defines "no salt" as HashLen zero bytes, and HMAC zero-pads
+  // short keys, so passing 32 zeros gives exactly the same output as an
+  // empty salt. It has to be explicit: Android's native HMAC (used through
+  // cryptography_flutter) throws "Empty key" on a zero-length key.
+  final effectiveSalt = salt.isEmpty ? Uint8List(32) : salt;
   final k = await Hkdf(hmac: Hmac.sha256(), outputLength: 32)
-      .deriveKey(secretKey: SecretKeyData(ikm), nonce: salt, info: utf8.encode(info));
+      .deriveKey(secretKey: SecretKeyData(ikm), nonce: effectiveSalt, info: utf8.encode(info));
   return Uint8List.fromList(await k.extractBytes());
 }
 

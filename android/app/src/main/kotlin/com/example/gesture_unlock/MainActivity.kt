@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val SECURITY_CHANNEL = "com.example.secretvault/security"
         private const val KEYS_CHANNEL = "app.vault/keys"
+        private const val PDF_CHANNEL = "app.vault/pdf"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
         // Neutral alias names: nothing in the keystore says "vault".
@@ -66,6 +67,8 @@ class MainActivity : FlutterActivity() {
 
     private class ChunkAuthException(val index: Int) : Exception()
 
+    private val pdfSandbox by lazy { PdfSandbox(this) }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -80,6 +83,14 @@ class MainActivity : FlutterActivity() {
                         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     } else {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                    result.success(true)
+                }
+                "setKeepScreenOn" -> {
+                    if (call.argument<Boolean>("on") == true) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     }
                     result.success(true)
                 }
@@ -102,6 +113,10 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        MethodChannel(messenger, PDF_CHANNEL).setMethodCallHandler { call, result ->
+            pdfSandbox.handle(call, result)
         }
 
         worker.execute {
