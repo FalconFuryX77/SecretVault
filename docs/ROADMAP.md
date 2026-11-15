@@ -55,6 +55,23 @@ automatically keep syncing there."
 
 ## Security hardening
 
+Found by the independent review (2026-11-16) and not fixed yet; details in
+[THREAT_MODEL.md](THREAT_MODEL.md) §6:
+
+- [ ] **Decoy can host a real decoy of its own.** Today a decoy's "Set up a
+      decoy" only pretends (the PIN opens nothing). Needs a container format
+      change: the decoy must be able to reserve a record and space the real
+      vault knows about.
+- [ ] **Decoy index looks like any lone vault's** (forensic tell with the
+      decoy PIN).
+- [ ] **Rotate the recording key pair**; consider making staged recordings
+      indistinguishable from random.
+- [ ] **One backup account per phone**, shared by its vaults (SYNC_DESIGN §11).
+- [ ] **Pad backup log records**; check device chains against known heads.
+- [ ] **Restore "as of" a time** and ignoring a revoked device's records.
+- [ ] Open the real vault even if its decoy's index is damaged (today a
+      corrupted decoy index stops the real vault opening).
+
 - [ ] **Duress PIN** (opt-in, with a clear warning): opens the decoy and
       silently destroys the real vault's key.
 - [ ] **Sandbox image decoding** like PDFs (images are decoded in the app
