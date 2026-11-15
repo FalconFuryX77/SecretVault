@@ -2,7 +2,7 @@
 // Android Keystore device binding, platform AES-GCM (cryptography_flutter),
 // production Argon2id parameters, and real app storage.
 //
-// Run:  flutter test integration_test/vault_device_test.dart -d <device> --dart-define=GESTURES=false
+// Run:  flutter test integration_test/vault_device_test.dart -d <device>
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -64,7 +64,6 @@ void main() {
     expect(a, b, reason: 'same input, same hardware key');
     expect(a, isNot(c));
     // ignore: avoid_print
-    print('[info] biometrics available: ${await AndroidBiometricKeystore().isAvailable()}');
   });
 
   testWidgets('native batch crypto is byte-compatible with the Dart implementation', (tester) async {

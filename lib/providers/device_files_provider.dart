@@ -211,23 +211,16 @@ class DeviceFilesProvider extends ChangeNotifier {
     _refreshCategoryCounts();
   }
 
+  StorageSpaceInfo? _storage;
+
+  /// The phone's real storage totals; null until loaded or if unavailable.
+  StorageSpaceInfo? get storage => _storage;
+
   Future<void> _refreshCategoryCounts() async {
     try {
-      final img = await _service.getFilesByCategory(DeviceFileCategory.images, maxResults: 100);
-      final doc = await _service.getFilesByCategory(DeviceFileCategory.documents, maxResults: 100);
-      final aud = await _service.getFilesByCategory(DeviceFileCategory.audio, maxResults: 100);
-      final vid = await _service.getFilesByCategory(DeviceFileCategory.videos, maxResults: 100);
-      final arc = await _service.getFilesByCategory(DeviceFileCategory.archives, maxResults: 100);
-      final dwn = await _service.getFilesByCategory(DeviceFileCategory.downloads, maxResults: 100);
-
-      _categoryCounts = {
-        DeviceFileCategory.downloads: dwn.length,
-        DeviceFileCategory.images: img.length,
-        DeviceFileCategory.documents: doc.length,
-        DeviceFileCategory.audio: aud.length,
-        DeviceFileCategory.videos: vid.length,
-        DeviceFileCategory.archives: arc.length,
-      };
+      _storage = await _service.getStorageSpace();
+      notifyListeners();
+      _categoryCounts = await _service.countByCategory();
       notifyListeners();
     } catch (_) {}
   }

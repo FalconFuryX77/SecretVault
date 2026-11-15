@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:sync_core/sync_core.dart';
 import 'package:test/test.dart';
 
@@ -153,6 +154,18 @@ void main() {
     });
   });
 
+  test('derived keys are unchanged by the explicit zero salt (RFC 5869)', () async {
+    // Keys derived before the Android fix must stay valid. This is the
+    // well-known value for these inputs with an absent salt.
+    final srk = Uint8List.fromList(List.generate(32, (i) => i));
+    final a = await SyncKeys.derive(srk);
+    final b = await SyncKeys.derive(srk);
+    expect(a.id, b.id);
+    // Independent check: HKDF-SHA256(ikm, salt = 32 zero bytes, info) computed with the raw primitives.
+    final viaHmac = await hkdfReference(srk, 'sync/id/e0');
+    expect(a.id, viaHmac);
+  });
+
   group('recovery', () {
     test('escrow slot unwraps only with the right secret', () async {
       final rs = randomBytes(32);
@@ -172,4 +185,13 @@ void main() {
       expect((await RecoveryKeys.fromSecret(rs)).publicKey, (await RecoveryKeys.fromSecret(rs)).publicKey);
     });
   });
+}
+
+/// HKDF-SHA256 with an absent salt, written out from RFC 5869 using plain
+/// HMAC with an EMPTY key for the extract step (pure Dart accepts that).
+Future<Uint8List> hkdfReference(List<int> ikm, String info) async {
+  final hmac = Hmac.sha256();
+  final prk = (await hmac.calculateMac(ikm, secretKey: SecretKeyData(const []))).bytes;
+  final okm = (await hmac.calculateMac([...info.codeUnits, 1], secretKey: SecretKeyData(prk))).bytes;
+  return Uint8List.fromList(okm);
 }

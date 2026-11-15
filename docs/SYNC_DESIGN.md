@@ -1,6 +1,6 @@
 # Sync Design
 
-**Status:** M1 server and the M2 sync engine core are built and tested ([server/](../server/README.md), [packages/sync_core](../packages/sync_core)); not yet wired into the app. Threat model: [THREAT_MODEL.md](THREAT_MODEL.md).
+**Status:** the server, the sync engine and a manual **Back up now** in the app are built and tested, including phone → server → restore. Automatic background upload, in-app restore, previews and pairing are not built. Threat model: [THREAT_MODEL.md](THREAT_MODEL.md).
 On-device format: [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md).
 
 **Problem:** get material off a phone and onto a server the user trusts, over
@@ -356,9 +356,9 @@ No number goes in the README or a résumé until the harness has produced it.
 
 | # | Deliverable |
 |---|---|
-| M0 | Commit the container work; test it on a real phone (biometrics, keystore, decoy). **PIN path verified on an Android 16 emulator by automated tests; gesture + fingerprint still need a real phone** |
+| M0 | Commit the container work; test it on a real phone (keystore, decoy). **Done: core and UI flow pass on a Galaxy M34 (Android 16). Gesture and fingerprint unlock were removed; unlock is PIN-only** |
 | M1 | Server skeleton (Compose: FastAPI, Postgres, MinIO), piece + log API, Toxiproxy harness, CLI client that backs up a folder. **Server + API + 21 tests done; Compose file written but not yet run; harness and CLI client pending** |
-| M2 | `sync_core`: keyed chunking, piece encoding, journal, scheduler logic; integrated into the app in mode A. **Engine done and tested end to end against the server through a failure-injecting proxy; app integration and the Android scheduler pending** |
+| M2 | `sync_core`: keyed chunking, piece encoding, journal, scheduler logic; integrated into the app in mode A. **Engine done and tested end to end against the server through a failure-injecting proxy; manual backup is in the app (Settings → Backup, reading straight from the vault); the Android background scheduler is pending** |
 | M3 | Restore, recovery phrase, pairing, revocation, SRK rotation |
 | M4 | Previews (Media3 Transformer for video, image downscale, audio) |
 | M5 | Locked outbox (mode B) and offload |

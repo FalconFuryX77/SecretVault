@@ -6,8 +6,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
 # Run as an unprivileged user.
-RUN useradd --system --uid 10001 sync && mkdir -p /data && chown sync /data
-USER sync
+RUN useradd --system --uid 10001 vaultsync && mkdir -p /data && chown vaultsync /data
+USER vaultsync
 
 EXPOSE 8080
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]

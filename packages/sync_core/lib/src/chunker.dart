@@ -8,6 +8,7 @@ class ChunkRef {
   final int offset;
   final int length;
   const ChunkRef(this.offset, this.length);
+  int get end => offset + length;
   @override
   String toString() => 'ChunkRef($offset, $length)';
 }
@@ -56,16 +57,23 @@ class Chunker {
   /// Cut points for a whole in-memory buffer.
   List<ChunkRef> chunkBytes(Uint8List data) {
     final out = <ChunkRef>[];
-    final s = _State();
-    _feed(s, data, 0, out);
-    if (s.len > 0) out.add(ChunkRef(s.start, s.len));
+    final s = ChunkerState();
+    feed(s, data, out);
+    final tail = finish(s);
+    if (tail != null) out.add(tail);
     return out;
   }
+
+  /// Incremental chunking: call [feed] with each block in order (completed
+  /// pieces are appended to [out]), then [finish] for the last piece.
+  void feed(ChunkerState s, Uint8List data, List<ChunkRef> out) => _feed(s, data, 0, out);
+
+  ChunkRef? finish(ChunkerState s) => s.len > 0 ? ChunkRef(s.start, s.len) : null;
 
   /// Cut points for a file, read in 1 MiB blocks (constant memory).
   Future<List<ChunkRef>> chunkFile(File file) async {
     final out = <ChunkRef>[];
-    final s = _State();
+    final s = ChunkerState();
     final raf = await file.open();
     try {
       final buf = Uint8List(1024 * 1024);
@@ -83,7 +91,7 @@ class Chunker {
     return out;
   }
 
-  void _feed(_State s, Uint8List data, int base, List<ChunkRef> out) {
+  void _feed(ChunkerState s, Uint8List data, int base, List<ChunkRef> out) {
     var fp = s.fp;
     var len = s.len;
     var start = s.start;
@@ -108,7 +116,8 @@ class Chunker {
   }
 }
 
-class _State {
+/// Progress of one incremental chunking run.
+class ChunkerState {
   int fp = 0;
   int len = 0;
   int start = 0;

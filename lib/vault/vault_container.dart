@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../models/gesture.dart';
+import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import 'bulk_crypto.dart';
 import 'crypto_primitives.dart';
@@ -24,8 +24,6 @@ import 'vault_index.dart';
 /// Chunk 0 is the header: a 32-byte KDF salt, then [recordCount] records of
 /// [recordSize] bytes. Each record holds:
 ///   * a PIN slot      – vault key sealed under the PIN-derived key
-///   * a gesture slot  – a biometric-keystore blob sealed under the
-///                       gesture-derived key
 ///   * superblocks A/B – where the vault's encrypted index lives (two copies
 ///                       with a generation counter, so a crash mid-write
 ///                       never loses the index)
@@ -46,9 +44,8 @@ class ContainerLayout {
   static const int pinSlotOffset = 0;
   static const int pinSlotLen = CryptoPrimitives.keyLen + sealOverhead; // 60
 
-  static const int bioSlotOffset = 64;
-  static const int bioPlainLen = 128;
-  static const int bioSlotLen = bioPlainLen + sealOverhead; // 156
+  // Bytes 64–219 of each record held a gesture/biometric slot in an earlier
+  // format. They are unused now and stay random filler.
 
   static const int superPlainLen = 2048;
   static const int superSlotLen = superPlainLen + sealOverhead; // 2076
@@ -64,7 +61,7 @@ class ContainerLayout {
 
 class CredentialInUseException implements Exception {
   @override
-  String toString() => 'That PIN or gesture is already used by another vault.';
+  String toString() => 'That PIN is already used by another vault.';
 }
 
 class NoFreeRecordException implements Exception {}
@@ -79,9 +76,7 @@ class VaultCorruptedException implements Exception {
 /// Dependencies shared by the container and its sessions.
 class VaultCrypto {
   final DeviceBinding binding;
-  final BiometricKeystore biometrics;
   final KdfParams pinParams;
-  final KdfParams gestureParams;
   final int growChunks;
 
   /// Batched chunk sealing/opening and random fill (native on Android).
@@ -89,22 +84,13 @@ class VaultCrypto {
 
   VaultCrypto({
     required this.binding,
-    required this.biometrics,
     BulkCrypto? bulk,
     this.pinParams = KdfParams.pin,
-    this.gestureParams = KdfParams.gesture,
     this.growChunks = ContainerLayout.defaultGrowChunks,
   }) : bulk = bulk ?? defaultBulkCrypto();
 
   Future<Uint8List> pinKek(String pin, Uint8List salt) =>
       _kek(utf8.encode('p:$pin'), salt, pinParams, 'sv/pin-kek');
-
-  Future<Uint8List> gestureKek(List<Gesture> gestures, Uint8List salt) => _kek(
-    utf8.encode('g:${gestures.map((g) => g.name).join(',')}'),
-    salt,
-    gestureParams,
-    'sv/gesture-kek',
-  );
 
   Future<Uint8List> _kek(
     List<int> secret,
@@ -122,7 +108,6 @@ class VaultCrypto {
 }
 
 List<int> _aadPin(int r) => [1, r];
-List<int> _aadBio(int r) => [2, r];
 List<int> _aadSuper(int r, int slot) => [3, r, slot];
 List<int> _aadIndex(int gen, int seq, bool last) {
   final b = ByteData(14)
@@ -140,7 +125,7 @@ List<int> _aadFile(String id, int seq, bool last) {
   return [5, ...utf8.encode(id), 0, ...b.buffer.asUint8List()];
 }
 
-/// Entry point: create a container, or unlock one with a PIN or gesture.
+/// Entry point: create a container, or unlock one with a PIN.
 class VaultContainer {
   final File file;
   final VaultCrypto crypto;
@@ -175,8 +160,6 @@ class VaultContainer {
     } finally {
       await raf.close();
     }
-
-    await crypto.biometrics.ensureSlots(ContainerLayout.recordCount);
 
     final container = VaultContainer(file, crypto);
     final session = await container._openSession();
@@ -216,48 +199,6 @@ class VaultContainer {
     } catch (_) {
       await session.close();
       rethrow;
-    }
-  }
-
-  /// Checks the gesture against every record's gesture slot. On a match,
-  /// asks for the biometric that unlocks that vault's key.
-  /// Returns null if the gesture matches nothing or biometrics fail.
-  Future<VaultSession?> unlockWithGesture(
-    List<Gesture> gestures, {
-    required String reason,
-  }) async {
-    final session = await _openSession();
-    try {
-      final kek = await crypto.gestureKek(gestures, session._salt);
-      final hit = await session._findBioRecord(kek);
-      CryptoPrimitives.wipe(kek);
-      if (hit == null) {
-        await session.close();
-        return null;
-      }
-      final vk = await crypto.biometrics.unwrap(hit.$1, hit.$2, reason: reason);
-      if (vk == null || vk.length != CryptoPrimitives.keyLen) {
-        await session.close();
-        return null;
-      }
-      await session._loadRoot(hit.$1, vk);
-      return session;
-    } catch (_) {
-      await session.close();
-      rethrow;
-    }
-  }
-
-  /// Whether a gesture matches any vault, without prompting for biometrics.
-  Future<bool> gestureMatchesAnyVault(List<Gesture> gestures) async {
-    final session = await _openSession();
-    try {
-      final kek = await crypto.gestureKek(gestures, session._salt);
-      final hit = await session._findBioRecord(kek);
-      CryptoPrimitives.wipe(kek);
-      return hit != null;
-    } finally {
-      await session.close();
     }
   }
 
@@ -397,51 +338,122 @@ class VaultSession {
     void Function(double)? onProgress,
   }) {
     return _locked(() async {
-      final root = _r;
       final length = await source.length();
-      final n = max(1, (length / ContainerLayout.chunkPayload).ceil());
-      final chunks = await _allocate(root, n);
-      final fileKey = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
       final src = await source.open();
       try {
-        for (var start = 0; start < n; start += _batch) {
-          final end = min(n, start + _batch);
-          final plains = <Uint8List>[];
-          final aads = <List<int>>[];
-          for (var seq = start; seq < end; seq++) {
-            plains.add(_readUpTo(src, ContainerLayout.chunkPayload));
-            aads.add(_aadFile(meta.id, seq, seq == n - 1));
-          }
-          final fulls = await _crypto.bulk.sealChunks(
-            fileKey,
-            plains,
-            aads,
-            ContainerLayout.chunkSize,
-          );
-          for (var k = 0; k < fulls.length; k++) {
-            _writeAt(ContainerLayout.chunkOffset(chunks[start + k]), fulls[k]);
-          }
-          onProgress?.call(end / n);
-        }
+        final (chunks, fileKey) = await _writeChunks(
+          meta.id,
+          length,
+          (_) => _readUpTo(src, ContainerLayout.chunkPayload),
+          onProgress,
+        );
+        return _addEntry(meta, chunks, fileKey, length);
       } finally {
         await src.close();
       }
-      await _raf.flush();
-      final entry = IndexEntry(
-        item: meta.copyWith(fileSizeBytes: length),
+    });
+  }
+
+  /// Stores [data], which is already in memory (a recording, an edited
+  /// text file), as a new item. Nothing is written outside the container.
+  Future<IndexEntry> importBytes(Uint8List data, VaultItem meta) {
+    return _locked(() async {
+      final (chunks, fileKey) = await _writeChunks(meta.id, data.length, _slicer(data), null);
+      return _addEntry(meta, chunks, fileKey, data.length);
+    });
+  }
+
+  /// Replaces the content of file item [id] with [data] and its metadata
+  /// with [item]. The new copy is written and committed before the old
+  /// chunks are shredded, so a crash leaves either the old or the new file.
+  Future<IndexEntry> replaceContent(String id, Uint8List data, VaultItem item) {
+    if (item.id != id) throw ArgumentError('item id must stay the same');
+    return _locked(() async {
+      final root = _r;
+      final idx = root.index.entries.indexWhere((e) => e.item.id == id);
+      if (idx < 0) throw StateError('no item $id');
+      final old = root.index.entries[idx];
+      if (old.fileKey == null) throw StateError('item $id has no file data');
+      final (chunks, fileKey) = await _writeChunks(id, data.length, _slicer(data), null);
+      final fresh = IndexEntry(
+        item: item.copyWith(fileSizeBytes: data.length),
         fileKey: fileKey,
         extents: extentsFromChunks(chunks),
-        byteLength: length,
+        byteLength: data.length,
       );
-      root.index.entries.insert(0, entry);
+      root.index.entries[idx] = fresh;
+      _holdUntilShredded(old.extents);
       try {
         await _commit(root);
       } catch (_) {
-        root.index.entries.remove(entry);
+        root.index.entries[idx] = old;
+        await _shred(fresh.extents);
         rethrow;
       }
-      return entry;
+      await _shred(old.extents);
+      CryptoPrimitives.wipe(old.fileKey);
+      return fresh;
     });
+  }
+
+  static Uint8List Function(int) _slicer(Uint8List data) => (seq) {
+        final start = seq * ContainerLayout.chunkPayload;
+        final end = min(data.length, start + ContainerLayout.chunkPayload);
+        return Uint8List.sublistView(data, min(start, end), end);
+      };
+
+  /// Allocates chunks for a [length]-byte file and writes it encrypted under
+  /// a fresh key. [next] returns the plaintext of chunk `seq`, in order.
+  /// Must run inside [_locked]; the caller commits (or shreds on failure).
+  Future<(List<int>, Uint8List)> _writeChunks(
+    String id,
+    int length,
+    Uint8List Function(int seq) next,
+    void Function(double)? onProgress,
+  ) async {
+    final root = _r;
+    final n = max(1, (length / ContainerLayout.chunkPayload).ceil());
+    final chunks = await _allocate(root, n);
+    final fileKey = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
+    for (var start = 0; start < n; start += _batch) {
+      final end = min(n, start + _batch);
+      final plains = <Uint8List>[];
+      final aads = <List<int>>[];
+      for (var seq = start; seq < end; seq++) {
+        plains.add(next(seq));
+        aads.add(_aadFile(id, seq, seq == n - 1));
+      }
+      final fulls = await _crypto.bulk.sealChunks(
+        fileKey,
+        plains,
+        aads,
+        ContainerLayout.chunkSize,
+      );
+      for (var k = 0; k < fulls.length; k++) {
+        _writeAt(ContainerLayout.chunkOffset(chunks[start + k]), fulls[k]);
+      }
+      onProgress?.call(end / n);
+    }
+    await _raf.flush();
+    return (chunks, fileKey);
+  }
+
+  Future<IndexEntry> _addEntry(VaultItem meta, List<int> chunks, Uint8List fileKey, int length) async {
+    final root = _r;
+    final entry = IndexEntry(
+      item: meta.copyWith(fileSizeBytes: length),
+      fileKey: fileKey,
+      extents: extentsFromChunks(chunks),
+      byteLength: length,
+    );
+    root.index.entries.insert(0, entry);
+    try {
+      await _commit(root);
+    } catch (_) {
+      root.index.entries.remove(entry);
+      rethrow;
+    }
+    return entry;
   }
 
   /// Decrypts a stored file chunk by chunk. Throws [TamperedDataException]
@@ -453,32 +465,105 @@ class VaultSession {
     final n = chunks.length;
     for (var start = 0; start < n; start += _batch) {
       final end = min(n, start + _batch);
-      final aads = <List<int>>[];
-      final sealed = await _locked(() async {
-        final out = <Uint8List>[];
-        for (var seq = start; seq < end; seq++) {
-          final last = seq == n - 1;
-          final plainLen = last
-              ? entry.byteLength - seq * ContainerLayout.chunkPayload
-              : ContainerLayout.chunkPayload;
-          if (plainLen < 0 || plainLen > ContainerLayout.chunkPayload) {
-            throw TamperedDataException('index length mismatch');
-          }
-          out.add(
-            _readAt(
-              _raf,
-              ContainerLayout.chunkOffset(chunks[seq]),
-              plainLen + ContainerLayout.sealOverhead,
-            ),
-          );
-          aads.add(_aadFile(entry.item.id, seq, last));
-        }
-        return out;
-      });
-      for (final part in await _crypto.bulk.openChunks(key, sealed, aads)) {
+      for (final part in await _openChunks(entry, key, chunks, start, end)) {
         yield part;
       }
     }
+  }
+
+  /// Decrypts container chunks [start, end) of [entry], verified.
+  Future<List<Uint8List>> _openChunks(
+    IndexEntry entry,
+    Uint8List key,
+    List<int> chunks,
+    int start,
+    int end,
+  ) async {
+    final n = chunks.length;
+    final aads = <List<int>>[];
+    final sealed = await _locked(() async {
+      final out = <Uint8List>[];
+      for (var seq = start; seq < end; seq++) {
+        final last = seq == n - 1;
+        final plainLen = last
+            ? entry.byteLength - seq * ContainerLayout.chunkPayload
+            : ContainerLayout.chunkPayload;
+        if (plainLen < 0 || plainLen > ContainerLayout.chunkPayload) {
+          throw TamperedDataException('index length mismatch');
+        }
+        out.add(
+          _readAt(
+            _raf,
+            ContainerLayout.chunkOffset(chunks[seq]),
+            plainLen + ContainerLayout.sealOverhead,
+          ),
+        );
+        aads.add(_aadFile(entry.item.id, seq, last));
+      }
+      return out;
+    });
+    return _crypto.bulk.openChunks(key, sealed, aads);
+  }
+
+  /// Decrypts [length] bytes of [entry] starting at [offset], touching only
+  /// the chunks that hold them. Used to back a file up piece by piece
+  /// without ever writing it out in the clear.
+  Future<Uint8List> readRange(IndexEntry entry, int offset, int length) async {
+    final key = entry.fileKey;
+    if (key == null) throw StateError('item has no file data');
+    if (offset < 0 || length < 0 || offset + length > entry.byteLength) {
+      throw RangeError('range $offset+$length is outside ${entry.byteLength} bytes');
+    }
+    if (length == 0) return Uint8List(0);
+    const payload = ContainerLayout.chunkPayload;
+    final chunks = entry.extents.expand((e) => e.chunks).toList();
+    final first = offset ~/ payload;
+    final last = (offset + length - 1) ~/ payload;
+    final out = Uint8List(length);
+    var written = 0;
+    for (var start = first; start <= last; start += _batch) {
+      final end = min(last + 1, start + _batch);
+      final parts = await _openChunks(entry, key, chunks, start, end);
+      for (var i = 0; i < parts.length; i++) {
+        final chunkStart = (start + i) * payload;
+        final from = max(offset, chunkStart) - chunkStart;
+        final to = min(offset + length, chunkStart + parts[i].length) - chunkStart;
+        out.setRange(written, written + (to - from), parts[i], from);
+        written += to - from;
+      }
+    }
+    if (written != length) throw TamperedDataException('short read');
+    return out;
+  }
+
+  // ─── Per-vault settings ─────────────────────────────────────────
+
+  /// A copy of this vault's encrypted settings (see [VaultIndex.extras]).
+  Map<String, dynamic> get extras =>
+      jsonDecode(jsonEncode(_r.index.extras)) as Map<String, dynamic>;
+
+  /// Sets one settings entry (or removes it with null) and saves the index.
+  Future<void> putExtra(String key, Object? value) {
+    return _locked(() async {
+      final root = _r;
+      final had = root.index.extras.containsKey(key);
+      final previous = root.index.extras[key];
+      if (value == null) {
+        root.index.extras.remove(key);
+      } else {
+        root.index.extras[key] = jsonDecode(jsonEncode(value));
+      }
+      try {
+        await _commit(root);
+      } catch (_) {
+        if (had) {
+          root.index.extras[key] = previous;
+        } else {
+          root.index.extras.remove(key);
+        }
+        rethrow;
+      }
+    });
   }
 
   Future<Uint8List> readAll(IndexEntry entry) async {
@@ -542,6 +627,7 @@ class VaultSession {
       final idx = root.index.entries.indexWhere((e) => e.item.id == id);
       if (idx < 0) return;
       final entry = root.index.entries.removeAt(idx);
+      _holdUntilShredded(entry.extents);
       await _commit(root);
       await _shred(entry.extents);
       CryptoPrimitives.wipe(entry.fileKey);
@@ -552,26 +638,11 @@ class VaultSession {
 
   Future<void> changePin(String newPin) => _locked(() => _setPin(_r, newPin));
 
-  /// Enrolls a motion gesture for this vault. Prompts for a biometric.
-  /// Returns false if the user cancels the prompt.
-  Future<bool> enrollGesture(
-    List<Gesture> gestures, {
-    required String reason,
-  }) => _locked(() => _setGesture(_r, gestures, reason));
-
-  Future<void> removeGesture() => _locked(() async {
-    await _fillRandom(
-      ContainerLayout.recordOffset(_r.record) + ContainerLayout.bioSlotOffset,
-      ContainerLayout.bioSlotLen,
-    );
-    await _raf.flush();
-  });
-
   // ─── Decoy vault ────────────────────────────────────────────────
 
-  /// Creates a decoy vault in a free record, opened with [pin] (and
-  /// optionally a gesture). The real vault keeps the decoy's key so it never
-  /// overwrites the decoy's data; the decoy knows nothing about the real one.
+  /// Creates a decoy vault in a free record, opened with [pin]. The real
+  /// vault keeps the decoy's key so it never overwrites the decoy's data;
+  /// the decoy knows nothing about the real one.
   Future<void> createDecoy({required String pin}) {
     return _locked(() async {
       final root = _r;
@@ -609,11 +680,6 @@ class VaultSession {
   Future<void> changeDecoyPin(String pin) =>
       _locked(() => _setPin(_decoy, pin));
 
-  Future<bool> enrollDecoyGesture(
-    List<Gesture> gestures, {
-    required String reason,
-  }) => _locked(() => _setGesture(_decoy, gestures, reason));
-
   /// Deletes the decoy vault and shreds everything it stored.
   Future<void> removeDecoy() {
     return _locked(() async {
@@ -623,6 +689,7 @@ class VaultSession {
           decoy.selfAndDescendants.expand((v) => v.usedChunks).toList()..sort();
       root.children.remove(decoy);
       root.index.links.removeWhere((l) => l.record == decoy.record);
+      _holdUntilShredded(extentsFromChunks(chunks));
       await _commit(root);
       await _fillRandom(
         ContainerLayout.recordOffset(decoy.record),
@@ -669,25 +736,6 @@ class VaultSession {
     return hit;
   }
 
-  Future<(int, Uint8List)?> _findBioRecord(Uint8List kek) async {
-    (int, Uint8List)? hit;
-    for (var r = 0; r < ContainerLayout.recordCount; r++) {
-      final slot = _readAt(
-        _raf,
-        ContainerLayout.recordOffset(r) + ContainerLayout.bioSlotOffset,
-        ContainerLayout.bioSlotLen,
-      );
-      final plain = await CryptoPrimitives.tryOpen(kek, slot, _aadBio(r));
-      if (plain != null && hit == null) {
-        final len = (plain[0] << 8) | plain[1];
-        if (len > 0 && len <= ContainerLayout.bioPlainLen - 2) {
-          hit = (r, Uint8List.fromList(plain.sublist(2, 2 + len)));
-        }
-      }
-    }
-    return hit;
-  }
-
   Future<void> _writePinSlot(int record, Uint8List kek, Uint8List vk) async {
     final sealed = await CryptoPrimitives.seal(kek, vk, _aadPin(record));
     _writeAt(
@@ -703,40 +751,6 @@ class VaultSession {
       final hit = await _findPinRecord(kek);
       if (hit != null && hit.$1 != v.record) throw CredentialInUseException();
       await _writePinSlot(v.record, kek, v.vk);
-    } finally {
-      CryptoPrimitives.wipe(kek);
-    }
-  }
-
-  Future<bool> _setGesture(
-    _OpenVault v,
-    List<Gesture> gestures,
-    String reason,
-  ) async {
-    final kek = await _crypto.gestureKek(gestures, _salt);
-    try {
-      final hit = await _findBioRecord(kek);
-      if (hit != null && hit.$1 != v.record) throw CredentialInUseException();
-      final blob = await _crypto.biometrics.wrap(
-        v.record,
-        v.vk,
-        reason: reason,
-      );
-      if (blob == null) return false;
-      if (blob.length > ContainerLayout.bioPlainLen - 2) {
-        throw StateError('keystore blob too large');
-      }
-      final plain = CryptoPrimitives.randomBytes(ContainerLayout.bioPlainLen);
-      plain[0] = blob.length >> 8;
-      plain[1] = blob.length & 0xff;
-      plain.setRange(2, 2 + blob.length, blob);
-      final sealed = await CryptoPrimitives.seal(kek, plain, _aadBio(v.record));
-      _writeAt(
-        ContainerLayout.recordOffset(v.record) + ContainerLayout.bioSlotOffset,
-        sealed,
-      );
-      await _raf.flush();
-      return true;
     } finally {
       CryptoPrimitives.wipe(kek);
     }
@@ -1024,6 +1038,16 @@ class VaultSession {
 
   Future<void> _fillRandom(int offset, int length) =>
       _crypto.bulk.fillRandom(_raf, _container.file, offset, length);
+
+  /// Keeps chunks that were just freed (and are about to be shredded) out
+  /// of allocation for the rest of this operation. Without this the index
+  /// written on commit could land in them and then be shredded with them,
+  /// leaving a vault that no longer opens.
+  void _holdUntilShredded(List<Extent> extents) {
+    for (final e in extents) {
+      _reserved.addAll(e.chunks);
+    }
+  }
 
   /// Overwrites chunks with random data so freed space looks like any other
   /// free space and old ciphertext (and old index copies holding file keys)

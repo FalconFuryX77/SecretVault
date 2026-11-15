@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:provider/provider.dart';
-import '../config/features.dart';
-import '../providers/gesture_unlock_provider.dart';
+import '../providers/unlock_provider.dart';
 import '../services/auth_service.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
-import 'setup_screen.dart';
+import 'backup_screen.dart';
 
 /// Security & Preferences Settings Screen.
 ///
@@ -23,7 +22,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final AuthService _authService = AuthService();
   bool _autoLockOnSwitch = true;
   int _inactivityTimeout = 30;
-  bool _biometrics = false;
 
   @override
   void initState() {
@@ -32,15 +30,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final vault = context.read<VaultService>();
     final autoLock = await _authService.getAutoLockOnSwitch();
     final timeout = await _authService.getInactivityTimeout();
-    final bio = await vault.biometricsAvailable();
     if (mounted) {
       setState(() {
         _autoLockOnSwitch = autoLock;
         _inactivityTimeout = timeout;
-        _biometrics = bio && Features.gestures;
       });
     }
   }
@@ -54,7 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: error
             ? const Color(0xFFE11D48)
             : const Color(0xFF059669),
-        content: Text(msg, style: GoogleFonts.outfit(color: Colors.white)),
+        content: Text(msg, style: AppFonts.outfit(color: Colors.white)),
       ),
     );
   }
@@ -120,11 +115,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: const Color(0xFF161B22),
         title: Text(
           'Remove decoy vault?',
-          style: GoogleFonts.outfit(color: Colors.white),
+          style: AppFonts.outfit(color: Colors.white),
         ),
         content: Text(
           'Everything in the decoy vault is erased. This cannot be undone.',
-          style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
         ),
         actions: [
           TextButton(
@@ -148,18 +143,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toast('Decoy vault removed.');
   }
 
-  Future<void> _recordGesture({required bool decoy}) async {
-    final saved = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SetupScreen(
-          mode: decoy ? SetupMode.decoyGesture : SetupMode.reenrollGesture,
-        ),
-      ),
-    );
-    if (saved == true) _toast('Gesture saved.');
-  }
-
   @override
   Widget build(BuildContext context) {
     final session = context.read<VaultService>().session;
@@ -180,7 +163,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         title: Text(
           'Security & Settings',
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             fontSize: 18,
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -191,21 +174,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
         children: [
           _buildSectionHeader('ACCESS & CREDENTIALS'),
-          if (_biometrics) ...[
-            _buildSettingCard(
-              icon: Icons.screen_rotation_rounded,
-              color: const Color(0xFFA78BFA),
-              title: 'Re-record Motion Gesture',
-              subtitle: 'Gesture + fingerprint to open this vault',
-              onTap: () => _recordGesture(decoy: false),
-            ),
-            const SizedBox(height: 8),
-          ],
           _buildSettingCard(
             icon: Icons.pin_rounded,
             color: const Color(0xFF34D399),
             title: 'Change PIN',
-            subtitle: 'Opens this vault without the gesture',
+            subtitle: 'The PIN that opens this vault',
             onTap: () => _runPinChange(decoy: false),
           ),
 
@@ -228,16 +201,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: 'The PIN you can give up under pressure',
                 onTap: () => _runPinChange(decoy: true),
               ),
-              if (_biometrics) ...[
-                const SizedBox(height: 8),
-                _buildSettingCard(
-                  icon: Icons.screen_rotation_alt_rounded,
-                  color: const Color(0xFFF59E0B),
-                  title: 'Set Decoy Gesture',
-                  subtitle: 'A different gesture that opens the decoy',
-                  onTap: () => _recordGesture(decoy: true),
-                ),
-              ],
               const SizedBox(height: 8),
               _buildSettingCard(
                 icon: Icons.delete_forever_rounded,
@@ -248,6 +211,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ],
+
+          const SizedBox(height: 24),
+          _buildSectionHeader('BACKUP'),
+          _buildSettingCard(
+            icon: Icons.cloud_upload_rounded,
+            color: const Color(0xFF38BDF8),
+            title: 'Backup',
+            subtitle: 'Send encrypted copies to a server you trust',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BackupScreen()),
+            ),
+          ),
 
           const SizedBox(height: 24),
           _buildSectionHeader('LOCKDOWN & TIMEOUTS'),
@@ -265,15 +241,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(
                     'Auto-Lock on App Switch',
-                    style: GoogleFonts.outfit(
+                    style: AppFonts.outfit(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
                   ),
                   subtitle: Text(
-                    'Lock immediately and purge RAM when leaving app',
-                    style: GoogleFonts.outfit(
+                    'Lock and clear keys from memory when you leave the app',
+                    style: AppFonts.outfit(
                       fontSize: 12,
                       color: Colors.white54,
                     ),
@@ -285,7 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     await _authService.setAutoLockOnSwitch(val);
                     if (context.mounted) {
                       await context
-                          .read<GestureUnlockProvider>()
+                          .read<UnlockProvider>()
                           .reloadSettings();
                     }
                   },
@@ -295,7 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text(
                     'Inactivity Auto-Lock Timeout',
-                    style: GoogleFonts.outfit(
+                    style: AppFonts.outfit(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
@@ -303,7 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   subtitle: Text(
                     '$_inactivityTimeout seconds of idle touch',
-                    style: GoogleFonts.outfit(
+                    style: AppFonts.outfit(
                       fontSize: 12,
                       color: Colors.white54,
                     ),
@@ -312,7 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _inactivityTimeout,
                     dropdownColor: const Color(0xFF1F2937),
                     underline: const SizedBox(),
-                    style: GoogleFonts.outfit(
+                    style: AppFonts.outfit(
                       color: const Color(0xFFA78BFA),
                       fontWeight: FontWeight.bold,
                     ),
@@ -328,7 +304,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await _authService.setInactivityTimeout(val);
                       if (context.mounted) {
                         await context
-                            .read<GestureUnlockProvider>()
+                            .read<UnlockProvider>()
                             .reloadSettings();
                       }
                     },
@@ -363,7 +339,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 10),
                 _buildSecurityBadge(
                   'Hard Shake Panic',
-                  'Instant session termination & RAM wipe upon sudden shake',
+                  'Shake hard to lock instantly and clear keys from memory',
                 ),
                 const SizedBox(height: 10),
                 _buildSecurityBadge(
@@ -373,7 +349,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 10),
                 _buildSecurityBadge(
                   'Memory Protection',
-                  'In-memory decrypted buffers purged on lock or panic',
+                  'Keys cleared on lock; open files cleared when closed',
                 ),
               ],
             ),
@@ -389,7 +365,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       padding: const EdgeInsets.only(bottom: 10, left: 4),
       child: Text(
         title,
-        style: GoogleFonts.outfit(
+        style: AppFonts.outfit(
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 1.2,
@@ -424,7 +400,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         title: Text(
           title,
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             fontSize: 14,
             fontWeight: FontWeight.w600,
             color: Colors.white,
@@ -432,7 +408,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         subtitle: Text(
           subtitle,
-          style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
+          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
         ),
         trailing: const Icon(
           Icons.arrow_forward_ios_rounded,
@@ -456,7 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Expanded(
           child: RichText(
             text: TextSpan(
-              style: GoogleFonts.outfit(fontSize: 12, color: Colors.white70),
+              style: AppFonts.outfit(fontSize: 12, color: Colors.white70),
               children: [
                 TextSpan(
                   text: '$label: ',
@@ -513,11 +489,12 @@ class _NewPinDialogState extends State<_NewPinDialog> {
   }
 
   Widget _field(TextEditingController c, String hint) => TextField(
+    enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
     controller: c,
     keyboardType: TextInputType.visiblePassword,
     obscureText: true,
     maxLength: 64,
-    style: GoogleFonts.outfit(
+    style: AppFonts.outfit(
       fontSize: 18,
       color: Colors.white,
       letterSpacing: 4,
@@ -526,7 +503,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
     decoration: InputDecoration(
       counterText: '',
       hintText: hint,
-      hintStyle: GoogleFonts.outfit(
+      hintStyle: AppFonts.outfit(
         fontSize: 13,
         letterSpacing: 0,
         color: Colors.white24,
@@ -547,7 +524,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Text(
         widget.title,
-        style: GoogleFonts.outfit(
+        style: AppFonts.outfit(
           color: Colors.white,
           fontWeight: FontWeight.bold,
         ),
@@ -558,7 +535,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           children: [
             Text(
               widget.hint,
-              style: GoogleFonts.outfit(fontSize: 13, color: Colors.white70),
+              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
             ),
             const SizedBox(height: 16),
             _field(_a, 'New PIN'),
@@ -568,7 +545,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
               const SizedBox(height: 10),
               Text(
                 _error!,
-                style: GoogleFonts.outfit(
+                style: AppFonts.outfit(
                   fontSize: 12,
                   color: const Color(0xFFFB7185),
                 ),
@@ -582,7 +559,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           onPressed: () => Navigator.pop(context),
           child: Text(
             'Cancel',
-            style: GoogleFonts.outfit(color: Colors.white54),
+            style: AppFonts.outfit(color: Colors.white54),
           ),
         ),
         ElevatedButton(
@@ -596,7 +573,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           onPressed: _submit,
           child: Text(
             'Save',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+            style: AppFonts.outfit(fontWeight: FontWeight.bold),
           ),
         ),
       ],

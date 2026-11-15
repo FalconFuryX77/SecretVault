@@ -10,32 +10,11 @@ import 'crypto_primitives.dart';
 ///
 /// On Android the input is HMAC'd with a non-exportable key in the hardware
 /// keystore (TEE / StrongBox). An attacker who copies the container off the
-/// phone therefore cannot brute-force PINs or gestures offline — every guess
+/// phone therefore cannot brute-force PINs offline — every guess
 /// has to go through this device's secure hardware.
 abstract class DeviceBinding {
   Future<Uint8List> bind(Uint8List input);
 }
-
-/// Unlocks a vault key with a biometric, using a keystore key that the
-/// hardware only releases after a successful strong-biometric prompt.
-abstract class BiometricKeystore {
-  Future<bool> isAvailable();
-
-  /// Makes sure every slot alias exists, so the number of keys in the
-  /// keystore never reveals how many vaults are set up.
-  Future<void> ensureSlots(int count);
-
-  /// Encrypts [secret] under slot [slot]'s biometric key. Shows a prompt.
-  /// Returns null if the user cancels or biometrics fail.
-  Future<Uint8List?> wrap(int slot, Uint8List secret, {required String reason});
-
-  /// Reverses [wrap]. Shows a prompt. Returns null on cancel / failure.
-  /// Throws [BiometricInvalidatedException] if the key was invalidated
-  /// (for example because a new fingerprint was enrolled).
-  Future<Uint8List?> unwrap(int slot, Uint8List blob, {required String reason});
-}
-
-class BiometricInvalidatedException implements Exception {}
 
 const _channel = MethodChannel('app.vault/keys');
 
@@ -87,91 +66,5 @@ class FixedDeviceBinding implements DeviceBinding {
       CryptoPrimitives.hmacSha256(secret, input);
 }
 
-Uint8List? _copy(Uint8List? b) => b == null ? null : Uint8List.fromList(b);
-
-class AndroidBiometricKeystore implements BiometricKeystore {
-  @override
-  Future<bool> isAvailable() async {
-    try {
-      return await _channel.invokeMethod<bool>('bioAvailable') ?? false;
-    } on PlatformException {
-      return false;
-    }
-  }
-
-  @override
-  Future<void> ensureSlots(int count) async {
-    try {
-      await _channel.invokeMethod('bioEnsureSlots', {'count': count});
-    } on PlatformException {
-      // Biometrics not enrolled / no secure lock screen. Gesture unlock is
-      // simply unavailable; PIN still works.
-    }
-  }
-
-  @override
-  Future<Uint8List?> wrap(
-    int slot,
-    Uint8List secret, {
-    required String reason,
-  }) async {
-    try {
-      return _copy(
-        await _channel.invokeMethod<Uint8List>('bioWrap', {
-          'slot': slot,
-          'data': secret,
-          'reason': reason,
-        }),
-      );
-    } on PlatformException catch (e) {
-      if (e.code == 'invalidated') throw BiometricInvalidatedException();
-      return null;
-    }
-  }
-
-  @override
-  Future<Uint8List?> unwrap(
-    int slot,
-    Uint8List blob, {
-    required String reason,
-  }) async {
-    try {
-      return _copy(
-        await _channel.invokeMethod<Uint8List>('bioUnwrap', {
-          'slot': slot,
-          'data': blob,
-          'reason': reason,
-        }),
-      );
-    } on PlatformException catch (e) {
-      if (e.code == 'invalidated') throw BiometricInvalidatedException();
-      return null;
-    }
-  }
-}
-
-class UnavailableBiometricKeystore implements BiometricKeystore {
-  @override
-  Future<bool> isAvailable() async => false;
-  @override
-  Future<void> ensureSlots(int count) async {}
-  @override
-  Future<Uint8List?> wrap(
-    int slot,
-    Uint8List secret, {
-    required String reason,
-  }) async => null;
-  @override
-  Future<Uint8List?> unwrap(
-    int slot,
-    Uint8List blob, {
-    required String reason,
-  }) async => null;
-}
-
 DeviceBinding defaultDeviceBinding() =>
     Platform.isAndroid ? AndroidDeviceBinding() : SoftwareDeviceBinding();
-
-BiometricKeystore defaultBiometricKeystore() => Platform.isAndroid
-    ? AndroidBiometricKeystore()
-    : UnavailableBiometricKeystore();
