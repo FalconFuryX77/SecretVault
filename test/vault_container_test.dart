@@ -354,9 +354,10 @@ void main() {
         await closing;
         final r = await reopen('482913');
         final got = await r.readAll(r.entryById('t')!);
-        // Either the save happened or it didn't start: never a broken file.
-        expect(err == null ? got : null, err == null ? edited : null);
-        if (err != null) expect(got, Uint8List.fromList(List.filled(90000, 1)));
+        // A save already queued when the lock comes always lands (it's how
+        // unsaved edits are written on lock).
+        expect(err, isNull, reason: 'round $round');
+        expect(got, edited, reason: 'round $round');
         await r.close();
         await containerFile.delete();
       }

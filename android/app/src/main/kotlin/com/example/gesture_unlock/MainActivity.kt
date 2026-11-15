@@ -240,8 +240,12 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "pending" -> {
+                    // List first, then read the active file: read the other
+                    // way round, a rotation in between would offer the part
+                    // that was just started.
+                    val listed = RecorderService.stagingDir(this).listFiles()
                     val active = RecorderService.activeFile
-                    val files = RecorderService.stagingDir(this).listFiles()
+                    val files = listed
                         ?.filter { it.isFile && it.name.endsWith(".bin") && it != active }
                         ?.sortedBy { it.lastModified() }
                         ?: emptyList()
@@ -253,7 +257,12 @@ class MainActivity : FlutterActivity() {
                     val file = stagedFile(call.argument<String>("id")!!)
                     val key = call.argument<ByteArray>("key")!!
                     try {
-                        val rec = if (file.exists()) RecordingReader.open(file, key) else null
+                        // Never open a file that is still being written.
+                        val rec = if (file.exists() && file != RecorderService.activeFile) {
+                            RecordingReader.open(file, key)
+                        } else {
+                            null
+                        }
                         if (rec == null) {
                             null
                         } else if (rec.frames.isEmpty() || rec.sampleRate == 0) {

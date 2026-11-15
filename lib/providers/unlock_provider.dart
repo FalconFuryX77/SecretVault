@@ -149,6 +149,10 @@ class UnlockProvider extends ChangeNotifier {
     if (state == UnlockState.lockout || state == UnlockState.authenticating) {
       return false;
     }
+    // Busy before the first await, so a burst of submissions can't get
+    // several guesses in flight at once.
+    state = UnlockState.authenticating;
+    notifyListeners();
     // A lockout may have started while a vault was open (refused PIN
     // changes count too); honour it before checking anything.
     final lockoutEnd = await _authService.getLockoutEndTime();
@@ -156,8 +160,6 @@ class UnlockProvider extends ChangeNotifier {
       _startLockoutCountdown(max(1, lockoutEnd.difference(DateTime.now()).inSeconds));
       return false;
     }
-    state = UnlockState.authenticating;
-    notifyListeners();
 
     try {
       final session = await _vault.unlockWithPin(pin);

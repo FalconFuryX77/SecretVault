@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'navigation/vault_routes.dart';
 import 'theme/app_fonts.dart';
 import 'package:provider/provider.dart';
 import 'providers/device_files_provider.dart';
@@ -10,7 +11,6 @@ import 'services/vault_service.dart';
 import 'screens/normal_files_screen.dart';
 import 'screens/setup_screen.dart';
 
-final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -81,40 +81,6 @@ class SecretVaultApp extends StatelessWidget {
   }
 }
 
-/// Tracks the root navigator's routes, so locking can remove every vault
-/// screen at once.
-class VaultRouteObserver extends NavigatorObserver {
-  final List<Route<dynamic>> stack = [];
-
-  @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => stack.add(route);
-  @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => stack.remove(route);
-  @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => stack.remove(route);
-  @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    final i = oldRoute == null ? -1 : stack.indexOf(oldRoute);
-    if (i >= 0 && newRoute != null) {
-      stack[i] = newRoute;
-    } else if (newRoute != null) {
-      stack.add(newRoute);
-    }
-  }
-
-  /// Removes everything above the first route, without any transition, so
-  /// the very next frame is the cover app. (popUntil animates each route
-  /// out, and that animation would show the vault on wake.)
-  void removeAllAboveFirst() {
-    final nav = rootNavigatorKey.currentState;
-    if (nav == null) return;
-    for (final r in stack.skip(1).toList().reversed) {
-      if (r.isActive) nav.removeRoute(r);
-    }
-  }
-}
-
-final VaultRouteObserver vaultRoutes = VaultRouteObserver();
 
 class AppLifecycleScope extends StatefulWidget {
   final Widget child;
@@ -161,8 +127,9 @@ class _AppLifecycleScopeState extends State<AppLifecycleScope>
         state == AppLifecycleState.hidden) {
       unlock.onAppPaused();
       // A lock screen left open would greet whoever wakes the phone with
-      // "enter your PIN" inside the Files app.
-      if (unlock.state != UnlockState.unlocked) vaultRoutes.removeAllAboveFirst();
+      // "enter your PIN" inside the Files app. The cover app's own screens
+      // stay, as a real file manager's would.
+      if (unlock.state != UnlockState.unlocked) vaultRoutes.removeVaultScreens();
     } else if (state == AppLifecycleState.resumed) {
       unlock.onAppResumed();
     }
