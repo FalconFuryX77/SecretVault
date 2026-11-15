@@ -152,6 +152,37 @@ void main() {
     }
   });
 
+  test('an item edited after an interrupted backup is planned again (longer and shorter)', () async {
+    for (final edited in ['EDITED: new contact details here ' * 20, 'short']) {
+      final (id, _) = await newAccount();
+      final engine = await engineFor(id, direct);
+      final v1 = Uint8List.fromList(utf8.encode('source: meet at the north gate ' * 30));
+      // The first run plans, then dies before sending anything.
+      await expectLater(
+        engine.backupSource(_FailOnce(v1), fileId: 'n1', meta: {'title': 'n1', 'v': 1}),
+        throwsStateError,
+      );
+      final v2 = Uint8List.fromList(utf8.encode(edited));
+      await engine.backupSource(MemorySyncSource(v2), fileId: 'n1', meta: {'title': 'n1', 'v': 2});
+      final out = Directory('${tmp.path}/edited_${v2.length}');
+      final restored = await (await engineFor(id, direct)).restoreAll(out);
+      expect(restored, hasLength(1));
+      expect(await restored.single.readAsBytes(), v2);
+    }
+  });
+
+  test('restore carries on past a file it cannot restore, and keeps same-named files apart', () async {
+    final (id, _) = await newAccount();
+    final engine = await engineFor(id, direct);
+    await engine.backupSource(MemorySyncSource(Uint8List.fromList(utf8.encode('one'))), fileId: 'a', meta: {'title': 'notes.txt'});
+    await engine.backupSource(MemorySyncSource(Uint8List.fromList(utf8.encode('two'))), fileId: 'b', meta: {'title': 'notes.txt'});
+    final out = Directory('${tmp.path}/same_names');
+    final failures = <String>[];
+    final restored = await (await engineFor(id, direct)).restoreAll(out, onError: (f, e) => failures.add(f));
+    expect(failures, isEmpty);
+    expect(restored.map((f) => f.uri.pathSegments.last).toSet(), {'notes.txt', 'notes (2).txt'});
+  });
+
   test('the same content is never uploaded twice (dedup), across files', () async {
     final (id, _) = await newAccount();
     final engine = await engineFor(id, direct);
@@ -247,5 +278,22 @@ class _RecordingJournal extends MemoryJournalStore {
   Future<void> save(Map<String, dynamic> journal) async {
     await super.save(journal);
     history.add(jsonEncode(journal));
+  }
+}
+
+/// Fails its first read, like a run cut off right after planning.
+class _FailOnce implements SyncSource {
+  final Uint8List bytes;
+  bool _failed = false;
+  _FailOnce(this.bytes);
+  @override
+  Stream<Uint8List> openRead() => Stream.value(bytes);
+  @override
+  Future<Uint8List> readRange(int offset, int length) async {
+    if (!_failed) {
+      _failed = true;
+      throw StateError('cut off mid-upload');
+    }
+    return Uint8List.sublistView(bytes, offset, offset + length);
   }
 }

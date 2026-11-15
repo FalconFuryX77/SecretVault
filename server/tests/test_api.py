@@ -213,7 +213,10 @@ def test_append_only_blocks_device_deletes_but_allows_recovery_key(phone):
     assert account.client.get(f"/v1/pieces/{pid}", headers=auth).status_code == 404
 
 
-def test_without_append_only_devices_can_prune(client):
+def test_without_append_only_devices_can_prune(settings):
+    # Only an operator can turn append-only off (SYNC_APPEND_ONLY_DEFAULT).
+    settings.append_only_default = False
+    client = TestClient(create_app(settings))
     acct = Account(client, append_only=False)
     dev = acct.add_device()
     auth = acct.login(dev)
@@ -339,3 +342,42 @@ def test_staged_parts_are_per_account(client, phone):
     other = Account(client)
     oauth = other.login(other.add_device())
     assert client.get(f"/v1/uploads/{pid}", headers=oauth).json()["offset"] == 0
+
+
+def test_a_client_cannot_opt_out_of_append_only(client):
+    acct = Account(client, append_only=False)
+    dev = acct.add_device()
+    auth = acct.login(dev)
+    data = os.urandom(100)
+    pid = piece_id(data)
+    client.put(f"/v1/pieces/{pid}", content=data, headers=auth)
+    r = client.post("/v1/pieces/delete", json={"ids": [pid]}, headers=auth)
+    assert r.status_code in (401, 403)
+
+
+def test_oversized_bodies_are_refused_before_reading(client):
+    big = b"x" * (3 * 1024 * 1024)
+    r = client.post("/v1/accounts", content=big, headers={"content-type": "application/json"})
+    assert r.status_code == 413
+    pid = "a" * 64
+    r = client.put(f"/v1/pieces/{pid}", content=big)
+    assert r.status_code == 413
+
+
+def test_quota_holds_under_concurrent_uploads(settings):
+    import concurrent.futures
+
+    settings.max_account_bytes = 250_000
+    client = TestClient(create_app(settings))
+    acct = Account(client)
+    dev = acct.add_device()
+    auth = acct.login(dev)
+    blobs = [os.urandom(100_000) for _ in range(8)]
+
+    def put(data):
+        return client.put(f"/v1/pieces/{piece_id(data)}", content=data, headers=auth).status_code
+
+    with concurrent.futures.ThreadPoolExecutor(8) as ex:
+        codes = list(ex.map(put, blobs))
+    assert codes.count(201) == 2, codes
+    assert codes.count(413) == 6, codes

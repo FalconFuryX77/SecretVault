@@ -92,6 +92,8 @@ class MemoryJournalStore implements JournalStore {
 /// Is this a "the connection dropped" error, as opposed to a real refusal?
 bool isTransient(Object e) =>
     e is SocketException ||
+    e is HandshakeException ||
+    e is TlsException ||
     e is TimeoutException ||
     e is http.ClientException ||
     e is HttpException ||
@@ -182,6 +184,12 @@ class SyncEngine {
     var state = await api.uploadOffset(id);
     if (state.done) return;
     var off = state.offset;
+    if (off >= sealed.length) {
+      // A leftover upload of different bytes under this name (or one the
+      // server never completed): resuming can't finish it. Send it whole.
+      await api.putPiece(id, sealed);
+      return;
+    }
     while (off < sealed.length) {
       final end = min(sealed.length, off + partSize);
       try {
@@ -269,10 +277,28 @@ class SyncEngine {
   /// journal remembers the plan and the server remembers which pieces
   /// arrived. The content is read from [src] only; nothing is written to
   /// disk in the clear.
+  ///
+  /// If the item changed since an interrupted run planned it, the old plan
+  /// is thrown away and the item planned again: sealing new content under
+  /// the old piece names would store pieces that can never be restored
+  /// (append-only servers keep them for good) or fail on every run.
   Future<BackupReport> backupSource(
     SyncSource src, {
     required String fileId,
     Map<String, dynamic> meta = const {},
+  }) async {
+    try {
+      return await _backupSource(src, fileId: fileId, meta: meta, replan: false);
+    } on _StalePlan {
+      return _backupSource(src, fileId: fileId, meta: meta, replan: true);
+    }
+  }
+
+  Future<BackupReport> _backupSource(
+    SyncSource src, {
+    required String fileId,
+    required Map<String, dynamic> meta,
+    required bool replan,
   }) async {
     final clock = Stopwatch()..start();
     final sentBefore = api.bytesSent;
@@ -282,11 +308,15 @@ class SyncEngine {
     final jobs = (j['jobs'] as Map?)?.cast<String, dynamic>() ?? {};
     var job = (jobs[fileId] as Map?)?.cast<String, dynamic>();
 
-    if (job == null || job['state'] == 'committed') {
+    final committed = job != null && job['state'] == 'committed';
+    final stale = job != null && !committed && (replan || jsonEncode(job['meta']) != jsonEncode(meta));
+    if (job == null || committed || stale) {
       final planned = await _plan(src);
       job = {
         'version': hex(randomBytes(16)),
-        'parent': job?['version'],
+        // After a committed version, that one; after an abandoned plan, the
+        // version it was going to replace.
+        'parent': committed ? job['version'] : job?['parent'],
         'size': planned.size,
         'mac': planned.mac,
         'meta': meta,
@@ -303,15 +333,26 @@ class SyncEngine {
     final compress = _compressible((meta['mime'] as String?) ?? '');
 
     // Pieces: ask what's missing, send only that. Every drop → ask again.
+    // Then ask once more: nothing is committed until the server has them all.
     await _withRetry(() async {
-      final todo = (await api.missing(ids)).toSet();
-      for (final p in plan) {
-        final id = p[2] as String;
-        if (!todo.remove(id)) continue;
-        final plain = await src.readRange(p[0] as int, p[1] as int);
-        final sealed = await codec.seal(id, plain, compress: compress);
-        await _sendPiece(id, sealed);
-        uploaded++;
+      for (var round = 0;; round++) {
+        final todo = (await api.missing(ids)).toSet();
+        if (todo.isEmpty) break;
+        if (round >= 3) throw IntegrityException('the server is still missing ${todo.length} pieces');
+        for (final p in plan) {
+          final id = p[2] as String;
+          if (!todo.remove(id)) continue;
+          final Uint8List plain;
+          try {
+            plain = await src.readRange(p[0] as int, p[1] as int);
+          } on RangeError {
+            throw _StalePlan();
+          }
+          if (await codec.idFor(plain) != id) throw _StalePlan();
+          final sealed = await codec.seal(id, plain, compress: compress);
+          await _sendPiece(id, sealed);
+          uploaded++;
+        }
       }
     }, () => attempts++);
 
@@ -352,7 +393,8 @@ class SyncEngine {
       // Our journal is behind the server: an earlier append went through but
       // its reply was lost. Re-sync the chain from the server and check
       // whether this exact version is already committed.
-      final already = await _resyncChain(j, fileId, job['version'] as String);
+      final version = job['version'] as String;
+      final already = await _resyncChain(j, (o) => o.type == 'put' && o.file == fileId && o.version == version);
       if (!already) {
         await _commit(fileId, job, manifestId);
         return;
@@ -376,14 +418,14 @@ class SyncEngine {
   }
 
   /// Rebuilds this device's chain position from the server's log. Returns
-  /// whether [version] of [fileId] is already in it.
-  Future<bool> _resyncChain(Map<String, dynamic> j, String fileId, String version) async {
+  /// whether an op matching [wanted] is already in it.
+  Future<bool> _resyncChain(Map<String, dynamic> j, bool Function(LogOp) wanted) async {
     final mine = (await api.readLog()).where((r) => r.device == _device).toList();
     var found = false;
     var state = ChainState();
     for (final r in mine) {
       final body = await sealer.open(r.device, r.counter, r.record);
-      found = found || body.ops.any((o) => o.type == 'put' && o.file == fileId && o.version == version);
+      found = found || body.ops.any(wanted);
       state = ChainState(counter: r.counter, lastHash: hex(await sha256(r.record)));
     }
     j['chain'] = state.toJson();
@@ -394,18 +436,34 @@ class SyncEngine {
   /// Marks a file deleted in the log (pieces stay until pruning).
   Future<void> deleteFile(String fileId, String version) async {
     await _withRetry(() async {
-      final j = await journal.load();
-      final chain = ChainState.fromJson(((j['chain'] as Map?) ?? {'c': 0, 'h': ''}).cast<String, dynamic>());
-      final (counter, sealed) = await sealer.next(_device, chain, [LogOp.del(file: fileId, version: version)]);
-      await api.appendLog(counter, sealed);
-      j['chain'] = chain.toJson();
-      await journal.save(j);
+      for (var tries = 0;; tries++) {
+        final j = await journal.load();
+        final chain = ChainState.fromJson(((j['chain'] as Map?) ?? {'c': 0, 'h': ''}).cast<String, dynamic>());
+        final (counter, sealed) = await sealer.next(_device, chain, [LogOp.del(file: fileId, version: version)]);
+        try {
+          await api.appendLog(counter, sealed);
+        } on ApiException catch (e) {
+          // 409: an earlier append went through but its reply was lost.
+          if (e.status != 409 || tries >= 3) rethrow;
+          final done = await _resyncChain(j, (o) => o.type == 'del' && o.file == fileId && o.version == version);
+          if (done) return;
+          continue;
+        }
+        j['chain'] = chain.toJson();
+        await journal.save(j);
+        return;
+      }
     }, () {});
   }
 
   /// Restores the latest version of every live file into [out]. Verifies the
   /// log chains, every piece (AEAD + name), and every file's MAC.
-  Future<List<File>> restoreAll(Directory out) async {
+  ///
+  /// With [onError], a file that can't be restored (a missing piece, a
+  /// failed check) is reported and skipped and the rest still come back;
+  /// without it the first failure throws. Same-named files get " (2)" etc.
+  /// A file that fails is never left half-written.
+  Future<List<File>> restoreAll(Directory out, {void Function(String fileId, Object error)? onError}) async {
     final records = await _withRetry(() => api.readLog(), () {});
     final bodies = await verifyLog(sealer, records);
     final live = <String, LogOp>{};
@@ -420,31 +478,52 @@ class SyncEngine {
     }
     await out.create(recursive: true);
     final restored = <File>[];
+    final used = <String>{};
     for (final op in live.values) {
-      final mSealed = await _withRetry(() => api.getPiece(op.manifestId!), () {});
-      final m = Manifest.decode(await codec.open(op.manifestId!, mSealed, manifest: true));
-      final name = _safeName((m.meta['title'] as String?) ?? m.file);
-      final target = File('${out.path}${Platform.pathSeparator}$name');
-      final sink = await target.open(mode: FileMode.write);
-      final macSink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
+      File? target;
       try {
-        for (final (id, len) in m.pieces) {
-          final plain = await codec.open(id, await _withRetry(() => api.getPiece(id), () {}));
-          if (plain.length != len) throw IntegrityException('piece $id has wrong length');
-          sink.writeFromSync(plain);
-          macSink.add(plain);
+        final mSealed = await _withRetry(() => api.getPiece(op.manifestId!), () {});
+        final m = Manifest.decode(await codec.open(op.manifestId!, mSealed, manifest: true));
+        final name = _uniqueName(_safeName((m.meta['title'] as String?) ?? m.file), used);
+        final t = File('${out.path}${Platform.pathSeparator}$name');
+        target = t;
+        final sink = await t.open(mode: FileMode.write);
+        final macSink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
+        try {
+          for (final (id, len) in m.pieces) {
+            final plain = await codec.open(id, await _withRetry(() => api.getPiece(id), () {}));
+            if (plain.length != len) throw IntegrityException('piece $id has wrong length');
+            sink.writeFromSync(plain);
+            macSink.add(plain);
+          }
+        } finally {
+          await sink.close();
         }
-      } finally {
-        await sink.close();
+        macSink.close();
+        if (hex((await macSink.mac()).bytes) != m.mac) {
+          throw IntegrityException('file ${m.file} failed its end-to-end check');
+        }
+        restored.add(t);
+      } catch (e) {
+        final t = target;
+        if (t != null && await t.exists()) await t.delete();
+        if (onError == null) rethrow;
+        onError(op.file, e);
       }
-      macSink.close();
-      if (hex((await macSink.mac()).bytes) != m.mac) {
-        await target.delete();
-        throw IntegrityException('file ${m.file} failed its end-to-end check');
-      }
-      restored.add(target);
     }
     return restored;
+  }
+
+  static String _uniqueName(String name, Set<String> used) {
+    var candidate = name;
+    final dot = name.lastIndexOf('.');
+    final stem = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+    for (var n = 2; used.contains(candidate.toLowerCase()); n++) {
+      candidate = '$stem ($n)$ext';
+    }
+    used.add(candidate.toLowerCase());
+    return candidate;
   }
 
   static String _safeName(String s) {
@@ -452,3 +531,6 @@ class SyncEngine {
     return cleaned.isEmpty || cleaned == '.' || cleaned == '..' ? 'file' : cleaned;
   }
 }
+
+/// The plan in the journal no longer matches the item's content.
+class _StalePlan implements Exception {}
