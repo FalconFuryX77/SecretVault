@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs an integration test on a connected device/emulator with the motion
-# module switched off, granting the cover app's storage permissions as soon as
+# Runs an integration test on a connected device/emulator,
+# granting the cover app's storage permissions as soon as
 # `flutter test` installs the app (so no system dialog interrupts the run).
 #
 # Usage:  tool/device_test.sh integration_test/app_flow_test.dart [device-id]
@@ -25,7 +25,7 @@ ADB="${ADB:-adb}"
 ) &
 GRANTER=$!
 
-flutter test "$TEST" -d "$DEVICE" --dart-define=GESTURES=false --dart-define=SECURE_WINDOW=false
+flutter test "$TEST" -d "$DEVICE" --dart-define=SECURE_WINDOW=false
 STATUS=$?
 kill "$GRANTER" 2>/dev/null || true
 exit $STATUS

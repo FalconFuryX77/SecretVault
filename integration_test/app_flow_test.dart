@@ -1,9 +1,9 @@
-// End-to-end UI flow on a real device or emulator, PIN-only build.
+// End-to-end UI flow on a real device or emulator.
 //
 // Before running, grant the cover app's storage permissions so no system
 // dialog interrupts the test (see tool/device_test.sh).
 //
-// Run:  flutter test integration_test/app_flow_test.dart -d <device> --dart-define=GESTURES=false
+// Run:  flutter test integration_test/app_flow_test.dart -d <device>
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'dart:convert';
 
 import 'package:gesture_unlock/main.dart' as app;
-import 'package:gesture_unlock/models/gesture.dart';
+import 'package:gesture_unlock/models/vault_state.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
 import 'package:gesture_unlock/providers/vault_provider.dart';
 import 'package:gesture_unlock/services/security_channel_service.dart';
@@ -64,6 +64,9 @@ void main() {
   Future<void> tapWhenReady(WidgetTester t, Finder f) async {
     await waitFor(t, f);
     await settle(t, 700);
+    // On a real phone the keyboard can cover a button; scroll it into view.
+    await t.ensureVisible(f);
+    await settle(t, 300);
     await t.tap(f);
     await t.pump();
   }
@@ -77,11 +80,10 @@ void main() {
       await t.tap(title, warnIfMissed: false);
       await t.pump(const Duration(milliseconds: 120));
     }
-    await waitFor(t, find.text('PIN Code'));
+    await waitFor(t, find.text('Unlock'));
   }
 
   Future<void> enterPin(WidgetTester t, String pin) async {
-    await tapWhenReady(t, find.text('PIN Code'));
     await waitFor(t, find.text('Unlock'));
     await settle(t, 500);
     await t.enterText(find.byType(TextField).last, pin);

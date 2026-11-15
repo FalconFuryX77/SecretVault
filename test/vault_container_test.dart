@@ -3,13 +3,11 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gesture_unlock/models/gesture.dart';
+import 'package:gesture_unlock/models/vault_state.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
 import 'package:gesture_unlock/vault/crypto_primitives.dart';
 import 'package:gesture_unlock/vault/platform_keys.dart';
 import 'package:gesture_unlock/vault/vault_container.dart';
-
-import 'support/fake_biometrics.dart';
 
 VaultItem _meta(String id, String title) => VaultItem(
   id: id,
@@ -24,7 +22,6 @@ VaultItem _meta(String id, String title) => VaultItem(
 void main() {
   late Directory tmp;
   late File containerFile;
-  late FakeBiometrics bio;
   late VaultCrypto crypto;
 
   Future<File> sourceFile(String name, int size, {int seed = 1}) async {
@@ -37,12 +34,9 @@ void main() {
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('vault_test');
     containerFile = File('${tmp.path}/c.bin');
-    bio = FakeBiometrics();
     crypto = VaultCrypto(
       binding: FixedDeviceBinding(),
-      biometrics: bio,
       pinParams: KdfParams.testing,
-      gestureParams: KdfParams.testing,
       growChunks: 8,
     );
   });
@@ -90,9 +84,7 @@ void main() {
       await s.close();
       final otherDevice = VaultCrypto(
         binding: FixedDeviceBinding(Uint8List.fromList(List.filled(32, 9))),
-        biometrics: bio,
         pinParams: KdfParams.testing,
-        gestureParams: KdfParams.testing,
       );
       expect(
         await VaultContainer(
@@ -112,48 +104,6 @@ void main() {
       final s2 = await c.unlockWithPin('99887766');
       expect(s2, isNotNull);
       await s2!.close();
-    });
-  });
-
-  group('gesture + biometric', () {
-    const g = [
-      Gesture.left,
-      Gesture.up,
-      Gesture.shake,
-      Gesture.right,
-      Gesture.down,
-    ];
-
-    test('gesture alone is never enough: biometric must succeed', () async {
-      final s = await createVault();
-      expect(await s.enrollGesture(g, reason: 't'), isTrue);
-      await s.close();
-
-      final c = VaultContainer(containerFile, crypto);
-      bio.succeed = false;
-      expect(await c.unlockWithGesture(g, reason: 't'), isNull);
-      bio.succeed = true;
-      final s2 = await c.unlockWithGesture(g, reason: 't');
-      expect(s2, isNotNull);
-      await s2!.close();
-    });
-
-    test('wrong gesture never reaches the biometric prompt', () async {
-      final s = await createVault();
-      await s.enrollGesture(g, reason: 't');
-      await s.close();
-      final before = bio.prompts;
-      final c = VaultContainer(containerFile, crypto);
-      expect(
-        await c.unlockWithGesture([
-          Gesture.right,
-          Gesture.right,
-          Gesture.right,
-          Gesture.right,
-        ], reason: 't'),
-        isNull,
-      );
-      expect(bio.prompts, before);
     });
   });
 
@@ -375,36 +325,6 @@ void main() {
         isNull,
       );
     });
-
-    test(
-      'decoy can have its own gesture, distinct from the real one',
-      () async {
-        const realG = [Gesture.left, Gesture.left, Gesture.up, Gesture.up];
-        const decoyG = [
-          Gesture.down,
-          Gesture.down,
-          Gesture.right,
-          Gesture.shake,
-        ];
-        final s = await createVault();
-        await s.enrollGesture(realG, reason: 't');
-        await s.createDecoy(pin: '111222');
-        await expectLater(
-          s.enrollDecoyGesture(realG, reason: 't'),
-          throwsA(isA<CredentialInUseException>()),
-        );
-        expect(await s.enrollDecoyGesture(decoyG, reason: 't'), isTrue);
-        await s.close();
-
-        final c = VaultContainer(containerFile, crypto);
-        final d = (await c.unlockWithGesture(decoyG, reason: 't'))!;
-        expect(d.type, VaultType.decoy);
-        await d.close();
-        final r = (await c.unlockWithGesture(realG, reason: 't'))!;
-        expect(r.type, VaultType.primary);
-        await r.close();
-      },
-    );
 
     test('with or without a decoy, the file has the same shape', () async {
       final s = await createVault();

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -26,6 +27,33 @@ class StorageSpaceInfo {
   final int totalBytes;
   final int usedBytes;
   final int freeBytes;
+
+  double get usedFraction => totalBytes <= 0 ? 0 : (usedBytes / totalBytes).clamp(0.0, 1.0);
+
+  static const List<int> _marketedGb = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
+
+  /// Bytes per displayed "GB". Phones are sold as 64 / 128 / 256 GB, but
+  /// some report that capacity in decimal units (128 x 10^9 bytes) and
+  /// others in binary (128 x 2^30). Pick the unit in which the total is a
+  /// size phones are actually sold in, so the card reads "128 GB" like the
+  /// system's own storage screen, and use the same unit for "used".
+  double get _bytesPerGb {
+    for (final unit in const [1e9, 1073741824.0]) {
+      final gb = totalBytes / unit;
+      if (_marketedGb.any((m) => (gb - m).abs() / m < 0.01)) return unit;
+    }
+    return 1e9;
+  }
+
+  String get totalLabel => formatGb(totalBytes, bytesPerGb: _bytesPerGb);
+  String get usedLabel => formatGb(usedBytes, bytesPerGb: _bytesPerGb);
+
+  static String formatGb(int bytes, {double bytesPerGb = 1e9}) {
+    final gb = bytes / bytesPerGb;
+    if (gb >= 100) return '${gb.round()} GB';
+    final text = gb.toStringAsFixed(1);
+    return '${text.endsWith('.0') ? text.substring(0, text.length - 2) : text} GB';
+  }
 
   const StorageSpaceInfo({
     required this.totalBytes,
@@ -192,8 +220,101 @@ class DeviceFileService {
     }
   }
 
+  static const MethodChannel _platform = MethodChannel('com.example.secretvault/security');
+
+  /// The phone's real storage totals, as the system reports them. Null where
+  /// that isn't available (the card then shows no numbers rather than fake ones).
+  Future<StorageSpaceInfo?> getStorageSpace() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final m = await _platform.invokeMapMethod<String, dynamic>('storageStats');
+      final total = (m?['total'] as num?)?.toInt() ?? 0;
+      final free = (m?['free'] as num?)?.toInt() ?? 0;
+      if (total <= 0) return null;
+      return StorageSpaceInfo(totalBytes: total, usedBytes: total - free, freeBytes: free);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Real per-category file counts across the user's shared folders. One
+  /// walk, no cap: the numbers are whatever is actually on the phone, and
+  /// they match what opening the category lists.
+  Future<Map<DeviceFileCategory, int>> countByCategory() async {
+    final counts = <DeviceFileCategory, int>{
+      for (final c in DeviceFileCategory.values)
+        if (c != DeviceFileCategory.all) c: 0,
+    };
+    final standardDirs = await getStandardDirectories();
+    final roots = standardDirs.values.toList();
+    if (roots.isEmpty) roots.add(await getDefaultRootDirectory());
+
+    final visited = <String>{};
+    for (final root in roots) {
+      await _countDirectory(root, counts, visited, depth: _scanDepth);
+    }
+
+    final downloadDir = standardDirs['Downloads'];
+    if (downloadDir != null && await downloadDir.exists()) {
+      try {
+        await for (final entity in downloadDir.list(followLinks: false)) {
+          if (entity is File && !p.basename(entity.path).startsWith('.')) {
+            counts[DeviceFileCategory.downloads] = counts[DeviceFileCategory.downloads]! + 1;
+          }
+        }
+      } catch (_) {}
+    }
+    return counts;
+  }
+
+  static const int _scanDepth = 12;
+
+  static DeviceFileCategory? _categoryForExtension(String ext) {
+    if (imageExtensions.contains(ext)) return DeviceFileCategory.images;
+    if (videoExtensions.contains(ext)) return DeviceFileCategory.videos;
+    if (audioExtensions.contains(ext)) return DeviceFileCategory.audio;
+    if (documentExtensions.contains(ext)) return DeviceFileCategory.documents;
+    if (archiveExtensions.contains(ext)) return DeviceFileCategory.archives;
+    return null;
+  }
+
+  Future<void> _countDirectory(
+    Directory dir,
+    Map<DeviceFileCategory, int> counts,
+    Set<String> visited, {
+    required int depth,
+  }) async {
+    if (depth <= 0 || !visited.add(dir.path)) return;
+    try {
+      await for (final entity in dir.list(followLinks: false)) {
+        final name = p.basename(entity.path);
+        if (name.startsWith('.')) continue;
+        if (entity is File) {
+          final cat = _categoryForExtension(p.extension(entity.path).replaceAll('.', '').toLowerCase());
+          if (cat != null) counts[cat] = counts[cat]! + 1;
+        } else if (entity is Directory && !name.startsWith('Android')) {
+          await _countDirectory(entity, counts, visited, depth: depth - 1);
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Newest first, with one stat per file (a comparator that stats on every
+  /// comparison gets very slow once there are thousands of files).
+  static void _sortNewestFirst(List<File> files) {
+    final modified = <String, DateTime>{};
+    for (final f in files) {
+      try {
+        modified[f.path] = f.statSync().modified;
+      } catch (_) {
+        modified[f.path] = DateTime(0);
+      }
+    }
+    files.sort((a, b) => modified[b.path]!.compareTo(modified[a.path]!));
+  }
+
   /// Scans real directories for files matching a specific category.
-  Future<List<File>> getFilesByCategory(DeviceFileCategory category, {int maxResults = 200}) async {
+  Future<List<File>> getFilesByCategory(DeviceFileCategory category, {int maxResults = 5000}) async {
     final List<File> matches = [];
     final standardDirs = await getStandardDirectories();
 
@@ -209,13 +330,7 @@ class DeviceFileService {
           }
         } catch (_) {}
       }
-      matches.sort((a, b) {
-        try {
-          return b.statSync().modified.compareTo(a.statSync().modified);
-        } catch (_) {
-          return 0;
-        }
-      });
+      _sortNewestFirst(matches);
       return matches;
     }
 
@@ -228,17 +343,10 @@ class DeviceFileService {
 
     for (final root in roots) {
       if (matches.length >= maxResults) break;
-      await _scanDirectoryForExtensions(root, allowedExts, matches, maxResults: maxResults, depth: 3);
+      await _scanDirectoryForExtensions(root, allowedExts, matches, maxResults: maxResults, depth: _scanDepth);
     }
 
-    // Sort by modified date descending
-    matches.sort((a, b) {
-      try {
-        return b.statSync().modified.compareTo(a.statSync().modified);
-      } catch (_) {
-        return 0;
-      }
-    });
+    _sortNewestFirst(matches);
 
     return matches;
   }

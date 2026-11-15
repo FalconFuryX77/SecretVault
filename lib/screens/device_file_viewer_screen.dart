@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import '../services/device_file_service.dart';
@@ -93,7 +93,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
         elevation: 0,
         title: Text(
           fileName,
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             fontSize: 16,
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -124,7 +124,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
                   errorBuilder: (context, error, stackTrace) => Center(
                     child: Text(
                       'Could not render image.',
-                      style: GoogleFonts.outfit(color: Colors.white54),
+                      style: AppFonts.outfit(color: Colors.white54),
                     ),
                   ),
                 ),
@@ -136,7 +136,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
               child: SingleChildScrollView(
                 child: SelectableText(
                   _textContent!,
-                  style: GoogleFonts.firaCode(
+                  style: AppFonts.firaCode(
                     fontSize: 13,
                     color: Colors.white70,
                     height: 1.5,
@@ -161,7 +161,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
                 children: [
                   Text(
                     DeviceFileService.formatBytes(_fileSize),
-                    style: GoogleFonts.outfit(
+                    style: AppFonts.outfit(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -170,7 +170,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
                   if (_modifiedDate != null)
                     Text(
                       'Modified: ${_modifiedDate!.day}/${_modifiedDate!.month}/${_modifiedDate!.year}',
-                      style: GoogleFonts.outfit(
+                      style: AppFonts.outfit(
                         fontSize: 11,
                         color: Colors.white54,
                       ),
@@ -207,7 +207,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
             child: Text(
               fileName,
               textAlign: TextAlign.center,
-              style: GoogleFonts.outfit(
+              style: AppFonts.outfit(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -217,7 +217,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
           const SizedBox(height: 8),
           Text(
             DeviceFileService.formatBytes(_fileSize),
-            style: GoogleFonts.outfit(fontSize: 13, color: Colors.white54),
+            style: AppFonts.outfit(fontSize: 13, color: Colors.white54),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -233,7 +233,7 @@ class _DeviceFileViewerScreenState extends State<DeviceFileViewerScreen> {
             icon: const Icon(Icons.open_in_new_rounded, size: 18),
             label: Text(
               'Open with External App',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+              style: AppFonts.outfit(fontWeight: FontWeight.w600),
             ),
           ),
         ],

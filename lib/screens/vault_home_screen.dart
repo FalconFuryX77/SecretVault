@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import '../models/gesture.dart';
+import '../models/vault_state.dart';
 import '../models/vault_item.dart';
-import '../providers/gesture_unlock_provider.dart';
+import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
 import '../services/device_file_service.dart';
 import 'file_viewer_screen.dart';
@@ -47,13 +47,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   void _lockAndExit() {
     context.read<VaultProvider>().clearVaultSession();
-    context.read<GestureUnlockProvider>().lockVault();
+    context.read<UnlockProvider>().lockVault();
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   void _triggerPanicLock() {
     context.read<VaultProvider>().clearVaultSession();
-    context.read<GestureUnlockProvider>().triggerPanicLock();
+    context.read<UnlockProvider>().triggerPanicLock();
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
@@ -81,7 +81,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               const SizedBox(height: 16),
               Text(
                 'Add File to Encrypted Safe',
-                style: GoogleFonts.outfit(
+                style: AppFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
@@ -158,7 +158,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     List<String>? allowedExtensions,
     VaultCategory category,
   ) async {
-    final result = await context.read<GestureUnlockProvider>().withoutAutoLock(
+    final result = await context.read<UnlockProvider>().withoutAutoLock(
       () => FilePicker.platform.pickFiles(
         type: fileType,
         allowedExtensions: allowedExtensions,
@@ -216,7 +216,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           content: Text(
             'Encrypted "$fileName". The original is still in your phone storage: '
             'delete it there if it should not exist outside the vault.',
-            style: GoogleFonts.outfit(color: Colors.white),
+            style: AppFonts.outfit(color: Colors.white),
           ),
         ),
       );
@@ -242,7 +242,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       ),
       title: Text(
         title,
-        style: GoogleFonts.outfit(
+        style: AppFonts.outfit(
           fontSize: 14,
           fontWeight: FontWeight.w600,
           color: Colors.white,
@@ -250,7 +250,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       ),
       subtitle: Text(
         subtitle,
-        style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
+        style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
       ),
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
     );
@@ -259,7 +259,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final vault = context.watch<VaultProvider>();
-    final unlockProvider = context.watch<GestureUnlockProvider>();
+    final unlockProvider = context.watch<UnlockProvider>();
 
     // Listen for panic or lock events to auto exit
     if (unlockProvider.state != UnlockState.unlocked) {
@@ -309,7 +309,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               children: [
                 Text(
                   'Encrypted Safe',
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
@@ -317,7 +317,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 ),
                 Text(
                   'AES-256 GCM • Active',
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontSize: 10,
                     color: const Color(0xFF34D399),
                   ),
@@ -394,7 +394,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     children: [
                       Text(
                         '$count protected ${count == 1 ? 'item' : 'items'} ($sizeFormatted)',
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
@@ -403,7 +403,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       const SizedBox(height: 2),
                       Text(
                         'Shake hard anytime to trigger Panic Lock',
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 11,
                           color: Colors.white60,
                         ),
@@ -421,10 +421,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             child: TextField(
               controller: _searchController,
               onChanged: (q) => vault.setSearchQuery(q),
-              style: GoogleFonts.outfit(color: Colors.white, fontSize: 14),
+              style: AppFonts.outfit(color: Colors.white, fontSize: 14),
               decoration: InputDecoration(
                 hintText: 'Search encrypted files, notes, tags...',
-                hintStyle: GoogleFonts.outfit(
+                hintStyle: AppFonts.outfit(
                   color: Colors.white38,
                   fontSize: 13,
                 ),
@@ -505,7 +505,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         const SizedBox(height: 12),
                         Text(
                           'Safe is Empty',
-                          style: GoogleFonts.outfit(
+                          style: AppFonts.outfit(
                             fontSize: 16,
                             color: Colors.white60,
                             fontWeight: FontWeight.w600,
@@ -514,7 +514,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         const SizedBox(height: 6),
                         Text(
                           'Tap + Add File below to import encrypted files.',
-                          style: GoogleFonts.outfit(
+                          style: AppFonts.outfit(
                             fontSize: 13,
                             color: Colors.white38,
                           ),
@@ -536,7 +536,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         icon: const Icon(Icons.add_rounded, size: 22),
         label: Text(
           'Add File',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14),
+          style: AppFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14),
         ),
       ),
     );
@@ -551,7 +551,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       child: FilterChip(
         selected: isSelected,
         label: Text(label),
-        labelStyle: GoogleFonts.outfit(
+        labelStyle: AppFonts.outfit(
           fontSize: 12,
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           color: isSelected ? Colors.white : Colors.white60,
@@ -670,7 +670,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               children: [
                 Text(
                   item.title,
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                     color: Colors.white,
@@ -683,7 +683,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   item.content != null
                       ? '${item.content!.length} chars'
                       : DeviceFileService.formatBytes(item.fileSizeBytes),
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontSize: 11,
                     color: Colors.white54,
                   ),
@@ -717,7 +717,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         ),
         title: Text(
           item.title,
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             fontSize: 14,
             fontWeight: FontWeight.w600,
             color: Colors.white,
@@ -729,7 +729,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           item.content != null
               ? (item.content!.split('\n').first)
               : '${DeviceFileService.formatBytes(item.fileSizeBytes)} • Encrypted',
-          style: GoogleFonts.outfit(fontSize: 12, color: Colors.white54),
+          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -818,7 +818,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             backgroundColor: const Color(0xFF059669),
             content: Text(
               'Exported to ${res.path}',
-              style: GoogleFonts.outfit(color: Colors.white),
+              style: AppFonts.outfit(color: Colors.white),
             ),
           ),
         );
@@ -834,7 +834,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
           title: Text(
             'Rename',
-            style: GoogleFonts.outfit(
+            style: AppFonts.outfit(
               color: Colors.white,
               fontWeight: FontWeight.bold,
             ),
@@ -842,7 +842,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           content: TextField(
             controller: controller,
             autofocus: true,
-            style: GoogleFonts.outfit(color: Colors.white),
+            style: AppFonts.outfit(color: Colors.white),
             decoration: InputDecoration(
               filled: true,
               fillColor: const Color(0xFF21262D),
@@ -857,7 +857,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               onPressed: () => Navigator.pop(ctx),
               child: Text(
                 'Cancel',
-                style: GoogleFonts.outfit(color: Colors.white54),
+                style: AppFonts.outfit(color: Colors.white54),
               ),
             ),
             ElevatedButton(
@@ -868,7 +868,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               onPressed: () => Navigator.pop(ctx, controller.text.trim()),
               child: Text(
                 'Save',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                style: AppFonts.outfit(fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -887,7 +887,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           backgroundColor: const Color(0xFFE11D48),
           content: Text(
             'File shredded and deleted.',
-            style: GoogleFonts.outfit(color: Colors.white),
+            style: AppFonts.outfit(color: Colors.white),
           ),
         ),
       );

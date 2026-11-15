@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../theme/app_fonts.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import '../providers/device_files_provider.dart';
-import '../providers/gesture_unlock_provider.dart';
+import '../providers/unlock_provider.dart';
 import '../services/device_file_service.dart';
 import '../services/security_channel_service.dart';
 import 'device_file_viewer_screen.dart';
@@ -16,7 +16,7 @@ import 'vault_home_screen.dart';
 
 /// Full-featured Native Android Files App.
 /// Serves as a real, working file manager for device storage while housing
-/// the encrypted vault behind a covert trigger and motion gestures.
+/// the encrypted vault behind a covert trigger and a PIN.
 class NormalFilesScreen extends StatefulWidget {
   const NormalFilesScreen({super.key});
 
@@ -42,10 +42,10 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
       // Permission prompts open system screens, which pause the app. Right
       // after setup the vault is open, and that pause must not lock it.
       final files = context.read<DeviceFilesProvider>();
-      context.read<GestureUnlockProvider>().withoutAutoLock(files.init);
+      context.read<UnlockProvider>().withoutAutoLock(files.init);
     });
 
-    _unlockSub = context.read<GestureUnlockProvider>().onVaultUnlocked.listen((
+    _unlockSub = context.read<UnlockProvider>().onVaultUnlocked.listen((
       vaultType,
     ) {
       if (!mounted) return;
@@ -103,7 +103,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
         backgroundColor: const Color(0xFF161B22),
         title: Text(
           'Delete ${targets.length} items?',
-          style: GoogleFonts.outfit(color: Colors.white),
+          style: AppFonts.outfit(color: Colors.white),
         ),
         actions: [
           TextButton(
@@ -146,7 +146,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
   }
 
   void _openVaultPortal() {
-    final provider = context.read<GestureUnlockProvider>();
+    final provider = context.read<UnlockProvider>();
     if (!provider.isSetupComplete) {
       Navigator.push(
         context,
@@ -169,7 +169,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           'New Folder',
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             color: Colors.white,
             fontWeight: FontWeight.bold,
           ),
@@ -177,10 +177,10 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          style: GoogleFonts.outfit(color: Colors.white),
+          style: AppFonts.outfit(color: Colors.white),
           decoration: InputDecoration(
             hintText: 'Folder name...',
-            hintStyle: GoogleFonts.outfit(color: Colors.white38),
+            hintStyle: AppFonts.outfit(color: Colors.white38),
             filled: true,
             fillColor: const Color(0xFF21262D),
             border: OutlineInputBorder(
@@ -194,7 +194,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: Text(
               'Cancel',
-              style: GoogleFonts.outfit(color: Colors.white54),
+              style: AppFonts.outfit(color: Colors.white54),
             ),
           ),
           ElevatedButton(
@@ -211,7 +211,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             },
             child: Text(
               'Create',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              style: AppFonts.outfit(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -229,7 +229,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           'New Text File',
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             color: Colors.white,
             fontWeight: FontWeight.bold,
           ),
@@ -240,10 +240,10 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             TextField(
               controller: nameController,
               autofocus: true,
-              style: GoogleFonts.outfit(color: Colors.white),
+              style: AppFonts.outfit(color: Colors.white),
               decoration: InputDecoration(
                 hintText: 'filename.txt',
-                hintStyle: GoogleFonts.outfit(color: Colors.white38),
+                hintStyle: AppFonts.outfit(color: Colors.white38),
                 filled: true,
                 fillColor: const Color(0xFF21262D),
                 border: OutlineInputBorder(
@@ -256,10 +256,10 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             TextField(
               controller: contentController,
               maxLines: 3,
-              style: GoogleFonts.firaCode(color: Colors.white, fontSize: 13),
+              style: AppFonts.firaCode(color: Colors.white, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'Content...',
-                hintStyle: GoogleFonts.outfit(color: Colors.white38),
+                hintStyle: AppFonts.outfit(color: Colors.white38),
                 filled: true,
                 fillColor: const Color(0xFF21262D),
                 border: OutlineInputBorder(
@@ -275,7 +275,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: Text(
               'Cancel',
-              style: GoogleFonts.outfit(color: Colors.white54),
+              style: AppFonts.outfit(color: Colors.white54),
             ),
           ),
           ElevatedButton(
@@ -296,7 +296,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             },
             child: Text(
               'Create',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+              style: AppFonts.outfit(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -332,7 +332,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
           ),
           title: Text(
             'Rename',
-            style: GoogleFonts.outfit(
+            style: AppFonts.outfit(
               color: Colors.white,
               fontWeight: FontWeight.bold,
             ),
@@ -340,7 +340,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
           content: TextField(
             controller: controller,
             autofocus: true,
-            style: GoogleFonts.outfit(color: Colors.white),
+            style: AppFonts.outfit(color: Colors.white),
             decoration: InputDecoration(
               filled: true,
               fillColor: const Color(0xFF21262D),
@@ -355,7 +355,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               onPressed: () => Navigator.pop(ctx),
               child: Text(
                 'Cancel',
-                style: GoogleFonts.outfit(color: Colors.white54),
+                style: AppFonts.outfit(color: Colors.white54),
               ),
             ),
             ElevatedButton(
@@ -365,7 +365,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               onPressed: () => Navigator.pop(ctx, controller.text.trim()),
               child: Text(
                 'Rename',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                style: AppFonts.outfit(fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -384,21 +384,21 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
           ),
           title: Text(
             'Delete File',
-            style: GoogleFonts.outfit(
+            style: AppFonts.outfit(
               color: Colors.white,
               fontWeight: FontWeight.bold,
             ),
           ),
           content: Text(
             'Permanently delete "$fileName" from storage?',
-            style: GoogleFonts.outfit(color: Colors.white70, fontSize: 13),
+            style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: Text(
                 'Cancel',
-                style: GoogleFonts.outfit(color: Colors.white54),
+                style: AppFonts.outfit(color: Colors.white54),
               ),
             ),
             ElevatedButton(
@@ -408,7 +408,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(
                 'Delete',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+                style: AppFonts.outfit(fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -452,7 +452,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                 ),
                 title: Text(
                   '${_selectedEntities.length} Selected',
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
@@ -470,7 +470,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                     },
                     child: Text(
                       'Select All',
-                      style: GoogleFonts.outfit(color: const Color(0xFF58A6FF)),
+                      style: AppFonts.outfit(color: const Color(0xFF58A6FF)),
                     ),
                   ),
                   if (_selectedEntities.isNotEmpty)
@@ -531,17 +531,17 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                         filesProvider.selectedCategory != null
                             ? _getCategoryTitle(filesProvider.selectedCategory!)
                             : 'Files',
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
                         ),
                       ),
                       Text(
-                        filesProvider.currentDirectory != null
+                        filesProvider.currentDirectory != null && filesProvider.canNavigateUp
                             ? p.basename(filesProvider.currentDirectory!.path)
                             : 'Internal Storage',
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 11,
                           color: Colors.white54,
                         ),
@@ -626,10 +626,10 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               TextField(
                 controller: _searchController,
                 onChanged: (q) => filesProvider.setSearchQuery(q),
-                style: GoogleFonts.outfit(color: Colors.white, fontSize: 14),
+                style: AppFonts.outfit(color: Colors.white, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Search files and folders...',
-                  hintStyle: GoogleFonts.outfit(
+                  hintStyle: AppFonts.outfit(
                     color: Colors.white38,
                     fontSize: 13,
                   ),
@@ -668,12 +668,12 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                   filesProvider.selectedCategory == null &&
                   !filesProvider.isSearching) ...[
                 // Storage Overview Card
-                _buildStorageOverviewCard(),
+                _buildStorageOverviewCard(filesProvider.storage),
                 const SizedBox(height: 16),
 
                 Text(
                   'Categories',
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
@@ -689,7 +689,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                   children: [
                     Text(
                       'Folders & Files',
-                      style: GoogleFonts.outfit(
+                      style: AppFonts.outfit(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
@@ -726,7 +726,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               if (filesProvider.isSearching) ...[
                 Text(
                   'Search Results (${filesProvider.searchResults.length})',
-                  style: GoogleFonts.outfit(
+                  style: AppFonts.outfit(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: Colors.white70,
@@ -792,7 +792,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                               const SizedBox(width: 6),
                               Text(
                                 filesProvider.currentDirectory?.path ?? '',
-                                style: GoogleFonts.firaCode(
+                                style: AppFonts.firaCode(
                                   fontSize: 12,
                                   color: Colors.white70,
                                 ),
@@ -848,7 +848,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
     );
   }
 
-  Widget _buildStorageOverviewCard() {
+  Widget _buildStorageOverviewCard(StorageSpaceInfo? storage) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -868,7 +868,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             children: [
               Text(
                 'Internal Storage',
-                style: GoogleFonts.outfit(
+                style: AppFonts.outfit(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
@@ -881,33 +881,46 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: const LinearProgressIndicator(
-              value: 0.62,
-              minHeight: 8,
-              backgroundColor: Color(0xFF21262D),
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF58A6FF)),
+          // Real figures from the system, or nothing: never invented ones.
+          if (storage != null) ...[
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: storage.usedFraction,
+                minHeight: 8,
+                backgroundColor: const Color(0xFF21262D),
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF58A6FF)),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '78.4 GB Used',
-                style: GoogleFonts.outfit(fontSize: 12, color: Colors.white70),
-              ),
-              Text(
-                '128 GB Total',
-                style: GoogleFonts.outfit(fontSize: 12, color: Colors.white38),
-              ),
-            ],
-          ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${storage.usedLabel} used',
+                  style: AppFonts.outfit(fontSize: 12, color: Colors.white70),
+                ),
+                Text(
+                  '${storage.totalLabel} total',
+                  style: AppFonts.outfit(fontSize: 12, color: Colors.white38),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  static String _withThousands(int n) {
+    final digits = n.toString();
+    final out = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) out.write(',');
+      out.write(digits[i]);
+    }
+    return out.toString();
   }
 
   Widget _buildCategoryGrid(DeviceFilesProvider provider) {
@@ -951,6 +964,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
     ];
 
     return GridView.builder(
+      padding: EdgeInsets.zero,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -962,7 +976,8 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
       itemCount: categories.length,
       itemBuilder: (context, index) {
         final (cat, title, icon, color) = categories[index];
-        final count = provider.categoryCounts[cat] ?? 0;
+        // Null until the first count finishes: show nothing, not a made-up 0.
+        final count = provider.categoryCounts[cat];
 
         return InkWell(
           onTap: () => provider.openCategory(cat),
@@ -992,7 +1007,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                     children: [
                       Text(
                         title,
-                        style: GoogleFonts.outfit(
+                        style: AppFonts.outfit(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: Colors.white,
@@ -1001,8 +1016,8 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        count > 0 ? '$count files' : 'Explore',
-                        style: GoogleFonts.outfit(
+                        count == null ? '' : (count == 1 ? '1 file' : '${_withThousands(count)} files'),
+                        style: AppFonts.outfit(
                           fontSize: 11,
                           color: Colors.white54,
                         ),
@@ -1021,6 +1036,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
   Widget _buildEntitiesList(List<FileSystemEntity> entities, bool isGrid) {
     if (isGrid) {
       return GridView.builder(
+        padding: EdgeInsets.zero,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -1106,7 +1122,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
               ),
         title: Text(
           name,
-          style: GoogleFonts.outfit(
+          style: AppFonts.outfit(
             fontSize: 13,
             fontWeight: FontWeight.w600,
             color: isSelected ? const Color(0xFFA78BFA) : Colors.white,
@@ -1116,7 +1132,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
         ),
         subtitle: Text(
           subtitle,
-          style: GoogleFonts.outfit(fontSize: 11, color: Colors.white54),
+          style: AppFonts.outfit(fontSize: 11, color: Colors.white54),
         ),
         trailing: _isMultiSelect
             ? null
@@ -1247,7 +1263,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             ),
             Text(
               name,
-              style: GoogleFonts.outfit(
+              style: AppFonts.outfit(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: isSelected ? const Color(0xFFA78BFA) : Colors.white,
@@ -1261,7 +1277,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
                   : (entity is File
                         ? DeviceFileService.formatBytes(entity.lengthSync())
                         : ''),
-              style: GoogleFonts.outfit(fontSize: 10, color: Colors.white54),
+              style: AppFonts.outfit(fontSize: 10, color: Colors.white54),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1324,7 +1340,7 @@ class _NormalFilesScreenState extends State<NormalFilesScreen> {
             const SizedBox(height: 12),
             Text(
               message,
-              style: GoogleFonts.outfit(fontSize: 14, color: Colors.white54),
+              style: AppFonts.outfit(fontSize: 14, color: Colors.white54),
               textAlign: TextAlign.center,
             ),
           ],
