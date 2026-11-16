@@ -43,6 +43,24 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- The assistant-button trigger (AssistTriggerActivity.kt). Disabled
+             until the user turns it on; draws nothing. -->
+        <activity
+            android:name=".AssistTriggerActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:label="Files">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
         <!-- Draws PDF pages in an isolated process: a throwaway user id with
              no permissions, no network and no access to the app's files or
              the vault. See PdfRenderService.kt. -->
@@ -51,7 +69,7 @@
             android:process=":render"
             android:isolatedProcess="true"
             android:exported="false" />
-        <!-- Records into encrypted files; listens for the volume-down
+        <!-- Records into encrypted files; listens for the volume-button
              trigger while armed. See RecorderService.kt. -->
         <service
             android:name=".RecorderService"

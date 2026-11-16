@@ -216,10 +216,24 @@ class MainActivity : FlutterActivity() {
                         recorderIntent(RecorderService.ACTION_ARM)
                             .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!)
                             .putExtra(RecorderService.EXTRA_VIBRATE, call.argument<Boolean>("vibrate") ?: true)
-                            .putExtra(RecorderService.EXTRA_ALWAYS_LISTEN, call.argument<Boolean>("alwaysListen") ?: false),
+                            .putExtra(RecorderService.EXTRA_ALWAYS_LISTEN, call.argument<Boolean>("alwaysListen") ?: false)
+                            .putExtra(RecorderService.EXTRA_BUTTON, call.argument<Int>("button") ?: -1)
+                            .putExtra(RecorderService.EXTRA_PRESSES, call.argument<Int>("presses") ?: 3)
+                            .putExtra(RecorderService.EXTRA_ASSIST, call.argument<Boolean>("assist") ?: false),
                     )
                     result.success(true)
                 }
+                "assistState" -> result.success(
+                    mapOf(
+                        "enabled" to AssistTriggerActivity.isEnabled(this),
+                        "holder" to AssistTriggerActivity.isAssistant(this),
+                    ),
+                )
+                "setAssistEnabled" -> {
+                    AssistTriggerActivity.setEnabled(this, call.argument<Boolean>("on") == true)
+                    result.success(true)
+                }
+                "openAssistSettings" -> result.success(AssistTriggerActivity.openSettings(this))
                 "disarm" -> {
                     if (RecorderService.running) startService(recorderIntent(RecorderService.ACTION_DISARM))
                     result.success(true)
@@ -231,7 +245,8 @@ class MainActivity : FlutterActivity() {
                             .putExtra(
                                 RecorderService.EXTRA_ROTATE_FRAMES,
                                 call.argument<Int>("rotateFrames") ?: RecorderThread.FRAMES_PER_FILE,
-                            ),
+                            )
+                            .putExtra(RecorderService.EXTRA_LEGACY_V1, call.argument<Boolean>("legacyV1") ?: false),
                     )
                     result.success(true)
                 }
@@ -256,14 +271,19 @@ class MainActivity : FlutterActivity() {
                 "open" -> inBackground(result) {
                     val file = stagedFile(call.argument<String>("id")!!)
                     val key = call.argument<ByteArray>("key")!!
+                    val pub = call.argument<ByteArray>("pub")
                     try {
                         // Never open a file that is still being written.
-                        val rec = if (file.exists() && file != RecorderService.activeFile) {
-                            RecordingReader.open(file, key)
+                        val usable = file.exists() && file != RecorderService.activeFile
+                        val kind = if (usable) RecordingReader.probe(file, pub, key) else null
+                        val rec = if (kind == RecordingReader.Kind.AUDIO || kind == RecordingReader.Kind.EMPTY) {
+                            RecordingReader.open(file, pub, key)
                         } else {
                             null
                         }
-                        if (rec == null) {
+                        if (kind == RecordingReader.Kind.VIDEO) {
+                            mapOf("video" to true)
+                        } else if (rec == null) {
                             null
                         } else if (rec.frames.isEmpty() || rec.sampleRate == 0) {
                             mapOf("empty" to true)

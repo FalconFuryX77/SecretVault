@@ -297,6 +297,46 @@ void main() {
       expect(s2.entries.length, 30);
       await s2.close();
     });
+
+    test('importStream stores a stream of uneven pieces byte for byte', () async {
+      final s = await createVault(chunks: 64);
+      final r = Random(7);
+      final data = Uint8List.fromList(List.generate(ContainerLayout.chunkPayload * 3 + 1234, (_) => r.nextInt(256)));
+      var at = 0;
+      Future<Uint8List> read(int max) async {
+        // Hand out awkward sizes, never more than asked.
+        final n = min(max, min(data.length - at, 1 + r.nextInt(100000)));
+        final out = Uint8List.sublistView(data, at, at + n);
+        at += n;
+        return out;
+      }
+
+      final e = await s.importStream(data.length, _meta('v', 'video.mp4'), read);
+      expect(await s.readAll(e), data);
+      // A stream that ends early is refused and leaves the vault as it was.
+      var given = 0;
+      Future<Uint8List> short(int max) async {
+        if (given > 1000) return Uint8List(0);
+        given += 1000;
+        return Uint8List(1000);
+      }
+
+      await expectLater(s.importStream(200000, _meta('w', 'short.mp4'), short), throwsStateError);
+      expect(s.entries.map((e) => e.item.id), ['v']);
+      await s.close();
+    });
+
+    test('putExtras saves several settings together, and null removes one', () async {
+      final s = await createVault();
+      await s.putExtra('a', 1);
+      await s.putExtras({'a': null, 'b': {'x': 2}, 'c': [3]});
+      await s.close();
+      final s2 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+      expect(s2.extras.containsKey('a'), isFalse);
+      expect(s2.extras['b'], {'x': 2});
+      expect(s2.extras['c'], [3]);
+      await s2.close();
+    });
   });
 
   group('review fixes', () {

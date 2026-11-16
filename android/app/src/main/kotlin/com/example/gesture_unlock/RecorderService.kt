@@ -31,13 +31,15 @@ import java.security.SecureRandom
 
 /**
  * Records audio into encrypted files (see [RecordingFormat]), either on
- * request from the vault screen or, while *armed*, when volume-down is
- * pressed three times quickly with the screen off.
+ * request from the vault screen or, while *armed*, when the chosen volume
+ * button is pressed the chosen number of times quickly with the screen off
+ * (volume-down three times by default), or when the phone's assistant
+ * button opens [AssistTriggerActivity].
  *
  * How the screen-off trigger works: while the screen is off, this service
  * holds a media session that reports "playing to a remote device". Android
  * then routes volume keys to it instead of the phone's own volume (as long
- * as nothing else is playing sound), and [onVolumeDown] counts the presses.
+ * as nothing else is playing sound), and [onVolumePress] counts the presses.
  * When the screen turns on, the session goes inactive, so the volume keys
  * behave normally while you use the phone.
  *
@@ -53,16 +55,30 @@ class RecorderService : Service() {
         const val ACTION_DISARM = "disarm"
         const val ACTION_RECORD = "record"
         const val ACTION_STOP = "stop"
+
+        /** From [AssistTriggerActivity]: start or stop, as the volume trigger does. */
+        const val ACTION_TOGGLE = "toggle"
         const val EXTRA_KEY = "key"
         const val EXTRA_VIBRATE = "vibrate"
         const val EXTRA_ALWAYS_LISTEN = "alwaysListen"
 
+        /** -1 for volume-down, +1 for volume-up, 0 for no volume trigger. */
+        const val EXTRA_BUTTON = "button"
+        const val EXTRA_PRESSES = "presses"
+        const val EXTRA_ASSIST = "assist"
+
         /** Tests only: start a new file after this many frames. */
         const val EXTRA_ROTATE_FRAMES = "rotateFrames"
 
+        /** Tests only (debug builds): write the v2.1.0 file format. */
+        const val EXTRA_LEGACY_V1 = "legacyV1"
+
         private const val NOTIFICATION_ID = 7
         private const val CHANNEL_ID = "background"
-        private const val PRESS_WINDOW_MS = 1500L
+        /** Time allowed per press: three presses within 1.5 s, five within 2.5 s. */
+        private const val MS_PER_PRESS = 500L
+        const val MIN_PRESSES = 2
+        const val MAX_PRESSES = 6
 
         @Volatile var armed = false
         @Volatile var recording = false
@@ -70,6 +86,9 @@ class RecorderService : Service() {
         @Volatile var activeFile: File? = null
         @Volatile var lastError: String? = null
         @Volatile var triggers = 0
+
+        /** Whether the assistant button may start and stop recordings. */
+        @Volatile var assistEnabled = false
 
         /** Whether a service instance exists (stop/disarm only make sense then). */
         @Volatile var running = false
@@ -88,6 +107,8 @@ class RecorderService : Service() {
     private var armedKey: ByteArray? = null
     private var vibrate = true
     private var alwaysListen = false
+    private var button = -1
+    private var pressesNeeded = 3
     private var session: MediaSession? = null
     private var screenReceiver: BroadcastReceiver? = null
     private var worker: RecorderThread? = null
@@ -96,6 +117,7 @@ class RecorderService : Service() {
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private var destroyed = false
     private var rotateFrames = RecorderThread.FRAMES_PER_FILE
+    private var legacyV1 = false
 
     override fun onCreate() {
         super.onCreate()
@@ -118,12 +140,20 @@ class RecorderService : Service() {
                 armedKey = intent.getByteArrayExtra(EXTRA_KEY)
                 vibrate = intent.getBooleanExtra(EXTRA_VIBRATE, true)
                 alwaysListen = intent.getBooleanExtra(EXTRA_ALWAYS_LISTEN, false)
+                button = intent.getIntExtra(EXTRA_BUTTON, -1).coerceIn(-1, 1)
+                pressesNeeded = intent.getIntExtra(EXTRA_PRESSES, 3).coerceIn(MIN_PRESSES, MAX_PRESSES)
+                assistEnabled = intent.getBooleanExtra(EXTRA_ASSIST, false)
+                presses.clear()
                 armed = armedKey != null
                 armedKeyId = armedKey?.let { keyId(it) }
-                if (armed) listenForTrigger() else stopIfIdle()
+                // No volume trigger, no media session: nothing for other
+                // apps to see while only the assistant button is in use.
+                if (armed && button != 0) listenForTrigger() else stopListening()
+                if (!armed) stopIfIdle()
             }
             ACTION_DISARM -> {
                 armed = false
+                assistEnabled = false
                 armedKey = null
                 armedKeyId = null
                 stopListening()
@@ -132,12 +162,17 @@ class RecorderService : Service() {
             ACTION_RECORD -> {
                 if (!goForeground()) return START_NOT_STICKY
                 rotateFrames = intent.getIntExtra(EXTRA_ROTATE_FRAMES, RecorderThread.FRAMES_PER_FILE)
+                legacyV1 = intent.getBooleanExtra(EXTRA_LEGACY_V1, false) &&
+                    applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
                 val key = intent.getByteArrayExtra(EXTRA_KEY)
                 if (key == null || !startRecording(key)) stopIfIdle()
             }
             ACTION_STOP -> {
                 stopRecording()
                 stopIfIdle()
+            }
+            ACTION_TOGGLE -> {
+                if (armed && assistEnabled) trigger() else stopIfIdle()
             }
             else -> stopIfIdle()
         }
@@ -152,6 +187,7 @@ class RecorderService : Service() {
         worker?.requestStop()
         stopListening()
         armed = false
+        assistEnabled = false
         armedKey = null
         armedKeyId = null
         running = false
@@ -222,7 +258,7 @@ class RecorderService : Service() {
             s.setPlaybackToRemote(object : VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
                 override fun onAdjustVolume(direction: Int) {
                     debug("volume $direction")
-                    if (direction < 0) onVolumeDown()
+                    if (direction != 0) onVolumePress(direction)
                 }
             })
             s.setPlaybackState(
@@ -262,12 +298,27 @@ class RecorderService : Service() {
         session = null
     }
 
-    private fun onVolumeDown() {
+    /**
+     * Counts presses of the chosen button. A press of the other button starts
+     * the count again, so ordinary volume changes (which mix both) rarely
+     * trigger it.
+     */
+    private fun onVolumePress(direction: Int) {
+        if ((direction > 0) != (button > 0)) {
+            presses.clear()
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         presses.addLast(now)
-        while (presses.isNotEmpty() && now - presses.first() > PRESS_WINDOW_MS) presses.removeFirst()
-        if (presses.size < 3) return
+        val window = MS_PER_PRESS * pressesNeeded
+        while (presses.isNotEmpty() && now - presses.first() > window) presses.removeFirst()
+        if (presses.size < pressesNeeded) return
         presses.clear()
+        trigger()
+    }
+
+    /** Starts a recording, or stops the one in progress. */
+    private fun trigger() {
         triggers++
         if (stopping) return // the last stop is still being written
         if (recording) {
@@ -318,6 +369,7 @@ class RecorderService : Service() {
             stagingDir(this),
             vaultKey,
             framesPerFile = rotateFrames,
+            legacyV1 = legacyV1,
             onFile = { file -> activeFile = file },
             onEnded = { thread, error -> main.post { recorderEnded(thread, error) } },
         )
@@ -381,6 +433,7 @@ class RecorderThread(
     private val dir: File,
     private val vaultKey: ByteArray,
     private val framesPerFile: Int = FRAMES_PER_FILE,
+    private val legacyV1: Boolean = false,
     private val onFile: (File) -> Unit,
     private val onEnded: (RecorderThread, String?) -> Unit,
 ) : Thread("recorder") {
@@ -405,7 +458,7 @@ class RecorderThread(
         // Marked active before it exists, so it's never offered for import
         // while it's being written.
         onFile(file)
-        return RecordingWriter(file, vaultKey)
+        return RecordingWriter(file, vaultKey, legacyV1)
     }
 
     override fun run() {

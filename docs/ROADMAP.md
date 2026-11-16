@@ -1,7 +1,53 @@
 # Roadmap
 
 What we've agreed to build, what's still open, and ideas we parked (and why).
-Collected from the project discussions; last updated 2026-11-16, at v2.0.0.
+Collected from the project discussions; last updated 2026-11-16, at v2.1.0.
+
+## Build plan (started 2026-11-16)
+
+Everything below is being built in this order. Each part is tested on the
+emulator (and on the PC where it can be), then committed on its own.
+Decisions taken: both hidden triggers (volume and assistant button), a
+video-trimmer cover app, and the name **Undertow**.
+
+1. **Capture**
+   1. Trigger options: volume-down or volume-up, 2–6 presses, and an opt-in
+      assistant-button trigger.
+   2. Recording keys rotate; staged recordings look like random data
+      (needed before video, which uses the same staging).
+   3. Camera: photos straight into the vault.
+   4. Camera: video into the vault, encrypted while it's recorded.
+2. **Vault hardening**
+   1. The real vault opens even if its decoy's index is damaged.
+   2. Passphrases are Unicode-normalised (the old form still opens).
+   3. Images are decoded in the isolated process, like PDFs.
+   4. Text copied out of the vault is marked sensitive and cleared on lock.
+   5. Rollback of the container file is detected.
+   6. A decoy that can't be told from a lone vault, and that can host a real
+      decoy of its own (container v2, migrated on unlock).
+   7. Duress PIN (opt-in).
+3. **Backup**
+   1. Padded log records, chain-head checks, manifests for very large files.
+   2. Automatic backup while unlocked: on change, on unlock, when a network
+      appears, with retries.
+   3. Restore in the app from the recovery code; device list and revocation;
+      key rotation; restore "as of" a time, skipping revoked devices.
+   4. One backup account per phone.
+   5. Upload while locked (outbox, decision D1 option B), with a switch.
+   6. Previews first on bad connections.
+   7. Version history and pruning.
+   8. Server: HTTPS through Caddy, MinIO tested, Tor through Orbot, and a
+      deployment guide.
+4. **Viewers:** landscape video; spreadsheets, slides and `.doc`;
+   password-protected PDFs and search (Android 15+).
+5. **Disguise:** a "move vault" tool first, then the video-trimmer cover,
+   then the rename to Undertow (new package and permanent signing key).
+6. **Docs, landing page and release.**
+
+Two items can't be finished from here: the **independent security review**
+(an audit brief will be prepared for reviewers) and **putting a server on
+the internet** (needs a domain and a host; the configuration and a guide
+will be ready).
 
 ## Next up
 

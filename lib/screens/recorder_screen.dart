@@ -234,7 +234,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
                   style: AppFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
                 ),
                 subtitle: Text(
-                  'Press volume-down three times to start or stop, without unlocking.',
+                  'Press a volume button a few times, or the assistant button, to start or stop without unlocking.',
                   style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
                 ),
                 trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),

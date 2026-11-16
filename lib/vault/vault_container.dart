@@ -394,6 +394,38 @@ class VaultSession {
     });
   }
 
+  /// Streams [length] bytes produced by [read] into the vault (a video
+  /// decrypted and packed on the fly). [read] is asked for at most the
+  /// number of bytes given and returns at least one, in order. Nothing is
+  /// written outside the container; a lock stops it like [importFile].
+  Future<IndexEntry> importStream(
+    int length,
+    VaultItem meta,
+    Future<Uint8List> Function(int max) read, {
+    void Function(double)? onProgress,
+  }) {
+    return _locked(() async {
+      final buf = BytesBuilder(copy: false);
+      var produced = 0;
+      Future<Uint8List> next(int seq) async {
+        final want = min(ContainerLayout.chunkPayload, length - seq * ContainerLayout.chunkPayload);
+        while (buf.length < want) {
+          final got = await read(max(want - buf.length, 1 << 20));
+          if (got.isEmpty) break; // short: _writeChunks refuses it
+          produced += got.length;
+          if (produced > length) throw StateError('the stream is longer than announced');
+          buf.add(got);
+        }
+        final all = buf.takeBytes();
+        if (all.length > want) buf.add(Uint8List.sublistView(all, want));
+        return all.length > want ? Uint8List.sublistView(all, 0, want) : all;
+      }
+
+      final (chunks, fileKey) = await _writeChunks(meta.id, length, next, onProgress, abortOnLock: true);
+      return _addEntry(meta, chunks, fileKey, length);
+    });
+  }
+
   /// Stores [data], which is already in memory (a recording, an edited
   /// text file), as a new item. Nothing is written outside the container.
   Future<IndexEntry> importBytes(Uint8List data, VaultItem meta) {
@@ -448,7 +480,7 @@ class VaultSession {
   Future<(List<int>, Uint8List)> _writeChunks(
     String id,
     int length,
-    Uint8List Function(int seq) next,
+    FutureOr<Uint8List> Function(int seq) next,
     void Function(double)? onProgress, {
     bool abortOnLock = false,
   }) async {
@@ -468,7 +500,7 @@ class VaultSession {
       final plains = <Uint8List>[];
       final aads = <List<int>>[];
       for (var seq = start; seq < end; seq++) {
-        final plain = next(seq);
+        final plain = await next(seq);
         // Every chunk but the last is full, and the total is [length]. A
         // source that shrank or grew mid-import would otherwise be stored as
         // an entry that can never be read back.
@@ -600,24 +632,33 @@ class VaultSession {
       jsonDecode(jsonEncode(_r.index.extras)) as Map<String, dynamic>;
 
   /// Sets one settings entry (or removes it with null) and saves the index.
-  Future<void> putExtra(String key, Object? value) {
+  Future<void> putExtra(String key, Object? value) => putExtras({key: value});
+
+  /// Sets several settings entries (null removes one) in a single commit:
+  /// either all of them are saved or none.
+  Future<void> putExtras(Map<String, Object?> values) {
     return _locked(() async {
       final root = _r;
-      final had = root.index.extras.containsKey(key);
-      final previous = root.index.extras[key];
-      if (value == null) {
-        root.index.extras.remove(key);
-      } else {
-        root.index.extras[key] = jsonDecode(jsonEncode(value));
-      }
+      final before = <String, (bool, Object?)>{
+        for (final k in values.keys) k: (root.index.extras.containsKey(k), root.index.extras[k]),
+      };
+      values.forEach((key, value) {
+        if (value == null) {
+          root.index.extras.remove(key);
+        } else {
+          root.index.extras[key] = jsonDecode(jsonEncode(value));
+        }
+      });
       try {
         await _commit(root);
       } catch (_) {
-        if (had) {
-          root.index.extras[key] = previous;
-        } else {
-          root.index.extras.remove(key);
-        }
+        before.forEach((key, was) {
+          if (was.$1) {
+            root.index.extras[key] = was.$2;
+          } else {
+            root.index.extras.remove(key);
+          }
+        });
         rethrow;
       }
     });
