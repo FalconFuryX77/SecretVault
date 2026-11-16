@@ -216,6 +216,9 @@ p { margin: 0; max-width: var(--measure); }
 
 /* ── Layers ── */
 .layers-head { display: grid; gap: 14px; margin-bottom: 40px; }
+.film-head { display: grid; gap: 14px; margin-bottom: 32px; max-width: 64ch; }
+.film { margin: 0; border: 1px solid var(--line); border-radius: calc(var(--radius) * 1.6); overflow: hidden; background: #0b0f17; aspect-ratio: 16 / 9; }
+.film video { display: block; width: 100%; height: 100%; background: #0b0f17; }
 .layers { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: layer; }
 .layer {
   display: grid; grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1fr); gap: 24px 40px;
@@ -300,6 +303,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
   <header class="top">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Undertow</div>
     <nav aria-label="Sections">
+      <a href="#video">Demo</a>
       <a href="#layers">How it works</a>
       <a href="#specs">Specs</a>
       <a href="#sync">Sync</a>
@@ -314,7 +318,6 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <p class="lede">Undertow looks and works like an ordinary video trimmer. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware. It records straight into the vault and backs up to a server you trust.</p>
       <div class="ctas">
         <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.1.1 for Android</a>
-        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow/releases/latest/download/Undertow-demo.mp4">Watch the 3-minute demo</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow">See the source</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
@@ -403,6 +406,22 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
     </div>
   </div>
 </div>
+
+<section id="video" aria-labelledby="video-title">
+  <div class="wrap">
+    <div class="film-head">
+      <div class="eyebrow">See it work</div>
+      <h2 id="video-title">Every feature in three minutes</h2>
+      <p style="color:var(--muted)">Filmed in the real app on an Android emulator, with made-up files. There's no sound: the captions beside the phone explain each step.</p>
+    </div>
+    <figure class="film">
+      <video id="film" controls muted playsinline loop preload="none" poster="demo-poster.jpg"
+             aria-label="Demo of Undertow: the video trimmer cover, the hidden vault, decoys, the duress PIN, capture and backup">
+        <source src="demo.mp4" type="video/mp4">
+      </video>
+    </figure>
+  </div>
+</section>
 
 <section id="layers">
   <div class="wrap">
@@ -546,6 +565,22 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 </footer>
 
 <script>
+(() => {
+  const v = document.getElementById("film");
+  if (!v || !("IntersectionObserver" in window)) return;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let paused = false, ours = false;
+  v.addEventListener("pause", () => { if (!ours) paused = true; ours = false; });
+  v.addEventListener("play", () => { paused = false; });
+  new IntersectionObserver(([e]) => {
+    if (e.intersectionRatio >= 0.5) {
+      if (!still && !paused && v.paused) v.play().catch(() => {});
+    } else if (!v.paused) {
+      ours = true;
+      v.pause();
+    }
+  }, { threshold: [0, 0.5, 1] }).observe(v);
+})();
 (() => {
   const $ = (id) => document.getElementById(id);
   const views = { files: $("v-files"), lock: $("v-lock"), vault: $("v-vault") };
