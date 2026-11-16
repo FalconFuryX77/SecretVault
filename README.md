@@ -99,3 +99,7 @@ flutter run
 * Backup: `packages/sync_core` (Dart sync engine) and `server/` (FastAPI, PostgreSQL or SQLite, local disk or S3)
 
 Core code lives in `lib/vault/` (container format, crypto, platform keys); the viewers in `lib/viewers/`; backup in `lib/sync/`; the cover app in `lib/cover/`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The two bundled typefaces, Fira Code and Outfit, are under the SIL Open Font License; their licences sit next to them in `assets/fonts/`.
