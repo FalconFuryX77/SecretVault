@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../navigation/vault_routes.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
-import 'package:path_provider/path_provider.dart';
+import 'export_dialog.dart';
+import 'recorder_screen.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
 import '../models/vault_item.dart';
@@ -46,27 +48,34 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     super.dispose();
   }
 
+  // Vault screens are removed at once, not animated out: the exit animation
+  // would draw the vault for a few hundred milliseconds after the lock, with
+  // screenshot protection already being lifted.
   void _lockAndExit() {
     context.read<VaultProvider>().clearVaultSession();
     context.read<UnlockProvider>().lockVault();
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    vaultRoutes.removeAllAboveFirst();
   }
 
   void _triggerPanicLock() {
     context.read<VaultProvider>().clearVaultSession();
     context.read<UnlockProvider>().triggerPanicLock();
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    vaultRoutes.removeAllAboveFirst();
   }
 
   void _showImportOptions() {
     showModalBottomSheet(
       context: context,
+      // A plain sheet is capped at 9/16 of the screen, which cut off the
+      // last option on smaller phones; let it size to its content and
+      // scroll if the screen is shorter still.
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF161B22),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -128,6 +137,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     FileType.any,
                     null,
                     VaultCategory.document,
+                  );
+                },
+              ),
+              _buildModalTile(
+                icon: Icons.mic_rounded,
+                color: const Color(0xFFF43F5E),
+                title: 'Record Audio',
+                subtitle: 'Recorded straight into the vault, encrypted as it goes',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RecorderScreen()),
                   );
                 },
               ),
@@ -262,7 +284,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (unlockProvider.state != UnlockState.unlocked) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        vaultRoutes.removeAllAboveFirst();
       });
     }
 
@@ -802,25 +824,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (action == 'open') {
       _openItem(item);
     } else if (action == 'export') {
-      Directory? exportDir = await getDownloadsDirectory();
-      exportDir ??= await getApplicationDocumentsDirectory();
-      if (!mounted) return;
-      final res = await context.read<VaultProvider>().exportFile(
-        item,
-        exportDir,
-      );
-      if (!mounted) return;
-      if (res != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF059669),
-            content: Text(
-              'Exported to ${res.path}',
-              style: AppFonts.outfit(color: Colors.white),
-            ),
-          ),
-        );
-      }
+      await exportWithConfirmation(context, item);
     } else if (action == 'rename') {
       final controller = TextEditingController(text: item.title);
       final newName = await showDialog<String>(
@@ -878,7 +882,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         await context.read<VaultProvider>().renameItem(item, newName);
       }
     } else if (action == 'delete') {
-      if (!mounted) return;
+      if (!mounted || !await confirmShred(context, item.title) || !mounted) return;
       await context.read<VaultProvider>().deleteItem(item);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

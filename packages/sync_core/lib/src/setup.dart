@@ -49,8 +49,18 @@ Future<(String, Uint8List)> _newDevice(SyncApi api, String account, RecoveryKeys
 /// secret (to show as the phrase). Mirrors the container's "4 slots, can't
 /// tell how many are used": the recovery key and escrow go into random slots,
 /// the other slots get real-looking filler.
-Future<(SyncIdentity, Uint8List recoverySecret)> createAccount(SyncApi api, {String? invite}) async {
-  final rs = randomBytes(32);
+///
+/// Pass [recoverySecret] to use one the user has already written down and
+/// confirmed (so an account never exists without its recovery secret).
+Future<(SyncIdentity, Uint8List recoverySecret)> createAccount(
+  SyncApi api, {
+  String? invite,
+  Uint8List? recoverySecret,
+}) async {
+  if (recoverySecret != null && recoverySecret.length != 32) {
+    throw ArgumentError('recovery secret must be 32 bytes');
+  }
+  final rs = recoverySecret ?? randomBytes(32);
   final rk = await RecoveryKeys.fromSecret(rs);
   final srk = randomBytes(32);
   final rng = Random.secure();

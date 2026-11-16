@@ -46,24 +46,45 @@ class _TextFileViewState extends State<TextFileView> {
 
   bool get _dirty => _editing && _edit.text != _saved;
 
+  late final UnlockProvider _unlock;
+  late final VaultProvider _vault;
+
+  @override
+  void initState() {
+    super.initState();
+    _unlock = context.read<UnlockProvider>()..addBeforeLock(_saveOnLock);
+    _vault = context.read<VaultProvider>();
+  }
+
+  /// The vault is locking with unsaved edits: write them while it can.
+  void _saveOnLock() {
+    if (_dirty && !_saving) {
+      _vault.saveFileContent(widget.item, Uint8List.fromList(utf8.encode(_edit.text))).ignore();
+    }
+  }
+
   @override
   void dispose() {
+    _unlock.removeBeforeLock(_saveOnLock);
     _edit.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (_saving) return;
+    // What is saved is what was on screen when Save was pressed; typing
+    // during the save isn't marked as saved.
+    final text = _edit.text;
     setState(() => _saving = true);
     try {
-      final item = await context.read<VaultProvider>().saveFileContent(
+      final item = await _vault.saveFileContent(
             widget.item,
-            Uint8List.fromList(utf8.encode(_edit.text)),
+            Uint8List.fromList(utf8.encode(text)),
           );
       if (!mounted) return;
       setState(() {
-        _saved = _edit.text;
-        _editing = false;
+        _saved = text;
+        _editing = _edit.text != text;
       });
       widget.onSaved(item);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -200,6 +221,7 @@ class _TextFileViewState extends State<TextFileView> {
         key: const Key('text-editor'),
         controller: _edit,
         autofocus: true,
+        readOnly: _saving,
         maxLines: null,
         expands: true,
         textAlignVertical: TextAlignVertical.top,

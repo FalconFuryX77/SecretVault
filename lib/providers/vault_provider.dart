@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models/vault_state.dart';
 import '../models/vault_item.dart';
+import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
 import '../vault/vault_container.dart';
 import '../viewers/file_kind.dart';
@@ -99,6 +100,87 @@ class VaultProvider extends ChangeNotifier {
   Future<void> loadVault(VaultType vaultType) async {
     _activeVaultType = vaultType;
     _refreshFromSession();
+    // Recordings made while the vault was locked move in now.
+    unawaited(importRecordings().catchError((Object _) => 0));
+  }
+
+  Future<int>? _importing;
+  VaultSession? _importingFor;
+
+  /// Moves finished recordings that belong to the open vault into it: each
+  /// is decrypted in memory with the vault's private key, stored as a vault
+  /// file, and its encrypted staging copy is shredded. Recordings belonging
+  /// to the other vault are left alone. Returns how many moved in.
+  Future<int> importRecordings() {
+    final session = _vault.session;
+    // A run for another (now locked) vault doesn't count for this one.
+    if (_importing != null && identical(_importingFor, session)) return _importing!;
+    _importingFor = session;
+    final run = _importRecordings(session);
+    _importing = run;
+    return run.whenComplete(() {
+      if (identical(_importing, run)) {
+        _importing = null;
+        _importingFor = null;
+      }
+    });
+  }
+
+  Future<int> _importRecordings(VaultSession? session) async {
+    if (session == null || !VaultRecorder.isAvailable) return 0;
+    final privateKey = RecordingKeys.privateKey(session);
+    if (privateKey == null) return 0; // this vault has never recorded
+    var moved = 0;
+    try {
+      for (final p in await VaultRecorder.pending()) {
+        if (!session.isOpen) break;
+        // One bad file must not hold up the rest.
+        try {
+          final tag = 'src:${p.id}';
+          if (session.entries.any((e) => e.item.tags.contains(tag))) {
+            // Moved in before, but the app stopped before the staging copy
+            // was removed: don't import it twice.
+            await VaultRecorder.discard(p.id);
+            continue;
+          }
+          final r = await VaultRecorder.open(p.id, Uint8List.fromList(privateKey));
+          if (r == null) continue; // another vault's
+          if (r.empty) {
+            await VaultRecorder.discard(p.id);
+            continue;
+          }
+          final title = 'Recording ${_stamp(r.startedAt)}${r.complete ? '' : ' (cut short)'}.${r.ext}';
+          await _vault.whileBusy(
+            () => session.importBytes(
+              r.data,
+              VaultItem(
+                id: _uuid.v4(),
+                title: title,
+                category: VaultCategory.document,
+                mimeType: mimeForName(title),
+                fileSizeBytes: r.data.length,
+                createdAt: r.startedAt,
+                updatedAt: DateTime.now(),
+                tags: ['recording', tag],
+              ),
+            ),
+          );
+          await VaultRecorder.discard(p.id);
+          moved++;
+        } catch (e) {
+          debugPrint('recording ${p.id} not imported: $e');
+        }
+      }
+    } finally {
+      privateKey.fillRange(0, privateKey.length, 0);
+    }
+    if (moved > 0 && identical(_vault.session, session)) _refreshFromSession();
+    return moved;
+  }
+
+  static String _stamp(DateTime t) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}.${two(t.minute)}.${two(t.second)}';
   }
 
   void _refreshFromSession() {
@@ -216,10 +298,25 @@ class VaultProvider extends ChangeNotifier {
   /// Writes a decrypted copy to [destinationDir]. This deliberately leaves
   /// plaintext outside the vault, so only call it on explicit user request.
   Future<File?> exportFile(VaultItem item, Directory destinationDir) async {
-    final entry = _session.entryById(item.id);
+    final session = _session;
+    final entry = session.entryById(item.id);
     if (entry == null || entry.fileKey == null) return null;
-    final out = File(p.join(destinationDir.path, p.basename(item.title)));
-    await _session.exportTo(entry, out);
+    // Never overwrite an earlier export with the same name.
+    final base = p.basenameWithoutExtension(item.title);
+    final ext = p.extension(item.title);
+    var out = File(p.join(destinationDir.path, '$base$ext'));
+    for (var n = 1; await out.exists(); n++) {
+      out = File(p.join(destinationDir.path, '$base ($n)$ext'));
+    }
+    try {
+      await _vault.whileBusy(() => session.exportTo(entry, out));
+    } catch (_) {
+      // Don't leave half a plaintext file behind.
+      try {
+        if (await out.exists()) await out.delete();
+      } catch (_) {}
+      rethrow;
+    }
     return out;
   }
 

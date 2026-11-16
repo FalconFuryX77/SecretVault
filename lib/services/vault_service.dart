@@ -90,8 +90,15 @@ class VaultService {
     _session = null;
     await SecurityChannelService.setVaultOpen(false);
     if (s != null) {
-      await s.close();
+      final closing = s.close();
+      _closing = closing;
       if (!_lockEvents.isClosed) _lockEvents.add(null);
+      await closing;
     }
+    // A second lock (or an unlock) must still wait for an earlier session to
+    // finish its last write before the file is opened again.
+    await _closing;
   }
+
+  Future<void> _closing = Future.value();
 }

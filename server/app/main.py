@@ -9,6 +9,7 @@ per-device log ordering and (optionally) append-only retention.
 import base64
 import hashlib
 import os
+import time
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -16,7 +17,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -83,6 +84,59 @@ class AppendLog(BaseModel):
 # ─── App factory ─────────────────────────────────────────────────────────
 
 
+MAX_OPEN_UPLOADS = 64
+LOG_HEADROOM_BYTES = 16 * 1024 * 1024
+STAGING_TTL_SECONDS = 24 * 3600
+
+
+def _clean_staging(folder: Path) -> None:
+    """Deletes partial uploads untouched for a day."""
+    cutoff = time.time() - STAGING_TTL_SECONDS
+    for f in folder.iterdir():
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
+class _BodyLimit:
+    """ASGI middleware: refuses a request body over the limit for its path,
+    by Content-Length up front and by counting what actually arrives."""
+
+    def __init__(self, app, limit_for):
+        self.app = app
+        self.limit_for = limit_for
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        limit = self.limit_for(scope["path"])
+        for k, v in scope.get("headers", []):
+            if k == b"content-length":
+                try:
+                    too_big = int(v) > limit
+                except ValueError:
+                    too_big = True
+                if too_big:
+                    await send({"type": "http.response.start", "status": 413,
+                                "headers": [(b"content-type", b"application/json")]})
+                    await send({"type": "http.response.body", "body": b'{"detail":"request too large"}'})
+                    return
+        seen = 0
+
+        async def limited():
+            nonlocal seen
+            msg = await receive()
+            if msg["type"] == "http.request":
+                seen += len(msg.get("body", b""))
+                if seen > limit:
+                    raise HTTPException(413, "request too large")
+            return msg
+
+        await self.app(scope, limited, send)
+
+
 def create_app(settings: Settings | None = None, blobs: BlobStore | None = None) -> FastAPI:
     settings = settings or Settings()
     SessionLocal = make_sessionmaker(settings.db_url)
@@ -93,9 +147,37 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
             else LocalBlobStore(settings.blob_dir)
         )
 
+    if not settings.invite_codes or "dev-invite" in settings.invite_codes:
+        import logging
+
+        logging.getLogger("uvicorn.error").warning(
+            "SYNC_INVITE_CODES is %s: anyone who can reach this server can create accounts. "
+            "Set it to a secret of your own before exposing the server.",
+            "empty" if not settings.invite_codes else "the development code 'dev-invite'",
+        )
     app = FastAPI(title="Vault sync server", version="1")
     app.state.settings = settings
     app.state.blobs = blobs
+
+    # Bodies are capped before anything reads them, including on endpoints
+    # that read the body before checking auth: without this, anyone could
+    # make the server buffer arbitrarily large requests in memory.
+    piece_limit = settings.max_piece_bytes + 4096
+    log_limit = settings.max_piece_bytes * 4 // 3 + 4096  # base64 in JSON
+
+    def body_limit(path: str) -> int:
+        if path.startswith("/v1/pieces/") and not path.startswith("/v1/pieces/missing") \
+                and not path.startswith("/v1/pieces/delete"):
+            return piece_limit
+        if path.startswith("/v1/uploads/"):
+            return piece_limit
+        if path == "/v1/log":
+            return log_limit
+        if path.startswith("/v1/pieces/missing") or path.startswith("/v1/pieces/delete"):
+            return 256 * 1024
+        return 64 * 1024
+
+    app.add_middleware(_BodyLimit, limit_for=body_limit)
 
     @app.exception_handler(ClientDisconnect)
     async def _client_gone(request: Request, exc: ClientDisconnect):
@@ -193,7 +275,10 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
             id=new_id(),
             recovery_keys=[b64e(k) for k in keys],
             escrow=[b64e(e) for e in escrow],
-            append_only=settings.append_only_default if body.append_only is None else body.append_only,
+            # A client may ask for append-only, but can't opt out of the
+            # operator's default (a seized phone creating accounts mustn't
+            # get deletable ones).
+            append_only=settings.append_only_default or bool(body.append_only),
         )
         db.add(acct)
         db.commit()
@@ -342,12 +427,27 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
     def staging_path(account_id: str, piece_id: str) -> Path:
         return staging_root / account_id / piece_id
 
-    def store_piece(db: Session, acct: Account, piece_id: str, data: bytes, digest: bytes) -> dict:
-        if acct.bytes_used + len(data) > settings.max_account_bytes:
+    def reserve_quota(db: Session, account_id: str, n: int, headroom: int = 0) -> None:
+        """Adds [n] bytes to the account's usage in one SQL statement, so
+        concurrent uploads can't overwrite each other's update and slip past
+        the quota. Part of the caller's transaction: a rollback releases it."""
+        res = db.execute(
+            update(Account)
+            .where(Account.id == account_id, Account.bytes_used + n <= settings.max_account_bytes + headroom)
+            .values(bytes_used=Account.bytes_used + n)
+        )
+        if res.rowcount != 1:
+            db.rollback()
             raise HTTPException(413, "account quota exceeded")
-        blobs.put(acct.id, piece_id, data)
+
+    def store_piece(db: Session, acct: Account, piece_id: str, data: bytes, digest: bytes) -> dict:
+        reserve_quota(db, acct.id, len(data))
+        try:
+            blobs.put(acct.id, piece_id, data)
+        except Exception:
+            db.rollback()
+            raise
         db.add(Piece(account_id=acct.id, id=piece_id, size=len(data), sha256=digest.hex()))
-        acct.bytes_used += len(data)
         try:
             db.commit()
         except IntegrityError:
@@ -392,6 +492,12 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         part = await request.body()
         path = staging_path(account_id, piece_id)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            # A new upload: drop abandoned ones, and cap how many can be open,
+            # so staging (which isn't counted in the quota) can't fill the disk.
+            await run_in_threadpool(_clean_staging, path.parent)
+            if sum(1 for _ in path.parent.iterdir()) >= MAX_OPEN_UPLOADS:
+                raise HTTPException(429, "too many unfinished uploads")
         current = path.stat().st_size if path.exists() else 0
         if upload_offset != current:
             raise HTTPException(409, {"error": "offset mismatch", "offset": current})
@@ -449,20 +555,12 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
             response.status_code = 200
             return {"sha256": existing.sha256, "created": False}
         acct = account_or_404(db, account_id)
-        if acct.bytes_used + len(data) > settings.max_account_bytes:
-            raise HTTPException(413, "account quota exceeded")
-        await run_in_threadpool(blobs.put, account_id, piece_id, data)
-        db.add(Piece(account_id=account_id, id=piece_id, size=len(data), sha256=digest.hex()))
-        acct.bytes_used += len(data)
-        try:
-            db.commit()
-        except IntegrityError:  # a concurrent upload of the same piece won
-            db.rollback()
-            existing = db.get(Piece, (account_id, piece_id))
-            response.status_code = 200
-            return {"sha256": existing.sha256 if existing else digest.hex(), "created": False}
-        response.status_code = 201
-        return {"sha256": digest.hex(), "created": True}
+        # One worker thread does reserve → write → commit: the quota UPDATE
+        # holds the account row's lock until the commit, and holding it across
+        # an await let a second upload block the event loop on that lock.
+        result = await run_in_threadpool(store_piece, db, acct, piece_id, data, digest)
+        response.status_code = 201 if result["created"] else 200
+        return {"sha256": result["sha256"], "created": result["created"]}
 
     @app.get("/v1/pieces/{piece_id}")
     async def get_piece(
@@ -518,18 +616,25 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         if acct.append_only:
             # A seized phone must not be able to erase what already got out.
             require_recovery(db, acct, x_recovery_auth, "delete-pieces", raw)
-        deleted = 0
         for pid in body.ids:
             check_piece_id(pid)
-            p = db.get(Piece, (acct.id, pid))
-            if p is None:
-                continue
-            await run_in_threadpool(blobs.delete, acct.id, pid)
-            acct.bytes_used -= p.size
-            db.delete(p)
-            deleted += 1
-        db.commit()
-        return {"deleted": deleted}
+
+        def _delete() -> int:
+            deleted = 0
+            for pid in body.ids:
+                p = db.get(Piece, (acct.id, pid))
+                if p is None:
+                    continue
+                blobs.delete(acct.id, pid)
+                db.execute(
+                    update(Account).where(Account.id == acct.id).values(bytes_used=Account.bytes_used - p.size)
+                )
+                db.delete(p)
+                deleted += 1
+            db.commit()
+            return deleted
+
+        return {"deleted": await run_in_threadpool(_delete)}
 
     # ── change log ──
 
@@ -546,6 +651,9 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         expected = dev.last_counter + 1
         if body.counter != expected:
             raise HTTPException(409, {"error": "counter out of order", "expected": expected})
+        # Log records take space too; they count toward the quota.
+        # Headroom so that, at quota, deletions can still be recorded.
+        reserve_quota(db, account_id, len(record), headroom=LOG_HEADROOM_BYTES)
         rec = LogRecord(account_id=account_id, device_id=device_id, counter=body.counter, record=record)
         db.add(rec)
         dev.last_counter = body.counter

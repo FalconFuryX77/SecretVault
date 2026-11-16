@@ -56,7 +56,9 @@ class DocxReader {
     }
     final doc = zip.findFile('word/document.xml');
     if (doc == null) throw DocxException('not a Word document');
-    if (doc.size > maxXmlBytes) throw DocxException('document too large');
+    // A zip64 entry can declare an "unknown" size, which reads as -1 here
+    // and would leave the inflater with no output limit at all.
+    if (doc.size < 0 || doc.size > maxXmlBytes) throw DocxException('document too large');
     final xmlBytes = doc.readBytes();
     if (xmlBytes == null || xmlBytes.length > maxXmlBytes) throw DocxException('document too large');
     final text = _utf8(xmlBytes);

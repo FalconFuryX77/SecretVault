@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'navigation/vault_routes.dart';
 import 'theme/app_fonts.dart';
 import 'package:provider/provider.dart';
 import 'providers/device_files_provider.dart';
 import 'providers/unlock_provider.dart';
 import 'providers/vault_provider.dart';
+import 'models/vault_state.dart';
 import 'services/vault_service.dart';
 import 'screens/normal_files_screen.dart';
 import 'screens/setup_screen.dart';
 
-final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +48,7 @@ class SecretVaultApp extends StatelessWidget {
         builder: (context) {
           return MaterialApp(
             navigatorKey: rootNavigatorKey,
+            navigatorObservers: [vaultRoutes],
             title: 'Files',
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
@@ -78,6 +81,7 @@ class SecretVaultApp extends StatelessWidget {
   }
 }
 
+
 class AppLifecycleScope extends StatefulWidget {
   final Widget child;
   const AppLifecycleScope({super.key, required this.child});
@@ -88,14 +92,26 @@ class AppLifecycleScope extends StatefulWidget {
 
 class _AppLifecycleScopeState extends State<AppLifecycleScope>
     with WidgetsBindingObserver {
+  StreamSubscription<void>? _lockSub;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // On any lock (timeout, app switch, panic, lock button): drop every vault
+    // screen and dialog at once, and any decoded images, before the next
+    // frame can be drawn. Viewers dispose with their routes, which stops
+    // playback and clears what they decrypted.
+    _lockSub = context.read<VaultService>().onLocked.listen((_) {
+      vaultRoutes.removeAllAboveFirst();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    });
   }
 
   @override
   void dispose() {
+    _lockSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -110,6 +126,10 @@ class _AppLifecycleScopeState extends State<AppLifecycleScope>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       unlock.onAppPaused();
+      // A lock screen left open would greet whoever wakes the phone with
+      // "enter your PIN" inside the Files app. The cover app's own screens
+      // stay, as a real file manager's would.
+      if (unlock.state != UnlockState.unlocked) vaultRoutes.removeVaultScreens();
     } else if (state == AppLifecycleState.resumed) {
       unlock.onAppResumed();
     }

@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
         private const val SECURITY_CHANNEL = "com.example.secretvault/security"
         private const val KEYS_CHANNEL = "app.vault/keys"
         private const val PDF_CHANNEL = "app.vault/pdf"
+        private const val RECORDER_CHANNEL = "app.vault/recorder"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
         // Neutral alias names: nothing in the keystore says "vault".
@@ -59,7 +60,9 @@ class MainActivity : FlutterActivity() {
                 mainHandler.post { result.success(value) }
             } catch (e: ChunkAuthException) {
                 mainHandler.post { result.error("auth", e.index.toString(), null) }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: an OutOfMemoryError here would
+                // otherwise kill the app.
                 mainHandler.post { result.error("bulk", e.message, null) }
             }
         }
@@ -86,6 +89,18 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                // For lockouts: time since boot can't be moved from Settings
+                // the way the wall clock can.
+                "clock" -> result.success(
+                    mapOf(
+                        "elapsed" to android.os.SystemClock.elapsedRealtime(),
+                        "boot" to android.provider.Settings.Global.getInt(
+                            contentResolver,
+                            android.provider.Settings.Global.BOOT_COUNT,
+                            -1,
+                        ),
+                    ),
+                )
                 "setKeepScreenOn" -> {
                     if (call.argument<Boolean>("on") == true) {
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -117,6 +132,10 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(messenger, PDF_CHANNEL).setMethodCallHandler { call, result ->
             pdfSandbox.handle(call, result)
+        }
+
+        MethodChannel(messenger, RECORDER_CHANNEL).setMethodCallHandler { call, result ->
+            handleRecorder(call, result)
         }
 
         worker.execute {
@@ -162,6 +181,128 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ─── Recorder ───────────────────────────────────────────────────
+    //
+    // See RecorderService and RecordingFormat. The vault's private key only
+    // passes through here to open finished recordings, in memory.
+
+    private fun recorderIntent(action: String) =
+        android.content.Intent(this, RecorderService::class.java).setAction(action)
+
+    private fun startRecorderService(intent: android.content.Intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+    }
+
+    private fun handleRecorder(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
+        try {
+            when (call.method) {
+                "keyPair" -> {
+                    val (pub, priv) = RecordingFormat.newVaultKeyPair()
+                    result.success(mapOf("pub" to pub, "priv" to priv))
+                }
+                "status" -> result.success(
+                    mapOf(
+                        "armed" to RecorderService.armed,
+                        "recording" to RecorderService.recording,
+                        "startedAt" to RecorderService.startedAtMs,
+                        "error" to RecorderService.lastError,
+                        "triggers" to RecorderService.triggers,
+                        "armedKey" to RecorderService.armedKeyId,
+                        "recordingKey" to RecorderService.recordingKeyId,
+                    ),
+                )
+                "arm" -> {
+                    startRecorderService(
+                        recorderIntent(RecorderService.ACTION_ARM)
+                            .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!)
+                            .putExtra(RecorderService.EXTRA_VIBRATE, call.argument<Boolean>("vibrate") ?: true)
+                            .putExtra(RecorderService.EXTRA_ALWAYS_LISTEN, call.argument<Boolean>("alwaysListen") ?: false),
+                    )
+                    result.success(true)
+                }
+                "disarm" -> {
+                    if (RecorderService.running) startService(recorderIntent(RecorderService.ACTION_DISARM))
+                    result.success(true)
+                }
+                "record" -> {
+                    startRecorderService(
+                        recorderIntent(RecorderService.ACTION_RECORD)
+                            .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!)
+                            .putExtra(
+                                RecorderService.EXTRA_ROTATE_FRAMES,
+                                call.argument<Int>("rotateFrames") ?: RecorderThread.FRAMES_PER_FILE,
+                            ),
+                    )
+                    result.success(true)
+                }
+                "stop" -> {
+                    if (RecorderService.running) startService(recorderIntent(RecorderService.ACTION_STOP))
+                    result.success(true)
+                }
+                "pending" -> {
+                    // List first, then read the active file: read the other
+                    // way round, a rotation in between would offer the part
+                    // that was just started.
+                    val listed = RecorderService.stagingDir(this).listFiles()
+                    val active = RecorderService.activeFile
+                    val files = listed
+                        ?.filter { it.isFile && it.name.endsWith(".bin") && it != active }
+                        ?.sortedBy { it.lastModified() }
+                        ?: emptyList()
+                    result.success(
+                        files.map { mapOf("id" to it.name, "size" to it.length(), "modified" to it.lastModified()) },
+                    )
+                }
+                "open" -> inBackground(result) {
+                    val file = stagedFile(call.argument<String>("id")!!)
+                    val key = call.argument<ByteArray>("key")!!
+                    try {
+                        // Never open a file that is still being written.
+                        val rec = if (file.exists() && file != RecorderService.activeFile) {
+                            RecordingReader.open(file, key)
+                        } else {
+                            null
+                        }
+                        if (rec == null) {
+                            null
+                        } else if (rec.frames.isEmpty() || rec.sampleRate == 0) {
+                            mapOf("empty" to true)
+                        } else {
+                            val (data, ext) = RecordingPacker.pack(rec)
+                            rec.wipe()
+                            mapOf(
+                                "data" to data,
+                                "ext" to ext,
+                                "startedAt" to rec.startedAtMs,
+                                "durationMs" to rec.durationMs,
+                                "complete" to rec.complete,
+                            )
+                        }
+                    } finally {
+                        key.fill(0)
+                    }
+                }
+                "discard" -> inBackground(result) {
+                    val f = stagedFile(call.argument<String>("id")!!)
+                    if (f.exists() && f != RecorderService.activeFile) RecordingFormat.shred(f)
+                    true
+                }
+                "stagingPath" -> result.success(RecorderService.stagingDir(this).absolutePath)
+                else -> result.notImplemented()
+            }
+        } catch (e: Exception) {
+            result.error("recorder", e.message, null)
+        }
+    }
+
+    /** A staged recording by name, refusing anything outside its folder. */
+    private fun stagedFile(id: String): File {
+        require(STAGED_NAME.matches(id)) { "bad id" }
+        return File(RecorderService.stagingDir(this), id)
+    }
+
+    private val STAGED_NAME = Regex("^[0-9a-f]{24}[.]bin$")
+
     // ─── Bulk chunk crypto ──────────────────────────────────────────
     //
     // Same format as the Dart implementation (lib/vault/bulk_crypto.dart):
@@ -174,6 +315,7 @@ class MainActivity : FlutterActivity() {
         chunkSize: Int,
     ): List<ByteArray> {
         val k = SecretKeySpec(key, "AES")
+        key.fill(0) // SecretKeySpec keeps its own copy
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         return plains.mapIndexed { i, plain ->
             val out = ByteArray(chunkSize)
@@ -195,6 +337,7 @@ class MainActivity : FlutterActivity() {
 
     private fun gcmOpenChunks(key: ByteArray, sealed: List<ByteArray>, aads: List<ByteArray>): List<ByteArray> {
         val k = SecretKeySpec(key, "AES")
+        key.fill(0) // SecretKeySpec keeps its own copy
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         return sealed.mapIndexed { i, s ->
             if (s.size < GCM_IV_LEN + GCM_TAG_BITS / 8) throw ChunkAuthException(i)
