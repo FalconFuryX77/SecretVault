@@ -96,7 +96,7 @@ void main() {
   }
 
   Future<void> lock(WidgetTester t) async {
-    await tapWhenReady(t, find.byTooltip('Lock Safe'));
+    await tapWhenReady(t, find.byTooltip('Lock'));
     await waitFor(t, find.text('Add'), gone: true);
     await waitFor(t, find.text('Video Trimmer'));
   }

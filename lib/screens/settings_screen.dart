@@ -77,7 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _runPinChange({required bool decoy}) async {
     final pin = await _askNewPin(
-      decoy ? 'Decoy Vault PIN' : 'Change PIN',
+      decoy ? 'Change decoy PIN' : 'Change PIN',
       decoy
           ? 'The PIN you can hand over if forced. It opens only the decoy vault.'
           : 'Your files are re-protected under the new PIN immediately.',
@@ -104,7 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _createDecoy() async {
     final pin = await _askNewPin(
-      'Set Up Decoy Vault',
+      'Set up a decoy vault',
       'If someone forces you to unlock, give them this PIN instead. It opens a separate, '
           'ordinary-looking vault; nothing on the phone shows a second one exists. '
           'Fill it with believable files after creating it.',
@@ -186,7 +186,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (go != true || !mounted) return;
     final pin = await _askNewPin(
-      'Set Duress PIN',
+      'Set up a duress PIN',
       'Different from your PIN and your decoy PIN. Entering it erases this vault.',
     );
     final session = _session;

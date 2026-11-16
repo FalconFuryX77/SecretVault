@@ -113,7 +113,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
-          'Rename File',
+          'Rename',
           style: AppFonts.ui(
             color: Ui.ink,
             fontWeight: FontWeight.w500,
@@ -207,7 +207,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.file_download_outlined, size: 21),
-            tooltip: 'Export File',
+            tooltip: 'Export',
             onPressed: _exportFile,
           ),
           IconButton(

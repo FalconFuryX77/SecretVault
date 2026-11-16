@@ -244,7 +244,7 @@ class VaultProvider extends ChangeNotifier {
     return true;
   }
 
-  /// Stores a photo from the in-vault camera (already stripped of metadata).
+  /// Stores a photo from the in-vault camera, metadata and all.
   Future<VaultItem?> importPhoto(Uint8List jpeg) async {
     final session = _vault.session;
     if (session == null) return null;
@@ -436,7 +436,7 @@ class VaultProvider extends ChangeNotifier {
     final existing = id == null ? null : _session.entryById(id)?.item;
     final item = VaultItem(
       id: id ?? _uuid.v4(),
-      title: title.trim().isEmpty ? 'Untitled Note' : title.trim(),
+      title: title.trim().isEmpty ? 'Untitled note' : title.trim(),
       category: category,
       content: content,
       mimeType: 'text/plain',

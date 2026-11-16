@@ -469,6 +469,7 @@ class _FullScreenVideoState extends State<_FullScreenVideo> {
                 child: SafeArea(
                   child: IconButton(
                     key: const Key('media-fullscreen-exit'),
+                    tooltip: 'Exit full screen',
                     icon: const Icon(Icons.fullscreen_exit_rounded, color: Colors.white, size: 30),
                     onPressed: () => Navigator.of(context).pop(),
                   ),

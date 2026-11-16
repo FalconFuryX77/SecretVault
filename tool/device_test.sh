@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs an integration test on a connected device/emulator,
-# granting the microphone and camera permissions as soon as
+# granting the microphone, camera and location permissions as soon as
 # `flutter test` installs the app (so no system dialog interrupts the run).
 #
 # Usage:  tool/device_test.sh integration_test/app_flow_test.dart [device-id] [extra flutter args]
@@ -20,7 +20,7 @@ phone_guard "$ADB" "$DEVICE" "$PKG" || exit 1
     if "$ADB" -s "$DEVICE" shell pm list packages 2>/dev/null | grep -q "$PKG"; then
       # Runtime permissions only. (The app no longer asks for storage access;
       # changing that app-op made Android kill the app as the test started.)
-      for p in RECORD_AUDIO CAMERA; do
+      for p in RECORD_AUDIO CAMERA ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
         "$ADB" -s "$DEVICE" shell pm grant "$PKG" "android.permission.$p" >/dev/null 2>&1 || true
       done
       exit 0

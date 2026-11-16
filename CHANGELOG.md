@@ -3,6 +3,22 @@
 Every release of Undertow (called SecretVault until v3.0.0), newest first.
 Security-relevant changes are marked **security**.
 
+## v3.2.1 (2026-11-17)
+
+- The in-vault camera keeps metadata, as evidence of where a picture came
+  from. Photos keep the camera's EXIF (time, phone, settings) plus where
+  they were taken; videos record when they started, where, and the phone's
+  make and model in the MP4, as a phone's own camera would. Location is
+  asked for when the camera opens; without it, photos and videos just don't
+  record a place. Exported copies carry all of this, so remove it before
+  sharing a file if the place could expose someone.
+- The last labels from before the redesign are in sentence case ("Set up a
+  decoy vault", "Set up a duress PIN", "Rename", "Export", "Untitled
+  note"), and every icon button has a name for screen readers and on long
+  press (the camera's buttons, PDF search and its arrows, clearing the
+  search, leaving full screen; "Lock", "Panic lock", "Show as a grid").
+- Website: the PIN field of the phone on the page no longer sits low.
+
 ## v3.2.0 (2026-11-16): a calmer, native design
 
 - A new look for the whole vault. Warm greys with one amber colour for the

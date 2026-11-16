@@ -263,14 +263,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         titleSpacing: 4,
         leading: IconButton(
           icon: const Icon(Icons.lock_outline_rounded, size: 22),
-          tooltip: 'Lock Safe',
+          tooltip: 'Lock',
           onPressed: _lockAndExit,
         ),
         title: Text('Vault', style: Ui.heading()),
         actions: [
           IconButton(
             icon: Icon(_isGridView ? Icons.view_agenda_outlined : Icons.grid_view_outlined, size: 21),
-            tooltip: _isGridView ? 'List View' : 'Grid View',
+            tooltip: _isGridView ? 'Show as a list' : 'Show as a grid',
             onPressed: () => setState(() => _isGridView = !_isGridView),
           ),
           IconButton(
@@ -282,7 +282,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.power_settings_new_rounded, size: 22),
-            tooltip: 'Instant Panic Lock',
+            tooltip: 'Panic lock',
             onPressed: _triggerPanicLock,
           ),
           const SizedBox(width: 4),
@@ -314,6 +314,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 prefixIcon: const Icon(Icons.search_rounded, color: Ui.ink3, size: 20),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
+                        tooltip: 'Clear search',
                         icon: const Icon(Icons.close_rounded, color: Ui.ink3, size: 18),
                         onPressed: () {
                           _searchController.clear();

@@ -84,8 +84,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         id: _noteId,
         title: title.isEmpty
             ? (widget.category == VaultCategory.keySecret
-                  ? 'Secret Key Seed'
-                  : 'Untitled Note')
+                  ? 'Recovery words'
+                  : 'Untitled note')
             : title,
         content: content,
         category: widget.category,

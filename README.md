@@ -4,7 +4,7 @@ An encrypted vault for Android, hidden inside a working video trimmer, built wit
 
 Website: **https://falconfuryx77.github.io/Undertow/** · **[Watch the demo](https://falconfuryx77.github.io/Undertow/#video)** (every feature, filmed in the real app)
 
-**Status: v3.2.0, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
+**Status: v3.2.1, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
 
 ## Install 📲
 
@@ -27,7 +27,7 @@ SHA-256 of the signing certificate:
   * **PDFs and images** are decoded by Android in an *isolated process*: its own throwaway user id with no permissions, no network and no access to the vault. A booby-trapped file that compromises the decoder gets nothing. Password-protected PDFs open; on Android 15+ PDFs can be searched.
   * **Word (`.docx` and old `.doc`), spreadsheets (`.xlsx`, `.ods`), slides (`.pptx`, `.odp`), `.odt` and text** are read by memory-safe Dart code with limits against zip bombs. Text files can be edited in place.
   * Text copied out of the vault is marked sensitive (kept out of clipboard previews) and cleared after a minute or when the vault locks.
-* **Capture straight into the vault.** Take photos (their metadata stripped) and record video and audio from inside the vault; nothing touches the gallery. Or arm the *hidden recorder*: with the screen off, press volume-down or volume-up 2–6 times (your choice) to start and stop recording, or use the phone's assistant button. Recordings are encrypted as they're captured to a key only the vault can open, so recording works while the vault is locked, the phone can't play them back, and they move into the vault at the next unlock. Recording keys rotate daily.
+* **Capture straight into the vault.** Take photos and record video and audio from inside the vault; nothing touches the gallery. Photos and videos keep their metadata as evidence: when, where (if location is allowed) and with which phone. Or arm the *hidden recorder*: with the screen off, press volume-down or volume-up 2–6 times (your choice) to start and stop recording, or use the phone's assistant button. Recordings are encrypted as they're captured to a key only the vault can open, so recording works while the vault is locked, the phone can't play them back, and they move into the vault at the next unlock. Recording keys rotate daily.
 * **No screenshots, no keyboard learning.** Vault screens are blocked from screenshots, screen recording and the recent-apps preview, and the keyboard is told not to learn anything typed in the vault.
 * **Authenticated encryption.** Files are streamed in 64 KB chunks, each sealed with AES-256-GCM under a per-file key. Any modified, swapped, reordered or truncated chunk is detected and refused, never shown.
 * **One container, no tells.** Every vault and all metadata live in a single pre-allocated file of ciphertext and random filler, with no headers or markers. Its size doesn't track how much you store, and there are always 4 key slots whether 1 or 4 are in use.
@@ -85,7 +85,7 @@ flutter run
 | On-device UI flow | `bash tool/device_test.sh integration_test/app_flow_test.dart <device> [--dart-define=SYNC_SERVER=…]` | Setup → note → lock → covert reopen → wrong PIN → decoy → duress PIN → sandboxed image, screenshot protection; with a server, backup |
 | Viewers | `bash tool/device_test.sh integration_test/viewers_device_test.dart <device>` | Video/audio over the private stream, PDFs (locked, search), office files, text editing, tampered file refused, nothing left behind |
 | Recorder | `bash tool/recorder_phone_test.sh <device>` | Volume triggers with the screen on and off, the assistant button, recording while locked, staging format, moving into the vault |
-| Camera | `bash tool/camera_test.sh <device>` | Photos and video into the vault, metadata stripped, front camera, preview orientation |
+| Camera | `bash tool/camera_test.sh <device>` | Photos and video into the vault with their metadata and place, front camera, preview orientation |
 | Previews | `bash tool/device_test.sh integration_test/preview_device_test.dart <device>` | Photo, video and recording previews, with no readable plaintext on disk |
 | Restore, move, cover | `integration_test/restore_flow_test.dart`, `move_device_test.dart`, `cover_device_test.dart` (through `tool/device_test.sh`) | New-phone restore, moving a vault between installs, the trimmer really trims |
 
