@@ -7,6 +7,7 @@ import android.os.Build
 import android.system.Os
 import android.system.OsConstants
 import java.io.ByteArrayOutputStream
+import java.io.Closeable
 import java.io.DataInputStream
 import java.io.EOFException
 import java.io.File
@@ -25,10 +26,12 @@ import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Recordings made while the vault may be locked.
+ * Recordings (audio, and video from the in-vault camera) made while the
+ * vault may be locked.
  *
  * The vault holds a P-256 key pair; only its public half is handed to the
  * recorder. Each recording gets a fresh ephemeral key pair, and the file key
@@ -37,26 +40,56 @@ import javax.crypto.spec.SecretKeySpec
  * private key, which exists only inside the encrypted vault index. The
  * ephemeral private key is discarded as soon as the file key is derived.
  *
- * File layout:
- *   u16 length, ephemeral public key (X.509)
- *   segments: u32 length, AES-256-GCM(ciphertext ‖ tag)
- *     nonce = 0⁴ ‖ u64 index, aad = "rec/v1" ‖ u64 index ‖ final flag
+ * File layout, v2 (written since v2.2; every byte looks random to anyone
+ * without the vault's public key, which also lives only inside the vault):
+ *   salt (16 random bytes)
+ *   header: AES-CTR(K_h, iv 0)( u16 length ‖ ephemeral public key (X.509) ‖ 0⁸ )
+ *     K_h = HKDF(vault public key, salt, "rec/v2 hdr"); the zeros let the
+ *     owner recognise its own files even before any audio was written
+ *   segments: (u32 length XOR mask(i)) ‖ AES-256-GCM(ciphertext ‖ tag)
+ *     mask(i) = first 4 bytes of AES-ECB(K_h, FF⁸ ‖ u64 i)
+ *     nonce = 0⁴ ‖ u64 i, aad = "rec/v2" ‖ u64 i ‖ final flag
+ *     file key = HKDF(ECDH, zero salt, "rec/v2" ‖ ephemeral public key)
  *
- * Segment plaintexts concatenate into records:
- *   1 config: u64 start time (ms), u32 sample rate, u8 channels, u16 len, AAC config
- *   2 frame:  u16 len, one AAC access unit (1024 samples)
- *   3 end
+ * v1 (v2.1.0): u16 length ‖ ephemeral public key in the clear, then
+ * u32 length ‖ sealed segments, with "rec/v1" in place of "rec/v2". Still
+ * read, so recordings staged by v2.1.0 move in after an update.
+ *
+ * Segment plaintexts concatenate into records, and a record never spans two
+ * segments:
+ *   audio: 1 config: u64 start time (ms), u32 sample rate, u8 channels,
+ *                    u16 len, AAC config
+ *          2 frame:  u16 len, one AAC access unit (1024 samples)
+ *   video (see [MediaRecording]):
+ *          0x12 start: u64 start time (ms)
+ *          0x10 track: u8 id, u8 kind (1 audio, 2 video), u16 len, MIME,
+ *                      u32 a, u32 b (rate and channels, or width and height),
+ *                      u16 rotation, u8 count, (u32 len, codec config)…
+ *          0x11 sample: u8 track, u8 flags (1 = sync), u64 time (µs),
+ *                       u32 len, data (H.264 as length-prefixed NAL units)
+ *   both:  3 end
  * Segments are written about once a second, so if the phone dies mid-way
  * only the last second is lost. The final flag lets a reader tell a finished
  * recording from one cut short.
  */
 object RecordingFormat {
     private val INFO = "rec/v1".toByteArray()
+    private val INFO2 = "rec/v2".toByteArray()
+    private val HEADER_INFO = "rec/v2 hdr".toByteArray()
     private val random = SecureRandom()
+
+    const val SALT_LEN = 16
+    private const val CHECK_LEN = 8
 
     const val REC_CONFIG = 1
     const val REC_FRAME = 2
     const val REC_END = 3
+    const val REC_TRACK = 0x10
+    const val REC_SAMPLE = 0x11
+    const val REC_START = 0x12
+
+    /** Largest segment a reader accepts. */
+    const val MAX_SEGMENT = 16 * 1024 * 1024
 
     fun newVaultKeyPair(): Pair<ByteArray, ByteArray> {
         val g = KeyPairGenerator.getInstance("EC")
@@ -71,22 +104,25 @@ object RecordingFormat {
     fun privateKey(pkcs8: ByteArray): PrivateKey =
         KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(pkcs8))
 
-    fun fileKey(own: PrivateKey, peer: PublicKey, ephemeralPublic: ByteArray): ByteArray {
+    fun fileKey(own: PrivateKey, peer: PublicKey, ephemeralPublic: ByteArray, v2: Boolean): ByteArray {
         val ka = KeyAgreement.getInstance("ECDH")
         ka.init(own)
         ka.doPhase(peer, true)
         val shared = ka.generateSecret()
         try {
-            return hkdf(shared, INFO + ephemeralPublic)
+            return hkdf(shared, (if (v2) INFO2 else INFO) + ephemeralPublic)
         } finally {
             shared.fill(0)
         }
     }
 
-    /** HKDF-SHA256 with a zero salt, 32 bytes of output. */
-    private fun hkdf(ikm: ByteArray, info: ByteArray): ByteArray {
+    /** K_h: hides a v2 file's header and segment lengths. */
+    fun headerKey(vaultPublic: ByteArray, salt: ByteArray): ByteArray = hkdf(vaultPublic, HEADER_INFO, salt)
+
+    /** HKDF-SHA256, 32 bytes of output ([salt] defaults to 32 zero bytes). */
+    private fun hkdf(ikm: ByteArray, info: ByteArray, salt: ByteArray = ByteArray(32)): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(ByteArray(32), "HmacSHA256"))
+        mac.init(SecretKeySpec(salt, "HmacSHA256"))
         val prk = mac.doFinal(ikm)
         mac.init(SecretKeySpec(prk, "HmacSHA256"))
         mac.update(info)
@@ -98,8 +134,31 @@ object RecordingFormat {
 
     fun nonce(index: Long): ByteArray = ByteArray(12).also { ByteBuffer.wrap(it, 4, 8).putLong(index) }
 
-    fun aad(index: Long, final: Boolean): ByteArray =
-        INFO + ByteBuffer.allocate(9).putLong(index).put(if (final) 1 else 0).array()
+    fun aad(index: Long, final: Boolean, v2: Boolean): ByteArray =
+        (if (v2) INFO2 else INFO) + ByteBuffer.allocate(9).putLong(index).put(if (final) 1 else 0).array()
+
+    /** The AES-CTR stream that hides a v2 header, positioned at its start. */
+    fun headerCipher(headerKey: ByteArray, mode: Int): Cipher =
+        Cipher.getInstance("AES/CTR/NoPadding").apply {
+            init(mode, SecretKeySpec(headerKey, "AES"), IvParameterSpec(ByteArray(16)))
+        }
+
+    /** The value XORed into segment [index]'s length (v2). */
+    fun lengthMask(headerKey: ByteArray, index: Long): Int {
+        val c = Cipher.getInstance("AES/ECB/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(headerKey, "AES"))
+        val block = ByteBuffer.allocate(16).putLong(-1L).putLong(index).array()
+        return ByteBuffer.wrap(c.doFinal(block)).int
+    }
+
+    /** The v2 header plaintext for [ephemeralPublic]. */
+    fun headerPlain(ephemeralPublic: ByteArray): ByteArray =
+        ByteBuffer.allocate(2 + ephemeralPublic.size + CHECK_LEN)
+            .putShort(ephemeralPublic.size.toShort()).put(ephemeralPublic).array()
+
+    fun checkLen(): Int = CHECK_LEN
+
+    fun randomBytes(n: Int): ByteArray = ByteArray(n).also { random.nextBytes(it) }
 
     /** Fills [file] with random bytes, then deletes it. */
     fun shred(file: File) {
@@ -125,13 +184,28 @@ object RecordingFormat {
     }
 }
 
-/** Writes one encrypted recording, segment by segment. Not thread-safe. */
-class RecordingWriter(private val file: File, vaultPublicKey: ByteArray) {
+/**
+ * Writes the encrypted segments of one v2 recording. Callers add whole
+ * records to [pending] and call [flush] between records, so a record never
+ * spans two segments. Not thread-safe.
+ */
+class SegmentWriter(
+    private val file: File,
+    vaultPublicKey: ByteArray,
+    /** Tests only: write the v2.1.0 format, to test that it's still read. */
+    private val v1: Boolean = false,
+) {
     private val out: FileOutputStream
     private val key: ByteArray
-    private val pending = ByteArrayOutputStream()
+    private val headerKey: ByteArray
+    val pending = ByteArrayOutputStream()
     private var index = 0L
     private var lastFlush = System.nanoTime()
+
+    /** Bytes written to the file so far. */
+    var written = 0L
+        private set
+
     var closed = false
         private set
 
@@ -139,46 +213,39 @@ class RecordingWriter(private val file: File, vaultPublicKey: ByteArray) {
     private var poisoned = false
 
     init {
-        // Derive the key before creating the file, so a failure here leaves
+        // Derive the keys before creating the file, so a failure here leaves
         // nothing behind.
         val g = KeyPairGenerator.getInstance("EC")
         g.initialize(ECGenParameterSpec("secp256r1"))
         val eph = g.generateKeyPair()
         val ephPub = eph.public.encoded
-        key = RecordingFormat.fileKey(eph.private, RecordingFormat.publicKey(vaultPublicKey), ephPub)
+        key = RecordingFormat.fileKey(eph.private, RecordingFormat.publicKey(vaultPublicKey), ephPub, v2 = !v1)
+        val salt = RecordingFormat.randomBytes(RecordingFormat.SALT_LEN)
+        headerKey = RecordingFormat.headerKey(vaultPublicKey, salt)
+        val header = if (v1) {
+            ByteBuffer.allocate(2 + ephPub.size).putShort(ephPub.size.toShort()).put(ephPub).array()
+        } else {
+            RecordingFormat.headerCipher(headerKey, Cipher.ENCRYPT_MODE).doFinal(RecordingFormat.headerPlain(ephPub))
+        }
         out = FileOutputStream(file)
         try {
-            out.write(ByteBuffer.allocate(2).putShort(ephPub.size.toShort()).array())
-            out.write(ephPub)
+            if (!v1) out.write(salt)
+            out.write(header)
             out.flush()
+            written = (if (v1) 0 else salt.size).toLong() + header.size
         } catch (e: Exception) {
             out.close()
             file.delete()
             key.fill(0)
+            headerKey.fill(0)
             throw e
         }
     }
 
-    fun config(startedAtMs: Long, sampleRate: Int, channels: Int, csd: ByteArray) {
-        val b = ByteBuffer.allocate(1 + 8 + 4 + 1 + 2 + csd.size)
-        b.put(RecordingFormat.REC_CONFIG.toByte()).putLong(startedAtMs).putInt(sampleRate)
-            .put(channels.toByte()).putShort(csd.size.toShort()).put(csd)
-        pending.write(b.array())
-    }
+    /** Whether a second has passed since the last segment. */
+    fun due(): Boolean = pending.size() > 0 && System.nanoTime() - lastFlush > 1_000_000_000L
 
-    fun frame(data: ByteArray, offset: Int, length: Int) {
-        pending.write(RecordingFormat.REC_FRAME)
-        pending.write(length shr 8)
-        pending.write(length and 0xff)
-        pending.write(data, offset, length)
-        if (pending.size() >= 32 * 1024) flush(false)
-    }
-
-    /** Writes what's buffered if a second has passed, so a crash loses little. */
-    fun flushIfDue() {
-        if (pending.size() > 0 && System.nanoTime() - lastFlush > 1_000_000_000L) flush(false)
-    }
-
+    /** Ends the file with an end record. */
     fun finish() {
         if (closed) return
         closed = true
@@ -186,15 +253,15 @@ class RecordingWriter(private val file: File, vaultPublicKey: ByteArray) {
             if (!poisoned) {
                 pending.write(RecordingFormat.REC_END)
                 flush(true)
-                out.fd.sync()
             }
         } finally {
             out.close()
             key.fill(0)
+            headerKey.fill(0)
         }
     }
 
-    private fun flush(final: Boolean) {
+    fun flush(final: Boolean = false) {
         check(!poisoned) { "an earlier write failed" }
         val plain = pending.toByteArray()
         pending.reset()
@@ -204,12 +271,14 @@ class RecordingWriter(private val file: File, vaultPublicKey: ByteArray) {
         try {
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, RecordingFormat.nonce(i)))
-            c.updateAAD(RecordingFormat.aad(i, final))
+            c.updateAAD(RecordingFormat.aad(i, final, v2 = !v1))
             val sealed = c.doFinal(plain)
-            out.write(ByteBuffer.allocate(4).putInt(sealed.size).array())
+            val len = if (v1) sealed.size else sealed.size xor RecordingFormat.lengthMask(headerKey, i)
+            out.write(ByteBuffer.allocate(4).putInt(len).array())
             out.write(sealed)
             out.flush()
             out.fd.sync()
+            written += 4 + sealed.size
         } catch (e: Exception) {
             poisoned = true
             throw e
@@ -217,6 +286,197 @@ class RecordingWriter(private val file: File, vaultPublicKey: ByteArray) {
             plain.fill(0)
         }
         lastFlush = System.nanoTime()
+    }
+}
+
+/** Writes one encrypted audio recording (AAC frames). Not thread-safe. */
+class RecordingWriter(file: File, vaultPublicKey: ByteArray, v1: Boolean = false) {
+    private val w = SegmentWriter(file, vaultPublicKey, v1)
+
+    val closed: Boolean get() = w.closed
+
+    fun config(startedAtMs: Long, sampleRate: Int, channels: Int, csd: ByteArray) {
+        val b = ByteBuffer.allocate(1 + 8 + 4 + 1 + 2 + csd.size)
+        b.put(RecordingFormat.REC_CONFIG.toByte()).putLong(startedAtMs).putInt(sampleRate)
+            .put(channels.toByte()).putShort(csd.size.toShort()).put(csd)
+        w.pending.write(b.array())
+    }
+
+    fun frame(data: ByteArray, offset: Int, length: Int) {
+        w.pending.write(RecordingFormat.REC_FRAME)
+        w.pending.write(length shr 8)
+        w.pending.write(length and 0xff)
+        w.pending.write(data, offset, length)
+        if (w.pending.size() >= 32 * 1024) w.flush()
+    }
+
+    /** Writes what's buffered if a second has passed, so a crash loses little. */
+    fun flushIfDue() {
+        if (w.due()) w.flush()
+    }
+
+    fun finish() = w.finish()
+}
+
+/**
+ * Reads the segments of one recording (v2 or v1), verified, in order. Open
+ * with [open]; [next] returns each segment's plaintext until the end, a cut,
+ * or damage. Not thread-safe.
+ */
+class SegmentReader private constructor(
+    private val inp: DataInputStream,
+    private val key: ByteArray,
+    private val headerKey: ByteArray?,
+) : Closeable {
+    private var index = 0L
+    private var ended = false
+
+    /** Whether the last segment was marked final (the recording finished). */
+    var finalSeen = false
+        private set
+
+    val v2: Boolean get() = headerKey != null
+
+    companion object {
+        /**
+         * Opens [file] with a vault's key pair. Returns null if the file
+         * isn't that vault's (or is unreadable from the start). [publicKey]
+         * is needed for v2 files; v1 files need only the private key.
+         */
+        fun open(file: File, publicKey: ByteArray?, privateKey: ByteArray): SegmentReader? {
+            if (publicKey != null) openV2(file, publicKey, privateKey)?.let { return it }
+            return openV1(file, privateKey)
+        }
+
+        private fun stream(file: File) = DataInputStream(FileInputStream(file).buffered(256 * 1024))
+
+        private fun openV2(file: File, publicKey: ByteArray, privateKey: ByteArray): SegmentReader? {
+            val inp = stream(file)
+            var keep = false
+            try {
+                val salt = ByteArray(RecordingFormat.SALT_LEN)
+                inp.readFully(salt)
+                val hk = RecordingFormat.headerKey(publicKey, salt)
+                val ctr = RecordingFormat.headerCipher(hk, Cipher.DECRYPT_MODE)
+                val lenBytes = ctr.update(ByteArray(2).also { inp.readFully(it) })
+                val pubLen = ByteBuffer.wrap(lenBytes).short.toInt() and 0xffff
+                if (pubLen !in 32..256) {
+                    hk.fill(0)
+                    return null
+                }
+                val rest = ctr.doFinal(ByteArray(pubLen + RecordingFormat.checkLen()).also { inp.readFully(it) })
+                if (rest.copyOfRange(pubLen, rest.size).any { it.toInt() != 0 }) {
+                    hk.fill(0)
+                    return null
+                }
+                val ephPub = rest.copyOfRange(0, pubLen)
+                val key = try {
+                    RecordingFormat.fileKey(RecordingFormat.privateKey(privateKey), RecordingFormat.publicKey(ephPub), ephPub, v2 = true)
+                } catch (_: Exception) {
+                    hk.fill(0)
+                    return null
+                }
+                keep = true
+                return SegmentReader(inp, key, hk)
+            } catch (_: Exception) {
+                return null
+            } finally {
+                if (!keep) inp.close()
+            }
+        }
+
+        private fun openV1(file: File, privateKey: ByteArray): SegmentReader? {
+            val inp = stream(file)
+            var keep = false
+            try {
+                val pubLen = inp.readUnsignedShort()
+                if (pubLen !in 1..512) return null
+                val ephPub = ByteArray(pubLen)
+                inp.readFully(ephPub)
+                val key = try {
+                    RecordingFormat.fileKey(RecordingFormat.privateKey(privateKey), RecordingFormat.publicKey(ephPub), ephPub, v2 = false)
+                } catch (_: Exception) {
+                    return null
+                }
+                val r = SegmentReader(inp, key, null)
+                // v1 has no check value: the first segment must open.
+                val first = r.next()
+                if (first == null && r.index == 0L && r.sawSegment) {
+                    r.close()
+                    return null
+                }
+                r.firstV1 = first
+                keep = true
+                return r
+            } catch (_: Exception) {
+                return null
+            } finally {
+                if (!keep) inp.close()
+            }
+        }
+    }
+
+    /** v1 only: the first segment, read while checking ownership. */
+    private var firstV1: ByteArray? = null
+    private var sawSegment = false
+
+    /** The next segment's plaintext, or null at the end, a cut or damage. */
+    fun next(): ByteArray? {
+        firstV1?.let {
+            firstV1 = null
+            return it
+        }
+        if (ended) return null
+        val raw = try {
+            inp.readInt()
+        } catch (_: EOFException) {
+            ended = true
+            return null
+        }
+        sawSegment = true
+        val len = if (headerKey != null) raw xor RecordingFormat.lengthMask(headerKey, index) else raw
+        if (len !in 16..RecordingFormat.MAX_SEGMENT) {
+            ended = true
+            return null
+        }
+        val sealed = ByteArray(len)
+        try {
+            inp.readFully(sealed)
+        } catch (_: EOFException) {
+            ended = true
+            return null
+        }
+        val opened = decrypt(index, false, sealed)
+            ?: decrypt(index, true, sealed)?.also { finalSeen = true }
+        if (opened == null) {
+            ended = true
+            return null
+        }
+        index++
+        if (finalSeen) ended = true
+        return opened
+    }
+
+    /** Segments read so far. */
+    val count: Long get() = index
+
+    private fun decrypt(i: Long, final: Boolean, sealed: ByteArray): ByteArray? = try {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, RecordingFormat.nonce(i)))
+        c.updateAAD(RecordingFormat.aad(i, final, v2 = headerKey != null))
+        c.doFinal(sealed)
+    } catch (_: Exception) {
+        null
+    }
+
+    override fun close() {
+        key.fill(0)
+        headerKey?.fill(0)
+        firstV1?.fill(0)
+        try {
+            inp.close()
+        } catch (_: Exception) {
+        }
     }
 }
 
@@ -238,70 +498,42 @@ class Recording(
 }
 
 object RecordingReader {
+    /** What a staged file holds, as far as its first segment tells. */
+    enum class Kind { AUDIO, VIDEO, EMPTY }
+
     /**
-     * Decrypts [file] with the vault's private key. Returns null if it isn't
-     * this vault's recording (or is unreadable from the first segment).
+     * Whether [file] belongs to the vault with this key pair, and if so what
+     * it holds. Null if it's another vault's.
      */
-    fun open(file: File, vaultPrivateKey: ByteArray): Recording? {
-        DataInputStream(FileInputStream(file).buffered()).use { inp ->
-            val pubLen = try {
-                inp.readUnsignedShort()
-            } catch (_: EOFException) {
-                return null
+    fun probe(file: File, publicKey: ByteArray?, privateKey: ByteArray): Kind? {
+        val r = SegmentReader.open(file, publicKey, privateKey) ?: return null
+        r.use {
+            val first = it.next() ?: return Kind.EMPTY
+            val kind = when (first.firstOrNull()?.toInt()) {
+                RecordingFormat.REC_START, RecordingFormat.REC_TRACK -> Kind.VIDEO
+                RecordingFormat.REC_CONFIG, RecordingFormat.REC_FRAME -> Kind.AUDIO
+                else -> Kind.EMPTY
             }
-            if (pubLen !in 1..512) return null
-            val ephPub = ByteArray(pubLen)
-            try {
-                inp.readFully(ephPub)
-            } catch (_: EOFException) {
-                return null
-            }
-            val key = try {
-                RecordingFormat.fileKey(RecordingFormat.privateKey(vaultPrivateKey), RecordingFormat.publicKey(ephPub), ephPub)
-            } catch (_: Exception) {
-                return null
-            }
-            val plain = ByteArrayOutputStream()
-            var index = 0L
-            var finalSeen = false
-            try {
-                while (!finalSeen) {
-                    val len = try {
-                        inp.readInt()
-                    } catch (_: EOFException) {
-                        break
-                    }
-                    if (len !in 16..(16 * 1024 * 1024)) break
-                    val sealed = ByteArray(len)
-                    try {
-                        inp.readFully(sealed)
-                    } catch (_: EOFException) {
-                        break
-                    }
-                    val opened = decrypt(key, index, false, sealed)
-                        ?: decrypt(key, index, true, sealed)?.also { finalSeen = true }
-                    if (opened == null) {
-                        if (index == 0L) return null
-                        break
-                    }
-                    plain.write(opened)
-                    opened.fill(0)
-                    index++
-                }
-            } finally {
-                key.fill(0)
-            }
-            return parse(plain.toByteArray(), finalSeen)
+            first.fill(0)
+            return kind
         }
     }
 
-    private fun decrypt(key: ByteArray, index: Long, final: Boolean, sealed: ByteArray): ByteArray? = try {
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, RecordingFormat.nonce(index)))
-        c.updateAAD(RecordingFormat.aad(index, final))
-        c.doFinal(sealed)
-    } catch (_: Exception) {
-        null
+    /**
+     * Decrypts an audio recording with the vault's key pair. Returns null if
+     * it isn't this vault's recording (or is unreadable from the start).
+     */
+    fun open(file: File, publicKey: ByteArray?, privateKey: ByteArray): Recording? {
+        val r = SegmentReader.open(file, publicKey, privateKey) ?: return null
+        val plain = ByteArrayOutputStream()
+        r.use {
+            while (true) {
+                val seg = it.next() ?: break
+                plain.write(seg)
+                seg.fill(0)
+            }
+            return parse(plain.toByteArray(), it.finalSeen)
+        }
     }
 
     private fun parse(data: ByteArray, finalSeen: Boolean): Recording {

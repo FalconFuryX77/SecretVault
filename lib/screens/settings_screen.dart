@@ -248,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.screen_lock_portrait_rounded,
             color: const Color(0xFFA78BFA),
             title: 'Hidden recorder',
-            subtitle: 'Volume-down ×3 records with the screen off',
+            subtitle: 'Volume or assistant button records with the screen off',
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const HiddenRecorderScreen()),

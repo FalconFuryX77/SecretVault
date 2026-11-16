@@ -128,8 +128,8 @@ class VaultProvider extends ChangeNotifier {
 
   Future<int> _importRecordings(VaultSession? session) async {
     if (session == null || !VaultRecorder.isAvailable) return 0;
-    final privateKey = RecordingKeys.privateKey(session);
-    if (privateKey == null) return 0; // this vault has never recorded
+    final keys = RecordingKeys.all(session);
+    if (keys.isEmpty) return 0; // this vault has never recorded
     var moved = 0;
     try {
       for (final p in await VaultRecorder.pending()) {
@@ -143,8 +143,14 @@ class VaultProvider extends ChangeNotifier {
             await VaultRecorder.discard(p.id);
             continue;
           }
-          final r = await VaultRecorder.open(p.id, Uint8List.fromList(privateKey));
-          if (r == null) continue; // another vault's
+          OpenedRecording? found;
+          for (final k in keys) {
+            found = await VaultRecorder.open(p.id, k);
+            if (found != null) break;
+          }
+          if (found == null) continue; // another vault's
+          final r = found;
+          if (r.video) continue; // moves in through the camera's import
           if (r.empty) {
             await VaultRecorder.discard(p.id);
             continue;
@@ -172,9 +178,26 @@ class VaultProvider extends ChangeNotifier {
         }
       }
     } finally {
-      privateKey.fillRange(0, privateKey.length, 0);
+      for (final k in keys) {
+        k.wipe();
+      }
     }
     if (moved > 0 && identical(_vault.session, session)) _refreshFromSession();
+    if (session.isOpen) {
+      try {
+        await RecordingKeys.rotateIfDue(
+          session,
+          status: await VaultRecorder.status(),
+          rearm: (pub) => VaultRecorder.arm(
+            pub,
+            vibrate: RecordingKeys.vibrate(session),
+            trigger: TriggerSettings.of(session),
+          ),
+        );
+      } catch (e) {
+        debugPrint('recording key not rotated: $e');
+      }
+    }
     return moved;
   }
 
