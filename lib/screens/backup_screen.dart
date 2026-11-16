@@ -706,6 +706,43 @@ class _BackupScreenState extends State<BackupScreen> {
     ),
     const SizedBox(height: 8),
     if (context.read<VaultService>().session case final s?) _autoCard(s),
+    if (context.read<VaultService>().session case final s?) ...[
+      SwitchListTile(
+        key: const Key('previews-first'),
+        contentPadding: EdgeInsets.zero,
+        value: VaultSync.previewsFirst(s),
+        onChanged: _busy
+            ? null
+            : (v) async {
+                await _sync.setPreviewsFirst(s, v);
+                if (mounted) setState(() {});
+              },
+        activeThumbColor: const Color(0xFFA78BFA),
+        title: Text('Small previews first', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        subtitle: Text(
+          'New photos, videos and recordings go up as a small copy, then in full. '
+          'On a bad connection the copy is what gets through.',
+          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+        ),
+      ),
+      SwitchListTile(
+        key: const Key('originals-wifi'),
+        contentPadding: EdgeInsets.zero,
+        value: VaultSync.originalsOnWifiOnly(s),
+        onChanged: _busy
+            ? null
+            : (v) async {
+                await _sync.setOriginalsOnWifiOnly(s, v);
+                if (mounted) setState(() {});
+              },
+        activeThumbColor: const Color(0xFFA78BFA),
+        title: Text('Full size only on Wi-Fi', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        subtitle: Text(
+          'Large originals wait for Wi-Fi; everything else still goes on mobile data.',
+          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+        ),
+      ),
+    ],
     if (context.read<VaultService>().session case final s?)
       _torSwitch(VaultSync.usesTor(s), (v) async {
         if (v && !await VaultSync.torAvailable()) {
@@ -775,8 +812,10 @@ class _BackupScreenState extends State<BackupScreen> {
   Widget _resultCard(BackupSummary s) {
     final parts = <String>[
       '${s.uploaded} sent',
+      if (s.previews > 0) '${s.previews} ${s.previews == 1 ? 'preview' : 'previews'} sent first',
       if (s.unchanged > 0) '${s.unchanged} already up to date',
       if (s.removed > 0) '${s.removed} removed',
+      if (s.waitingForWifi > 0) '${s.waitingForWifi} full-size ${s.waitingForWifi == 1 ? 'original waits' : 'originals wait'} for Wi-Fi',
     ];
     return Container(
       padding: const EdgeInsets.all(12),

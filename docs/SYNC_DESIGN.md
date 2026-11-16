@@ -137,6 +137,29 @@ before upload. Rough targets, to be tuned by measurement:
 The preview is evidence that *arrives*. The original keeps full quality and
 metadata for verification, and follows later.
 
+**As built** ("Small previews first", on by default; Settings → Backup):
+
+- Only for photos of 1 MB or more (up to 64 MB), videos of 4 MB or more and
+  recordings of 2 MB or more that have never reached the backup. An edit
+  or a rename of something already backed up gets no preview.
+- Photo: decoded in the isolated renderer, at most 1600 px, JPEG quality 75.
+  Video: H.264 at 600 kbit/s with AAC at 64 kbit/s, scaled down (never up)
+  to a 480 px short side. Recording: AAC at 32 kbit/s. Video and audio go
+  through Media3 Transformer, reading the item from the vault's loopback
+  stream; its encoded samples go into a staging file sealed to a key pair
+  that lives only in memory for that one preview, and the MP4 is streamed
+  out of it. No plaintext is written. A preview not under 70% of the
+  original's size isn't sent.
+- A preview is a file of its own in the backup (`<item id>~p`, meta
+  `role: preview`, `previewOf`), sent before any original. Deleting the
+  item deletes both.
+- "Full size only on Wi-Fi" (off by default) holds back the originals of
+  those items while the network is metered; they go on the next backup on
+  Wi-Fi.
+- Restore brings a preview back (titled "… (preview)") only when its
+  original isn't in the backup; once the original arrives, a restore brings
+  that too.
+
 ## 6. The change log
 
 The server keeps an append-only log per account. Each record is sealed under

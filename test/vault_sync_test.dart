@@ -16,10 +16,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
 import 'package:gesture_unlock/services/vault_service.dart';
 import 'package:gesture_unlock/sync/auto_backup.dart';
+import 'package:gesture_unlock/sync/previews.dart';
 import 'package:gesture_unlock/sync/vault_sync.dart';
 import 'package:gesture_unlock/vault/crypto_primitives.dart';
 import 'package:gesture_unlock/vault/platform_keys.dart';
 import 'package:gesture_unlock/vault/vault_container.dart';
+import 'package:gesture_unlock/vault/vault_index.dart';
 import 'package:sync_core/sync_core.dart';
 
 Uint8List noise(int n, int seed) {
@@ -446,6 +448,64 @@ void main() {
       expect(s.entryById('note')!.item.content, 'second draft');
       await s.close();
     });
+
+    test('previews go first; originals can wait for Wi-Fi; a restore uses a preview only while the original is missing', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      final s = await newVault();
+      final video = noise(500000, 41);
+      await s.importBytes(video, fileItem('vid', 'clip.mp4', 'video/mp4', VaultCategory.video));
+      await s.upsertItem(fileItem('note', 'Notes', 'text/plain', VaultCategory.note).copyWith(content: 'hi'));
+      final fake = _FakePreviews()..free = false;
+      final sync = VaultSync(previews: fake);
+      final rs = VaultSync.newRecoverySecret();
+      await sync.connect(s, server: serverUrl.toString(), recoverySecret: rs);
+      await sync.setOriginalsOnWifiOnly(s, true);
+
+      // On mobile data: the preview and the note go, the video waits.
+      final first = await sync.backupAll(s);
+      expect(first.previews, 1);
+      expect(first.waitingForWifi, 1);
+      expect(first.uploaded, 1);
+      expect(fake.made, ['vid']);
+
+      // A new phone now: the preview stands in for the original.
+      final b = await VaultContainer.create(File('${tmp.path}/c2.bin'), crypto, pin: '111222', initialChunks: 64);
+      final syncB = VaultSync(previews: fake);
+      expect((await syncB.recoverInto(b, server: serverUrl.toString(), recoverySecret: rs)).restored, 2);
+      final pv = b.entryById(VaultSync.previewId('vid'))!;
+      expect(pv.item.title, 'clip.mp4 (preview)');
+      expect(utf8.decode(await b.readAll(pv)), 'preview of vid');
+      expect(b.entryById('vid'), isNull);
+
+      // On Wi-Fi the original follows; no second preview.
+      fake.free = true;
+      final second = await sync.backupAll(s);
+      expect(second.previews, 0);
+      expect(second.waitingForWifi, 0);
+      expect(second.uploaded, 1);
+      expect(fake.made, ['vid']);
+
+      // A restore now brings the original and skips the preview.
+      final c = await VaultContainer.create(File('${tmp.path}/c3.bin'), crypto, pin: '333444', initialChunks: 64);
+      expect((await VaultSync(previews: fake).recoverInto(c, server: serverUrl.toString(), recoverySecret: rs)).restored, 2);
+      expect(await c.readAll(c.entryById('vid')!), video);
+      expect(c.entryById(VaultSync.previewId('vid')), isNull);
+      expect((await syncB.restoreMissing(b)).restored, 1);
+      expect(await b.readAll(b.entryById('vid')!), video);
+
+      // Deleting the video deletes its preview from the backup too.
+      await s.delete('vid');
+      expect((await sync.backupAll(s)).removed, 2);
+      final d = await VaultContainer.create(File('${tmp.path}/c4.bin'), crypto, pin: '555666', initialChunks: 64);
+      expect((await VaultSync(previews: fake).recoverInto(d, server: serverUrl.toString(), recoverySecret: rs)).restored, 1);
+      expect(d.entries.single.item.id, 'note');
+      for (final v in [s, b, c, d]) {
+        await v.close();
+      }
+    });
   });
 
   test('release builds take https, or http only to this phone itself', () {
@@ -457,4 +517,23 @@ void main() {
     expect(() => n('http://backup.example.org'), throwsA(isA<SyncSetupException>()));
     expect(() => n('ftp://backup.example.org'), throwsA(isA<SyncSetupException>()));
   });
+}
+
+/// Previews without the platform: a few bytes, for every video.
+class _FakePreviews implements PreviewMaker {
+  bool free = true;
+  final made = <String>[];
+
+  @override
+  bool wants(IndexEntry entry) => entry.item.mimeType.startsWith('video/');
+
+  @override
+  Future<bool> unmetered() async => free;
+
+  @override
+  Future<Preview?> make(VaultSession session, IndexEntry entry) async {
+    made.add(entry.item.id);
+    final small = Uint8List.fromList(utf8.encode('preview of ${entry.item.id}'));
+    return Preview(MemorySyncSource(small), small.length, 'video/mp4', () async {});
+  }
 }

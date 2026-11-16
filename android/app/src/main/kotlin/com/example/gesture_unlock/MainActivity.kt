@@ -72,6 +72,7 @@ class MainActivity : FlutterActivity() {
     private class ChunkAuthException(val index: Int) : Exception()
 
     private val pdfSandbox by lazy { PdfSandbox(this) }
+    private val previews by lazy { PreviewMaker(applicationContext, pdfSandbox) }
     private var camera: VaultCamera? = null
     private val mover by lazy { FileMover(this) }
     private val trimmer by lazy { VideoTrimmer(this) }
@@ -187,6 +188,18 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(messenger, PDF_CHANNEL).setMethodCallHandler { call, result ->
             pdfSandbox.handle(call, result)
+        }
+
+        // Backup previews (see PreviewMaker), and whether the network costs
+        // money (originals can wait for Wi-Fi).
+        MethodChannel(messenger, "app.vault/preview").setMethodCallHandler { call, result ->
+            if (call.method == "unmetered") {
+                val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+                result.success(caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true)
+            } else {
+                previews.handle(call, result)
+            }
         }
 
         MethodChannel(messenger, RECORDER_CHANNEL).setMethodCallHandler { call, result ->

@@ -74,3 +74,11 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Backup previews: transcodes vault video and audio to small copies
+    // (PreviewMaker). Same Media3 version as the video player plugin's.
+    implementation("androidx.media3:media3-transformer:1.9.2")
+    implementation("androidx.media3:media3-effect:1.9.2")
+    implementation("androidx.media3:media3-muxer:1.9.2")
+}
