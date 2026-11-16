@@ -45,8 +45,9 @@ class CameraInfo {
       );
 }
 
-/// The in-vault camera. Photos come back as JPEG bytes stripped of
-/// metadata; videos are encrypted to the vault's recording key as they're
+/// The in-vault camera. Photos come back as JPEG bytes with all their
+/// metadata (time, camera, settings, and where, if the location permission
+/// is given); videos are encrypted to the vault's recording key as they're
 /// recorded and staged like hidden recordings, then moved in by
 /// [VaultProvider.importRecordings].
 class VaultCamera {
@@ -59,13 +60,15 @@ class VaultCamera {
     return CameraInfo.fromMap(m!);
   }
 
-  /// Takes a photo. The JPEG keeps only its orientation tag.
-  static Future<({Uint8List data, int width, int height})> photo() async {
+  /// Takes a photo. The JPEG keeps the camera's EXIF, and [located] says
+  /// whether it also says where it was taken.
+  static Future<({Uint8List data, int width, int height, bool located})> photo() async {
     final m = (await _channel.invokeMapMethod<String, Object?>('photo'))!;
     return (
       data: m['data'] as Uint8List,
       width: (m['width'] as num).toInt(),
       height: (m['height'] as num).toInt(),
+      located: m['located'] == true,
     );
   }
 

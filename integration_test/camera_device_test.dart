@@ -1,11 +1,13 @@
-// The in-vault camera on a phone or emulator: a photo (stored with its
-// metadata removed), a video (encrypted while recorded, streamed into the
+// The in-vault camera on a phone or emulator: a photo (stored with all its
+// metadata, the place too when the phone knows it), a video (with its time,
+// place and phone in the MP4; encrypted while recorded, streamed into the
 // vault as an MP4 that Android's own parser and the vault's player both
 // read), the front camera, and a video cut off by a lock that moves in at
 // the next unlock. Run through tool/camera_test.sh, which screenshots the
 // preview when this test prints "[cam] shot <name>".
 //
 // Uses a throwaway vault in the app's temp folder.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -125,17 +127,23 @@ void main() {
     final photo = items(VaultCategory.image).single;
     final jpeg = await svc.session!.readAll(svc.session!.entryById(photo.id)!);
     expect(jpeg.sublist(0, 2), [0xFF, 0xD8]);
-    // The only EXIF left, if any, is the tiny orientation-only block.
+    // The camera's EXIF is kept, and says where when the phone knew it.
+    Uint8List? exif;
     for (var i = 2; i + 4 < jpeg.length;) {
       if (jpeg[i] != 0xFF) break;
       final marker = jpeg[i + 1];
       if (marker == 0xDA) break;
       final len = (jpeg[i + 2] << 8) | jpeg[i + 3];
-      expect(marker == 0xE1 && len > 40, isFalse, reason: 'no full EXIF/XMP segment');
-      expect(marker == 0xFE, isFalse, reason: 'no comment segment');
-      expect(marker >= 0xE3 && marker <= 0xEF, isFalse, reason: 'no other metadata segments');
+      if (marker == 0xE1 && latin1.decode(jpeg.sublist(i + 4, i + 8)) == 'Exif') exif = jpeg.sublist(i + 4, i + 2 + len);
       i += 2 + len;
     }
+    expect(exif, isNotNull, reason: "the camera's EXIF is kept");
+    bool hasTag(int tag) =>
+        indexOf(exif!, [tag >> 8, tag & 0xff]) >= 0 || indexOf(exif, [tag & 0xff, tag >> 8]) >= 0;
+    final located = status().contains('where it was taken');
+    // ignore: avoid_print
+    print('[cam] photo EXIF ${exif!.length} bytes, located: $located, GPS: ${hasTag(0x8825)}');
+    if (located) expect(hasTag(0x8825), isTrue, reason: 'GPSInfo in the EXIF');
     final codec = await ui.instantiateImageCodec(jpeg);
     final frame = await codec.getNextFrame();
     // ignore: avoid_print
@@ -201,6 +209,17 @@ void main() {
     expect(ms, inInclusiveRange(3000, 9000));
     expect(probe['syncs'] as int, greaterThanOrEqualTo(3), reason: 'a key frame every second');
     expect(probe['frame'], isNotNull, reason: 'a frame decodes');
+    // Like a phone camera's own videos: when, the phone, and where if known.
+    final head = mp4.sublist(0, mp4.length < (1 << 20) ? mp4.length : 1 << 20);
+    final mvhd = indexOf(head, latin1.encode('mvhd'));
+    expect(mvhd, greaterThan(0));
+    final created = ByteData.sublistView(head).getUint32(mvhd + 8) - 2082844800;
+    final age = DateTime.now().millisecondsSinceEpoch ~/ 1000 - created;
+    expect(age, inInclusiveRange(0, 300), reason: 'the MP4 says when it was recorded');
+    expect(indexOf(head, latin1.encode('\u00A9mak')), greaterThan(0), reason: 'the make');
+    expect(indexOf(head, latin1.encode('\u00A9mod')), greaterThan(0), reason: 'the model');
+    // ignore: avoid_print
+    print('[cam] video place: ${indexOf(head, latin1.encode('\u00A9xyz')) > 0}');
 
     // It plays in the vault's own player.
     await t.pumpWidget(app(FileViewerScreen(item: video)));
@@ -253,4 +272,16 @@ void main() {
     await svc.lock();
     await dir.delete(recursive: true);
   });
+}
+
+/// Where [needle] first occurs in [hay], or -1.
+int indexOf(List<int> hay, List<int> needle) {
+  outer:
+  for (var i = 0; i + needle.length <= hay.length; i++) {
+    for (var j = 0; j < needle.length; j++) {
+      if (hay[i + j] != needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
 }

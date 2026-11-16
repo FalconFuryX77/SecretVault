@@ -46,10 +46,12 @@ import kotlin.math.abs
 
 /**
  * The in-vault camera (channel `app.vault/camera`). Photos are captured into
- * memory, stripped of metadata ([JpegClean]) and handed to the vault; they
- * never touch storage. Videos are encrypted as they're recorded, exactly
- * like hidden audio recordings ([VideoRecorder] writes [RecordingFormat] v2
- * to the vault's public key), and move into the vault through [Mp4Exporter].
+ * memory and handed to the vault with all their metadata (time, camera,
+ * settings, and where they were taken: [PlaceTracker]); they never touch
+ * storage. Videos are encrypted as they're recorded, exactly like hidden
+ * audio recordings ([VideoRecorder] writes [RecordingFormat] v2 to the
+ * vault's public key), and move into the vault through [Mp4Exporter], which
+ * writes their time, place and phone into the MP4.
  *
  * The preview is a Flutter texture inside the app's own window, which is
  * screenshot-protected while the vault is open.
@@ -78,6 +80,7 @@ class VaultCamera(private val activity: Activity, private val textures: TextureR
     private var jpeg: ImageReader? = null
     private var torch = false
     private var recorder: VideoRecorder? = null
+    private val place = PlaceTracker(activity)
 
     @Volatile private var deviceOrientation = 0
     private val orientationListener = object : OrientationEventListener(activity) {
@@ -171,6 +174,7 @@ class VaultCamera(private val activity: Activity, private val textures: TextureR
         startSession(listOfNotNull(surface, jpeg?.surface))
         repeatPreview(record = false)
         onMain { orientationListener.enable() }
+        place.start(cbThread.looper)
         val facings = ids.mapNotNull { manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) }.toSet()
         return mapOf(
             "textureId" to p.id(),
@@ -331,13 +335,14 @@ class VaultCamera(private val activity: Activity, private val textures: TextureR
         b.set(CaptureRequest.JPEG_QUALITY, 92.toByte())
         afMode(false)?.let { b.set(CaptureRequest.CONTROL_AF_MODE, it) }
         if (torch) b.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+        // Where it was taken goes into the EXIF with the camera's own tags.
+        val where = place.now()
+        where?.let { b.set(CaptureRequest.JPEG_GPS_LOCATION, it) }
         s.capture(b.build(), null, cb)
         check(latch.await(10, TimeUnit.SECONDS)) { "the photo didn't arrive" }
         r.setOnImageAvailableListener(null, null)
         val raw = bytes ?: throw IllegalStateException("the photo was empty")
-        val clean = JpegClean.clean(raw)
-        raw.fill(0)
-        return mapOf("data" to clean, "width" to r.width, "height" to r.height)
+        return mapOf("data" to raw, "width" to r.width, "height" to r.height, "located" to (where != null))
     }
 
     // ─── Video ─────────────────────────────────────────────────────
@@ -351,7 +356,7 @@ class VaultCamera(private val activity: Activity, private val textures: TextureR
         // Never take the microphone from a hidden recording in progress.
         val mic = audio && !RecorderService.recording &&
             activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        val rec = VideoRecorder(RecorderService.stagingDir(activity), key, videoSize, captureRotation(), mic, bootClock)
+        val rec = VideoRecorder(RecorderService.stagingDir(activity), key, videoSize, captureRotation(), mic, bootClock, place.now())
         activeFile = rec.file
         try {
             rec.prepare()
@@ -422,6 +427,7 @@ class VaultCamera(private val activity: Activity, private val textures: TextureR
         jpeg?.close()
         jpeg = null
         torch = false
+        place.stop()
     }
 
     /** Stops any video (it's kept, encrypted), closes the camera and the texture. */
@@ -460,6 +466,8 @@ class VideoRecorder(
     private val wantAudio: Boolean,
     /** Whether camera timestamps run on the boot clock (else monotonic). */
     private val bootClock: Boolean,
+    /** Where the recording starts, if known: kept with it, encrypted. */
+    private val where: android.location.Location? = null,
 ) {
     companion object {
         const val VIDEO_TRACK = 1
@@ -492,6 +500,14 @@ class VideoRecorder(
     fun prepare() {
         writer = SegmentWriter(file, vaultKey)
         writer.pending.write(ByteBuffer.allocate(9).put(RecordingFormat.REC_START.toByte()).putLong(System.currentTimeMillis()).array())
+        where?.let { l ->
+            writer.pending.write(
+                ByteBuffer.allocate(RecordingFormat.PLACE_LEN).put(RecordingFormat.REC_PLACE.toByte())
+                    .putDouble(l.latitude).putDouble(l.longitude)
+                    .putDouble(if (l.hasAltitude()) l.altitude else Double.NaN)
+                    .putFloat(if (l.hasAccuracy()) l.accuracy else Float.NaN).array(),
+            )
+        }
         val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, size.width, size.height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, (size.width * size.height * 4).coerceIn(2_000_000, 12_000_000))

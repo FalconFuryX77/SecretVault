@@ -273,6 +273,7 @@ class _PdfViewState extends State<PdfView> {
                 Text('Double-tap to zoom', style: AppFonts.ui(fontSize: 11, color: Colors.white38)),
               IconButton(
                 key: const Key('pdf-search-toggle'),
+                tooltip: _searching ? 'Close search' : 'Search',
                 visualDensity: VisualDensity.compact,
                 icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded, color: Colors.white70, size: 20),
                 onPressed: () => setState(() {
@@ -316,11 +317,13 @@ class _PdfViewState extends State<PdfView> {
                   style: AppFonts.ui(fontSize: 12, color: Colors.white54),
                 ),
                 IconButton(
+                  tooltip: 'Previous match',
                   icon: const Icon(Icons.keyboard_arrow_up_rounded, color: Colors.white70),
                   onPressed: _matches.isEmpty ? null : () => _goTo(_match - 1),
                 ),
                 IconButton(
                   key: const Key('pdf-search-next'),
+                  tooltip: 'Next match',
                   icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70),
                   onPressed: _matches.isEmpty ? null : () => _goTo(_match + 1),
                 ),

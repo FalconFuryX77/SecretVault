@@ -46,7 +46,7 @@ Who it's for and what they face: [THREAT_MODEL.md](THREAT_MODEL.md).
 | Container and allocation | `lib/vault/vault_container.dart`, `lib/vault/vault_index.dart` | Format 2's rule that no vault writes into another's space, the decoy chain, relocation, duress |
 | Keys and device binding | `lib/vault/crypto_primitives.dart`, `lib/vault/platform_keys.dart`, `MainActivity.kt` (keystore, bulk AES-GCM) | Argon2id parameters, HMAC under a StrongBox key, nonce handling in the native batch path |
 | Recording while locked | `RecordingFormat.kt`, `RecorderService.kt`, `lib/recorder/vault_recorder.dart` | Hybrid encryption to the vault's public key, staging format v2, key rotation |
-| Camera and video export | `VaultCamera.kt`, `Mp4Export.kt`, `JpegClean.kt` | Metadata stripping, two-pass MP4 writer over sealed staging |
+| Camera and video export | `VaultCamera.kt`, `PlaceTracker.kt`, `Mp4Export.kt` | Metadata kept as evidence (EXIF, MP4 time/place/phone), two-pass MP4 writer over sealed staging |
 | Previews | `PreviewMaker.kt`, `lib/sync/previews.dart` | Transformer reading from the loopback stream; custom muxer sealing samples |
 | Isolated renderer | `PdfRenderService.kt`, `PdfSandbox.kt` | Treats the renderer's replies as hostile; timeouts |
 | Loopback media stream | `lib/viewers/vault_media_server.dart` | 127.0.0.1 only, 256-bit path, range handling |

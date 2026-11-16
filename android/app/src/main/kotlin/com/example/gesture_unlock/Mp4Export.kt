@@ -18,7 +18,9 @@ import java.nio.ByteBuffer
  * Every segment is authenticated on both passes, and pass 2 must find the
  * same samples as pass 1 or the export fails.
  *
- * The MP4 carries no device, place or time metadata.
+ * Like a phone camera's own videos, the MP4 records when it was made (the
+ * recording's start), where (if the place was known) and the phone's make
+ * and model.
  */
 class MediaTrack(
     val id: Int,
@@ -35,6 +37,8 @@ class MediaTrack(
 /** The sample table of one staged video, from [MediaScan.scan]. */
 class MediaScan(
     val startedAtMs: Long,
+    /** Latitude, longitude, altitude (NaN if unknown), or null. */
+    val place: DoubleArray?,
     val tracks: List<MediaTrack>,
     val sampleTrack: ByteArray,
     val sampleSize: IntArray,
@@ -70,6 +74,7 @@ class MediaScan(
             val reader = SegmentReader.open(file, publicKey, privateKey) ?: return null
             reader.use { r ->
                 var startedAt = 0L
+                var place: DoubleArray? = null
                 val tracks = LinkedHashMap<Int, MediaTrack>()
                 var cap = 4096
                 var track = ByteArray(cap)
@@ -88,6 +93,10 @@ class MediaScan(
                                 RecordingFormat.REC_START -> {
                                     startedAt = b.long
                                     video = true
+                                }
+                                RecordingFormat.REC_PLACE -> {
+                                    place = doubleArrayOf(b.double, b.double, b.double)
+                                    b.float
                                 }
                                 RecordingFormat.REC_TRACK -> {
                                     val t = readTrack(b)
@@ -130,7 +139,7 @@ class MediaScan(
                     }
                 }
                 if (!video) return null
-                return MediaScan(startedAt, tracks.values.toList(), track, size, pts, sync, n, r.finalSeen && ended)
+                return MediaScan(startedAt, place, tracks.values.toList(), track, size, pts, sync, n, r.finalSeen && ended)
             }
         }
 
@@ -220,6 +229,7 @@ class Mp4Exporter private constructor(
             if (b != null && b.hasRemaining()) {
                 when (b.get().toInt() and 0xff) {
                     RecordingFormat.REC_START -> b.long
+                    RecordingFormat.REC_PLACE -> b.position(b.position() + RecordingFormat.PLACE_LEN - 1)
                     RecordingFormat.REC_TRACK -> skipTrack(b)
                     RecordingFormat.REC_SAMPLE -> {
                         val id = b.get().toInt() and 0xff
@@ -272,6 +282,8 @@ object Mp4Writer {
     private const val MOVIE_TIMESCALE = 1000
     private const val VIDEO_TIMESCALE = 90000
     private const val AAC_FRAME = 1024
+    /** Seconds from 1904-01-01 (MP4) to 1970-01-01 (Unix). */
+    private const val MP4_EPOCH_OFFSET = 2_082_844_800L
 
     private class Timing(
         val timescale: Int,
@@ -289,6 +301,8 @@ object Mp4Writer {
         }
         val timings = tracks.associate { t -> t.id to timing(t, indices.getValue(t.id), scan) }
         val t0 = timings.values.minOf { it.startUs }
+        // When it was recorded, in seconds since 1904 (MP4's epoch); 0 if unknown.
+        val made = if (scan.startedAtMs > 0) scan.startedAtMs / 1000 + MP4_EPOCH_OFFSET else 0L
 
         val ftyp = box("ftyp") {
             it.str("isom"); it.u32(0x200); it.str("isom"); it.str("iso2"); it.str("avc1"); it.str("mp41")
@@ -308,14 +322,15 @@ object Mp4Writer {
                 val gapMs = (tm.startUs - t0) / 1000
                 val durMs = tm.duration * 1000 / tm.timescale
                 movieDuration = maxOf(movieDuration, gapMs + durMs)
-                trak(n + 1, t, tm, indices.getValue(t.id), offsets, scan, gapMs, durMs)
+                trak(n + 1, t, tm, indices.getValue(t.id), offsets, scan, gapMs, durMs, made)
             }
             return box("moov") { b ->
                 b.raw(box("mvhd") {
-                    it.u32(0); it.u32(0); it.u32(0); it.u32(MOVIE_TIMESCALE); it.u32(movieDuration.toInt())
+                    it.u32(0); it.u32(made.toInt()); it.u32(made.toInt()); it.u32(MOVIE_TIMESCALE); it.u32(movieDuration.toInt())
                     it.u32(0x00010000); it.u16(0x0100); it.zeros(10); matrix(it, 0); it.zeros(24); it.u32(tracks.size + 1)
                 })
                 traks.forEach { b.raw(it) }
+                if (scan.startedAtMs > 0) b.raw(userData(scan))
             }
         }
         val probe = moov(0)
@@ -363,9 +378,10 @@ object Mp4Writer {
         scan: MediaScan,
         gapMs: Long,
         durMs: Long,
+        made: Long,
     ): ByteArray = box("trak") { trak ->
         trak.raw(box("tkhd") {
-            it.u32(0x00000003); it.u32(0); it.u32(0); it.u32(trackId); it.u32(0); it.u32((gapMs + durMs).toInt())
+            it.u32(0x00000003); it.u32(made.toInt()); it.u32(made.toInt()); it.u32(trackId); it.u32(0); it.u32((gapMs + durMs).toInt())
             it.zeros(8); it.u16(0); it.u16(0); it.u16(if (t.isVideo) 0 else 0x0100); it.u16(0)
             matrix(it, if (t.isVideo) t.rotation else 0)
             it.u32(if (t.isVideo) t.a shl 16 else 0); it.u32(if (t.isVideo) t.b shl 16 else 0)
@@ -380,7 +396,7 @@ object Mp4Writer {
         })
         trak.raw(box("mdia") { mdia ->
             mdia.raw(box("mdhd") {
-                it.u32(0); it.u32(0); it.u32(0); it.u32(tm.timescale); it.u32(tm.duration.toInt()); it.u16(0x55C4); it.u16(0)
+                it.u32(0); it.u32(made.toInt()); it.u32(made.toInt()); it.u32(tm.timescale); it.u32(tm.duration.toInt()); it.u16(0x55C4); it.u16(0)
             })
             mdia.raw(box("hdlr") {
                 it.u32(0); it.u32(0); it.str(if (t.isVideo) "vide" else "soun"); it.zeros(12)
@@ -521,6 +537,26 @@ object Mp4Writer {
         return out.array()
     }
 
+    /**
+     * `udta` as phone cameras write it: where (`©xyz`, ISO 6709, the way
+     * Android's own MediaMuxer writes it) and the phone (`©mak`, `©mod`).
+     */
+    private fun userData(scan: MediaScan): ByteArray = box("udta") { u ->
+        scan.place?.let { (lat, lon, alt) ->
+            val xyz = String.format(java.util.Locale.ROOT, "%+09.5f%+010.5f", lat, lon) +
+                (if (alt.isNaN()) "" else String.format(java.util.Locale.ROOT, "%+.1f", alt)) + "/"
+            u.raw(text("\u00A9xyz", xyz))
+        }
+        u.raw(text("\u00A9mak", android.os.Build.MANUFACTURER))
+        u.raw(text("\u00A9mod", android.os.Build.MODEL))
+    }
+
+    /** A QuickTime user-data string: u16 length, u16 language, text. */
+    private fun text(type: String, value: String): ByteArray = box(type) {
+        val s = value.toByteArray()
+        it.u16(s.size); it.u16(0x15C7); it.raw(s)
+    }
+
     private fun matrix(b: Buf, rotation: Int) {
         val (a, bb, c, d) = when (rotation) {
             90 -> listOf(0, 0x00010000, -0x00010000, 0)
@@ -546,6 +582,7 @@ object Mp4Writer {
         val b = Buf()
         body(b)
         val content = b.out.toByteArray()
-        return ByteBuffer.allocate(8 + content.size).putInt(8 + content.size).put(type.toByteArray()).put(content).array()
+        // Box types are four Latin-1 bytes (the © of user data is 0xA9).
+        return ByteBuffer.allocate(8 + content.size).putInt(8 + content.size).put(type.toByteArray(Charsets.ISO_8859_1)).put(content).array()
     }
 }

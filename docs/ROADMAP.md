@@ -14,7 +14,7 @@ can be) and committed on its own. Decisions taken: both hidden triggers
    - [x] Trigger options: volume-down or volume-up, 2–6 presses, and an
          opt-in assistant-button trigger.
    - [x] Recording keys rotate daily; staged recordings look like random data.
-   - [x] Camera: photos straight into the vault (metadata stripped).
+   - [x] Camera: photos straight into the vault (since v3.2.1 with their metadata and place, as evidence).
    - [x] Camera: video into the vault, encrypted while it's recorded.
 2. **Vault hardening**
    - [x] The real vault opens even if its decoy's index is damaged.

@@ -62,6 +62,8 @@ import javax.crypto.spec.SecretKeySpec
  *          2 frame:  u16 len, one AAC access unit (1024 samples)
  *   video (see [MediaRecording]):
  *          0x12 start: u64 start time (ms)
+ *          0x13 place (optional, after start): f64 latitude, f64 longitude,
+ *                      f64 altitude (NaN if unknown), f32 accuracy (m, NaN)
  *          0x10 track: u8 id, u8 kind (1 audio, 2 video), u16 len, MIME,
  *                      u32 a, u32 b (rate and channels, or width and height),
  *                      u16 rotation, u8 count, (u32 len, codec config)…
@@ -87,6 +89,8 @@ object RecordingFormat {
     const val REC_TRACK = 0x10
     const val REC_SAMPLE = 0x11
     const val REC_START = 0x12
+    const val REC_PLACE = 0x13
+    const val PLACE_LEN = 1 + 8 + 8 + 8 + 4
 
     /** Largest segment a reader accepts. */
     const val MAX_SEGMENT = 16 * 1024 * 1024

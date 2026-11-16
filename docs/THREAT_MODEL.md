@@ -228,6 +228,7 @@ the 256-bit path in the URL they can't read from it.
 | Moving a vault | Anyone holding the moved copy *and* its transfer code can open the vaults in it without a PIN until the new phone finishes the move. The code is shown once and never stored. |
 | Tor | Backups over Tor go through Orbot's local proxy; if Orbot isn't running the app refuses rather than falling back. Trust in Orbot is assumed. |
 | Container format needs external review | It is a composition of standard primitives (see [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md)) and hasn't been reviewed by a third party. |
+| Where photos and videos were taken | Since v3.2.1 the in-vault camera keeps each photo's and video's metadata, including where it was taken when location is allowed, because it's evidence. Inside the vault it's encrypted with the file; an exported copy carries it, so remove it before sharing a file if the place could expose you or a source. Deny the app location in Android to record no place. |
 | Uploading while locked | On by default. With root, an examiner can see the queue, its size, the server address and an upload-only token (which can add to the account, never read or delete). "Clear cache" in the cover app, or the stop code on the lock screen, wipes all of it; use one before handing the phone over. Only one vault on a phone can use the queue. See [SYNC_DESIGN.md §9.1](SYNC_DESIGN.md#91-as-built-v31). |
 
 Closed since the review of 2026-11-16: duress PIN, rollback detection, PIN

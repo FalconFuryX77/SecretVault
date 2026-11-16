@@ -25,7 +25,8 @@ Future<bool> ensurePermission(BuildContext context, Permission permission) async
 
 /// The in-vault camera: photos and videos go straight into the vault and
 /// never into the phone's gallery. Photos are kept in memory until they're
-/// stored, with their metadata (phone model, settings, time) removed.
+/// stored, with their metadata (time, phone, settings and, if allowed, where)
+/// kept as evidence of where they came from.
 /// Videos are encrypted as they're recorded; leaving the screen or locking
 /// stops a video, and it's kept.
 class CameraScreen extends StatefulWidget {
@@ -85,6 +86,8 @@ class _CameraScreenState extends State<CameraScreen> {
       _say('The camera permission is needed.', error: true);
       return;
     }
+    // Optional: without it, photos and videos just don't record where.
+    if (mounted) await ensurePermission(context, Permission.locationWhenInUse);
     await _open();
   }
 
@@ -145,7 +148,9 @@ class _CameraScreenState extends State<CameraScreen> {
       // can't be wiped here; the vault copy is encrypted at once.)
       await _vault.importPhoto(p.data);
       _saved++;
-      _say('Photo saved to the vault.');
+      _say(p.located
+          ? 'Photo saved to the vault, with where it was taken.'
+          : 'Photo saved to the vault. No location yet: allow it, or wait for a fix, to record where.');
     } catch (e) {
       _say("The photo wasn't saved: $e", error: true);
     } finally {
@@ -273,6 +278,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 child: Row(
                   children: [
                     IconButton(
+                      tooltip: 'Close camera',
                       icon: const Icon(Icons.close_rounded, color: Ui.ink),
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -288,6 +294,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     if (c?.hasFlash == true)
                       IconButton(
                         key: const Key('camera-torch'),
+                        tooltip: _torch ? 'Turn the light off' : 'Turn the light on',
                         icon: Icon(_torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Ui.ink),
                         onPressed: _toggleTorch,
                       )
@@ -379,6 +386,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: c?.canSwitch == true
                           ? IconButton(
                               key: const Key('camera-switch'),
+                              tooltip: 'Switch camera',
                               icon: const Icon(Icons.cameraswitch_rounded, color: Ui.ink, size: 30),
                               onPressed: _recording ? null : _switchCamera,
                             )
