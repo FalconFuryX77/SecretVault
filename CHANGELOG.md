@@ -3,7 +3,7 @@
 Every release of Undertow (called SecretVault until v3.0.0), newest first.
 Security-relevant changes are marked **security**.
 
-## v3.1.0 (unreleased): uploading while locked
+## v3.1.0 (2026-11-16): uploading while locked
 
 - **Keeps uploading while locked** (on by default, with an off switch in
   Settings → Backup). When backup can't reach the server, what's left is
