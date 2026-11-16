@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../vault/crypto_primitives.dart';
 import '../vault/platform_keys.dart';
+import '../sync/outbox.dart';
 import '../vault/rollback_guard.dart';
 import 'security_channel_service.dart';
 import '../vault/vault_container.dart';
@@ -105,9 +106,13 @@ class VaultService {
     return s;
   }
 
+  /// A PIN that opened nothing may be the locked-upload stop code: the
+  /// upload queue checks (and if so wipes itself). Replaced in tests.
+  Future<void> Function(Uint8List stopTag) onWrongPin = (tag) => const PlatformOutbox().stopIfMatches(tag);
+
   Future<VaultSession?> unlockWithPin(String pin) async {
     await lock();
-    final s = await (await _container()).unlockWithPin(pin);
+    final s = await (await _container()).unlockWithPin(pin, onNoMatch: onWrongPin);
     _session = s;
     if (s != null) {
       await SecurityChannelService.setVaultOpen(true);

@@ -229,9 +229,7 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         if not verify_signature(pub, sig, signed_message(op, acct.id, nonce, body)):
             raise HTTPException(401, "bad recovery signature")
 
-    def require_device(
-        db: DB, authorization: Annotated[str | None, Header()] = None
-    ) -> tuple[str, str]:
+    def _device_token(db: Session, authorization: str | None) -> Token:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(401, "bearer token required")
         tok = db.get(Token, hash_token(authorization[7:]))
@@ -240,9 +238,25 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         dev = db.get(Device, tok.device_id)
         if dev is None or dev.revoked_at is not None:
             raise HTTPException(401, "device revoked")
+        return tok
+
+    def require_device(
+        db: DB, authorization: Annotated[str | None, Header()] = None
+    ) -> tuple[str, str]:
+        tok = _device_token(db, authorization)
+        if tok.scope != "full":
+            raise HTTPException(403, "this token can only upload")
         return tok.account_id, tok.device_id
 
+    def require_uploader(
+        db: DB, authorization: Annotated[str | None, Header()] = None
+    ) -> tuple[str, str]:
+        tok = _device_token(db, authorization)
+        return tok.account_id, tok.device_id
+
+    # Everything, or (Uploader) only adding pieces and log records.
     Caller = Annotated[tuple[str, str], Depends(require_device)]
+    Uploader = Annotated[tuple[str, str], Depends(require_uploader)]
 
     def check_piece_id(piece_id: str) -> None:
         if not PIECE_ID.match(piece_id):
@@ -325,6 +339,29 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         )
         db.commit()
         return {"token": token, "expires_in": settings.token_ttl_seconds}
+
+    @app.post("/v1/auth/upload-token")
+    def upload_token(caller: Caller, db: DB):
+        """A long-lived token that can only upload (see Token.scope), for a
+        phone to keep while its vault is locked. Needs a full token."""
+        token = new_token()
+        db.add(
+            Token(
+                token_hash=hash_token(token),
+                account_id=caller[0],
+                device_id=caller[1],
+                expires_at=utcnow() + timedelta(seconds=settings.upload_token_ttl_seconds),
+                scope="upload",
+            )
+        )
+        db.commit()
+        return {"token": token, "expires_in": settings.upload_token_ttl_seconds}
+
+    @app.delete("/v1/auth/upload-token", status_code=204)
+    def revoke_upload_tokens(caller: Caller, db: DB):
+        """Every upload-only token of the calling device stops working."""
+        db.execute(delete(Token).where(Token.device_id == caller[1], Token.scope == "upload"))
+        db.commit()
 
     # ── devices (recovery-key operations) ──
 
@@ -519,7 +556,7 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         return {"done": True, "created": True, "sha256": digest.hex()}
 
     @app.get("/v1/uploads/{piece_id}")
-    def upload_offset(piece_id: str, caller: Caller, db: DB):
+    def upload_offset(piece_id: str, caller: Uploader, db: DB):
         check_piece_id(piece_id)
         existing = db.get(Piece, (caller[0], piece_id))
         if existing is not None:
@@ -532,7 +569,7 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         piece_id: str,
         request: Request,
         response: Response,
-        caller: Caller,
+        caller: Uploader,
         db: DB,
         upload_offset: Annotated[int, Header()],
         upload_length: Annotated[int, Header()],
@@ -584,7 +621,7 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         return {**result, "offset": len(data)}
 
     @app.post("/v1/pieces/missing")
-    def missing(body: MissingRequest, caller: Caller, db: DB):
+    def missing(body: MissingRequest, caller: Uploader, db: DB):
         for pid in body.ids:
             check_piece_id(pid)
         have = set(
@@ -597,7 +634,7 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         piece_id: str,
         request: Request,
         response: Response,
-        caller: Caller,
+        caller: Uploader,
         db: DB,
         content_digest: Annotated[str | None, Header()] = None,
     ):
@@ -701,7 +738,7 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
     # ── change log ──
 
     @app.post("/v1/log", status_code=201)
-    def append_log(body: AppendLog, caller: Caller, db: DB):
+    def append_log(body: AppendLog, caller: Uploader, db: DB):
         account_id, device_id = caller
         try:
             record = b64d(body.record)

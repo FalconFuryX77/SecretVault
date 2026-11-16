@@ -628,6 +628,33 @@ class SyncEngine {
     return bodies;
   }
 
+  /// After records were queued for someone else to upload (see the app's
+  /// locked upload), which may or may not have reached the server: takes
+  /// this device's chain as the server has it, and says which of this
+  /// device's versions (`file/version`) and deletions arrived.
+  ///
+  /// The chain position this device noted for itself is dropped first: it
+  /// counted records that were only queued, so the server being behind it
+  /// is expected here, not a rollback.
+  Future<({Set<String> puts, Set<String> dels})> syncOwnChain() async {
+    final j0 = await journal.load();
+    ((j0['heads'] as Map?) ?? {}).remove(_device);
+    await journal.save(j0);
+    final bodies = await _verifiedLog();
+    final j = await journal.load();
+    final head = ((j['heads'] as Map?) ?? const {})[_device];
+    j['chain'] = head ?? {'c': 0, 'h': ''};
+    await journal.save(j);
+    final puts = <String>{}, dels = <String>{};
+    for (final b in bodies) {
+      if (b.device != _device) continue;
+      for (final op in b.ops) {
+        (op.type == 'put' ? puts : dels).add('${op.file}/${op.version}');
+      }
+    }
+    return (puts: puts, dels: dels);
+  }
+
   /// Every file the log has seen, each with its versions oldest first:
   /// current, replaced by a newer one, or deleted (see [BackupVersion]).
   /// Versions that [prune] removed are still listed (the log keeps them);
