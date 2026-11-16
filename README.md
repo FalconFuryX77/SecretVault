@@ -4,7 +4,7 @@ An encrypted file vault for Android, hidden inside a working file manager, built
 
 Website: **https://falconfuryx77.github.io/SecretVault/**
 
-**Status: v2.0.0, an early release.** It works end to end on real phones and is covered by the tests below, but it has not been independently audited. Don't make it the only copy of anything that matters yet.
+**Status: v2.1.0, an early release.** It works end to end on real phones and emulators and is covered by the tests below. Each release also goes through an adversarial code review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had. Don't make it the only copy of anything that matters yet.
 
 ## Install 📲
 
