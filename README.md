@@ -2,7 +2,7 @@
 
 An encrypted vault for Android, hidden inside a working video trimmer, built with Flutter. It is for people whose phones may be searched or seized: one PIN opens the real vault, another opens a harmless decoy, and nothing on the phone shows how many vaults there are. It records audio, photos and video straight into the vault, and backs the vault up, end-to-end encrypted, to a server you run.
 
-Website: **https://falconfuryx77.github.io/Undertow/** · **[Watch the 3-minute demo](https://falconfuryx77.github.io/Undertow/#video)**
+Website: **https://falconfuryx77.github.io/Undertow/** · **[Watch the demo](https://falconfuryx77.github.io/Undertow/#video)** (every feature, filmed in the real app)
 
 **Status: v3.2.0, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
 
