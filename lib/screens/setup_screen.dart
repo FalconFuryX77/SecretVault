@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../main.dart' show rootNavigatorKey;
+import '../navigation/vault_routes.dart';
 import '../providers/unlock_provider.dart';
 import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
@@ -76,7 +76,10 @@ class _SetupScreenState extends State<SetupScreen> {
         (_) => false,
       );
       rootNavigatorKey.currentState?.push(
-        MaterialPageRoute(builder: (_) => VaultHomeScreen(vaultType: session.type)),
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
+          builder: (_) => VaultHomeScreen(vaultType: session.type),
+        ),
       );
     } catch (e) {
       if (mounted) {

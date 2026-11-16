@@ -135,14 +135,28 @@ class VaultSync {
     return [for (var i = 0; i < h.length; i += 4) h.substring(i, i + 4)].join(' ');
   }
 
-  /// Creates an account on [server] for this vault and stores the device's
-  /// identity inside the vault. Returns the recovery secret, which is shown
-  /// to the user once and never stored on the phone.
-  Future<String> connect(VaultSession session, {required String server, String? invite}) async {
+  /// A new 32-byte recovery secret. Show it ([formatRecoverySecret]) and
+  /// have the user confirm it *before* calling [connect] with it, so an
+  /// account never exists without a recovery secret the user has.
+  static Uint8List newRecoverySecret() => randomBytes(32);
+
+  /// Creates an account on [server] for this vault, using [recoverySecret],
+  /// and stores the device's identity inside the vault. The recovery secret
+  /// is never stored on the phone. Returns it formatted.
+  Future<String> connect(
+    VaultSession session, {
+    required String server,
+    String? invite,
+    required Uint8List recoverySecret,
+  }) async {
     final uri = normalizeServer(server);
     final api = SyncApi(uri, timeout: const Duration(seconds: 20));
     try {
-      final (identity, secret) = await createAccount(api, invite: (invite ?? '').trim().isEmpty ? null : invite!.trim());
+      final (identity, secret) = await createAccount(
+        api,
+        invite: (invite ?? '').trim().isEmpty ? null : invite!.trim(),
+        recoverySecret: recoverySecret,
+      );
       await session.putExtra(_configKey, {'server': uri.toString(), 'identity': identity.toJson()});
       return formatRecoverySecret(secret);
     } on ApiException catch (e) {
@@ -210,6 +224,35 @@ class VaultSync {
 
       final entries = session.entries;
       var uploaded = 0, unchanged = 0, removed = 0, payload = 0, retries = 0;
+
+      // Items that were backed up before but are gone from the vault now.
+      // Done first: when the account is full, uploads fail, and a deletion
+      // should still get through.
+      final current = {for (final e in entries) e.item.id};
+      final j = await journal.load();
+      final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
+      for (final id in jobs.keys.toList()) {
+        if (current.contains(id)) continue;
+        final job = jobs[id] as Map;
+        // Committed: that version. Half-sent: the new version may have
+        // reached the server's log even though this phone never heard back,
+        // so delete it and the version it replaced (whichever is live).
+        final versions = job['state'] == 'committed'
+            ? [job['version'] as String]
+            : [
+                job['version'] as String?,
+                job['parent'] as String?,
+                ...((job['abandoned'] as List?) ?? const []).cast<String?>(),
+              ].whereType<String>().toSet().toList();
+        if (versions.isNotEmpty) {
+          await engine.deleteVersions(id, versions);
+          removed++;
+        }
+        final fresh = await journal.load();
+        ((fresh['jobs'] as Map?) ?? {}).remove(id);
+        await journal.save(fresh);
+      }
+
       for (var i = 0; i < entries.length; i++) {
         final entry = entries[i];
         final item = entry.item;
@@ -228,22 +271,6 @@ class VaultSync {
         uploaded++;
         payload += report.payloadBytes;
         retries += report.retries;
-      }
-
-      // Items that were backed up before but are gone from the vault now.
-      final current = {for (final e in entries) e.item.id};
-      final j = await journal.load();
-      final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
-      for (final id in jobs.keys.toList()) {
-        if (current.contains(id)) continue;
-        final job = jobs[id] as Map;
-        if (job['state'] == 'committed') {
-          await engine.deleteFile(id, job['version'] as String);
-          removed++;
-        }
-        final fresh = await journal.load();
-        ((fresh['jobs'] as Map?) ?? {}).remove(id);
-        await journal.save(fresh);
       }
 
       onProgress?.call(entries.length, entries.length, '');

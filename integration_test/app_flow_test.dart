@@ -176,8 +176,11 @@ void main() {
     expect(find.text(noteTitle), findsNothing);
     await tapWhenReady(t, find.byTooltip('Settings'));
     await waitFor(t, find.text('Change PIN'));
-    expect(find.text('DECOY VAULT'), findsNothing);
-    expect(find.text('Set Up Decoy Vault'), findsNothing);
+    // The decoy's Settings look like a lone real vault's: the same decoy
+    // section, offering to set one up (it can't be told apart at a glance).
+    expect(find.text('DECOY VAULT'), findsOneWidget);
+    expect(find.text('Set Up Decoy Vault'), findsOneWidget);
+    expect(find.text('Change Decoy PIN'), findsNothing);
     await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
     await waitFor(t, find.text('Add File'));
     await lock(t);
@@ -229,11 +232,22 @@ void main() {
       await t.enterText(find.widgetWithText(TextField, 'Server address'), syncServer);
       await t.enterText(find.widgetWithText(TextField, 'Invite code (if the server needs one)'), syncInvite);
       await tapWhenReady(t, find.text('Connect'));
-      await waitFor(t, find.text('I wrote it down'), timeout: const Duration(seconds: 40));
-      // The recovery code is on screen exactly once: 16 groups of 4 characters.
-      final code = t.widget<SelectableText>(find.byType(SelectableText)).data!;
+      // The code is shown and confirmed before the account is created.
+      await waitFor(t, find.byKey(const Key('recovery-code')));
+      final code = t.widget<Text>(find.byKey(const Key('recovery-code'))).data!;
       expect(RegExp(r'^([0-9a-f]{4} ){15}[0-9a-f]{4}$').hasMatch(code), isTrue);
-      await tapWhenReady(t, find.text('I wrote it down'));
+      await tapWhenReady(t, find.byKey(const Key('recovery-written')));
+      // The code is hidden now; two of its groups are asked for.
+      await waitFor(t, find.byKey(const Key('recovery-group-0')));
+      expect(find.byKey(const Key('recovery-code')), findsNothing);
+      final groups = code.split(' ');
+      for (var i = 0; i < 2; i++) {
+        final label = t.widget<TextField>(find.byKey(Key('recovery-group-$i'))).decoration!.labelText!;
+        final n = int.parse(RegExp(r'Group (\d+)').firstMatch(label)!.group(1)!);
+        await t.enterText(find.byKey(Key('recovery-group-$i')), groups[n - 1]);
+      }
+      await t.pump();
+      await tapWhenReady(t, find.byKey(const Key('recovery-confirm')));
       await waitFor(t, find.text('Not backed up yet'));
       final backupClock = Stopwatch()..start();
       await tapWhenReady(t, find.text('Back up now'));

@@ -1,8 +1,6 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../models/vault_item.dart';
@@ -15,6 +13,7 @@ import '../viewers/file_kind.dart';
 import '../viewers/media_player_view.dart';
 import '../viewers/pdf_view.dart';
 import '../viewers/text_file_view.dart';
+import 'export_dialog.dart';
 
 /// Opens a vault file inside the app: no other app is ever involved, and
 /// nothing decrypted is written to storage.
@@ -57,6 +56,8 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   void dispose() {
     final bytes = _decryptedBytes;
     if (bytes != null) {
+      // The decoded picture lives in Flutter's image cache, not in [bytes].
+      if (_kind == ViewerKind.image) MemoryImage(bytes).evict();
       // Best effort: Dart may have made copies, but this one is cleared.
       bytes.fillRange(0, bytes.length, 0);
       _decryptedBytes = null;
@@ -78,7 +79,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         setState(() {
           _errorMessage =
               'This file is ${DeviceFileService.formatBytes(e.bytes)}, too large to open '
-              'in memory. Use Export to open it.';
+              'in memory on this phone.';
           _isLoading = false;
         });
       }
@@ -101,42 +102,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     }
   }
 
-  Future<void> _exportFile() async {
-    try {
-      Directory? exportDir = await getDownloadsDirectory();
-      exportDir ??= await getApplicationDocumentsDirectory();
-
-      if (!mounted) return;
-      final result = await context.read<VaultProvider>().exportFile(
-        _currentItem,
-        exportDir,
-      );
-      if (!mounted) return;
-
-      if (result != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF059669),
-            content: Text(
-              'Exported to ${result.path}',
-              style: AppFonts.outfit(color: Colors.white),
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFFE11D48),
-          content: Text(
-            'Export failed: $e',
-            style: AppFonts.outfit(color: Colors.white),
-          ),
-        ),
-      );
-    }
-  }
+  Future<void> _exportFile() => exportWithConfirmation(context, _currentItem);
 
   Future<void> _renameFile() async {
     final controller = TextEditingController(text: _currentItem.title);
@@ -203,52 +169,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   }
 
   Future<void> _deleteAndExit() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Shred & Delete File',
-          style: AppFonts.outfit(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Text(
-          'Permanently wipe this file from encrypted storage? This action cannot be undone.',
-          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: AppFonts.outfit(color: Colors.white54),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE11D48),
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Shred Permanently',
-              style: AppFonts.outfit(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      if (!mounted) return;
-      await context.read<VaultProvider>().deleteItem(_currentItem);
-      if (mounted) Navigator.pop(context);
-    }
+    if (!await confirmShred(context, _currentItem.title) || !mounted) return;
+    await context.read<VaultProvider>().deleteItem(_currentItem);
+    if (mounted) Navigator.pop(context);
   }
 
   @override

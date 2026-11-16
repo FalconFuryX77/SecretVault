@@ -148,8 +148,32 @@ void main() {
 
     expect(await auth.beginLockout(), AuthService.baseLockoutSeconds * 2);
     expect(await auth.beginLockout(), AuthService.baseLockoutSeconds * 4);
-    await auth.resetAfterSuccess();
-    expect(await auth.beginLockout(), AuthService.baseLockoutSeconds);
+    // A successful unlock (e.g. of the decoy) doesn't reset the escalation.
+    await auth.recordSuccess();
+    expect(await auth.beginLockout(), AuthService.baseLockoutSeconds * 8);
+  });
+
+  test('opening the decoy does not reset failed guesses at the real PIN', () async {
+    for (var i = 0; i < 4; i++) {
+      await auth.recordFailure();
+    }
+    await auth.recordSuccess();
+    expect(await auth.recordFailure(), 5);
+  });
+
+  test('a refused PIN change counts as a failed attempt and can start a lockout', () async {
+    final unlock = newUnlock();
+    await settle();
+    expect(await unlock.verifyPin(pin), isTrue);
+    for (var i = 0; i < UnlockProvider.maxFailedAttempts; i++) {
+      await unlock.registerRefusedPin();
+    }
+    expect(vault.isUnlocked, isTrue, reason: 'the open vault is left alone');
+    unlock.lockVault();
+    await settle();
+    expect(await unlock.verifyPin(pin), isFalse, reason: 'the lockout applies at the next unlock');
+    expect(unlock.state, UnlockState.lockout);
+    unlock.dispose();
   });
 
   test('panic lock wipes the session', () async {

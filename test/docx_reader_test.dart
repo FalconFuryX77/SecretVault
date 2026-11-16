@@ -71,4 +71,30 @@ void main() {
     expect(bomb.length, lessThan(200 * 1024), reason: 'tiny on disk');
     expect(() => DocxReader.read(bomb), throwsA(isA<DocxException>()));
   });
+
+  test('a zip64 "unknown size" entry is refused before inflating', () {
+    // From the review: a declared uncompressed size of 0xFFFF...FF reads
+    // back as -1, which passed the size cap and left inflate unbounded.
+    final plain = Uint8List(8 * 1024 * 1024);
+    final raw = Deflate(plain).getBytes();
+    final name = 'word/document.xml'.codeUnits;
+    final b = BytesBuilder();
+    void u16(int v) => b.add([v & 0xff, (v >> 8) & 0xff]);
+    void u32(int v) => b.add([v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff]);
+    u32(0x04034b50); u16(45); u16(0); u16(8); u16(0); u16(0);
+    u32(0); u32(raw.length); u32(0xffffffff); u16(name.length); u16(0);
+    b.add(name);
+    b.add(raw);
+    final cdOffset = b.length;
+    u32(0x02014b50); u16(45); u16(45); u16(0); u16(8); u16(0); u16(0);
+    u32(0); u32(raw.length); u32(0xffffffff); u16(name.length); u16(12); u16(0);
+    u16(0); u16(0); u32(0); u32(0);
+    b.add(name);
+    u16(0x0001); u16(8); b.add(List.filled(8, 0xff));
+    final cdLen = b.length - cdOffset;
+    u32(0x06054b50); u16(0); u16(0); u16(1); u16(1); u32(cdLen); u32(cdOffset); u16(0);
+    final clock = Stopwatch()..start();
+    expect(() => DocxReader.read(b.toBytes()), throwsA(isA<DocxException>()));
+    expect(clock.elapsedMilliseconds, lessThan(2000), reason: 'refused without inflating');
+  });
 }

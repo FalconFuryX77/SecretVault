@@ -60,6 +60,9 @@ Forces you to "open the vault" or hand over the PIN, under threat.
 | Container has 4 key records whether 1 or 2 are in use; unused ones are random bytes | Built |
 | Decoy can never be made to reveal the real vault's key: only the real vault knows about the decoy, not the other way round | Built |
 | Optional duress PIN that silently destroys the real vault's key | Not built (would be opt-in; see §6) |
+| Each vault has its own recording key and sees only its own recordings and recorder state; opening the decoy never reveals the real vault's recordings | Built |
+| Settings look the same in both vaults (both have a decoy section). A decoy can't safely create a vault of its own, so in a decoy "Set up a decoy" goes through the same steps but the PIN it sets opens nothing: someone who tests it can tell | Built (partial) |
+| Refused PIN changes say nothing about why and count as failed unlock attempts; failures expire after 24 h instead of being reset by any successful unlock (so the decoy PIN can't be used to reset guesses at the real one) | Built |
 
 **Residual risk:** the coercer may not believe there is only one vault. The
 cryptography can't prove that a second vault *doesn't* exist, but it also
@@ -81,11 +84,21 @@ after forcing an unlock of the phone itself, with time and tools.
 | Deleted files' ciphertext and old index copies are overwritten with random data; their keys are dropped | Built |
 | App data excluded from Android cloud backup and device-to-device transfer | Built |
 | Viewing a file never writes a decrypted copy to storage: media is streamed from memory, documents are opened in memory (checked on a phone: no new files after every viewer ran) | Built |
+| Recordings made while the vault is locked are encrypted to the vault's public key (ECDH P-256 + AES-256-GCM, a fresh key per recording). The phone can write them but can't read them back; the private key exists only inside the encrypted vault index | Built |
 | The keyboard is asked not to learn anything typed in the vault (`IME_FLAG_NO_PERSONALIZED_LEARNING`), so notes don't end up in its suggestions. Gboard and most keyboards honour this; a keyboard app is free to ignore it | Built |
 
 **What the examiner still learns:**
 - The app is installed, and it holds a large high-entropy file. We don't hide
   that encrypted data exists, only how much and how many vaults.
+- With the decoy PIN *and* a copy of the file system, an examiner can read
+  the decoy's own index, which records that it is a decoy (its allocation
+  direction and ceiling). That proves a second vault exists. A casual
+  inspector, or a coercer without forensic tools, doesn't get this.
+- Recordings waiting to move into a vault sit encrypted in the app's private
+  storage until the next unlock, so their number and sizes show that
+  something was recorded (not what, or for which vault).
+- While the hidden recorder is armed, Android lists the app as running, and
+  the system privacy log records microphone use.
 - The keystore holds one key (`db0`) regardless of setup. (Keys from the old
   fingerprint unlock, `k0`–`k3`, are deleted on start.)
 - If the phone is seized **while the vault is unlocked**, keys are in RAM.
@@ -199,6 +212,14 @@ the 256-bit path in the URL they can't read from it.
 | Duress PIN | Would destroy the real vault's key on entry. Risky if the coercer notices data vanished, so opt-in only, with a clear warning. Not built. |
 | Rollback of the container file | Restoring an older copy of the file isn't detected locally. |
 | PIN Unicode normalisation | Passphrases with accented characters aren't NFC-normalised yet, so different keyboards could produce different keys. |
+| Hidden recorder visible to other apps | While armed with the screen off, the recorder holds an active media session. Apps with notification access (smartwatch companions, automation apps) can see it, and could start a recording with volume commands. |
+| Recording key not rotated | A vault's recording key pair is kept for good. Shredded staging files are overwritten in place, but flash wear-levelling can keep old blocks, which that key could still decrypt. |
+| Clipboard | Text copied out of a vault viewer can stay in the keyboard's clipboard history. The recovery code can't be copied. |
+| Backup accounts per vault | SYNC_DESIGN §11 calls for one sync account per phone shared by its vaults. Today each vault that backs up creates its own, so if both vaults back up, the server sees two accounts from the same phone. |
+| Backup log sizes | Log records aren't padded, so their sizes tell the server whether an operation is a new file, an edit or a delete, and when. |
+| Backup ordering | Across devices, the server orders the log, and a device's chain isn't checked against a head the client already knew, so a malicious server can roll back or drop the newest records without detection. |
+| Seized phone and restore | Even in append-only mode, a seized phone can append "deleted" records that hide files from a restore (their pieces stay on the server). Restore carries on past broken files, but restoring "as of" a time, or ignoring a revoked device's records, isn't built yet. |
+| Very large files | A file of roughly 10 GB or more needs a manifest over the server's 2 MiB limit and isn't backed up. |
 | Image decoding is not sandboxed | Images are decoded by Flutter's native codecs in the app process. Moving them to the isolated renderer, like PDFs, is planned. |
 | Decoy can't host its own decoy | By design; a decoy opened alone can't see the real vault, so a nested one could overwrite real data. |
 | Container format needs external review | It is a composition of standard primitives (see [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md)) and hasn't been reviewed by a third party. |

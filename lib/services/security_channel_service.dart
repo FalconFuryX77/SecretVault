@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import '../config/features.dart';
 
@@ -29,9 +29,31 @@ class SecurityChannelService {
   static bool get isSecure => _vaultOpen || _holders > 0;
 
   /// Called by VaultService whenever a session opens or closes.
+  ///
+  /// On close, the window stays protected until a frame has been drawn
+  /// without the vault: the app may be in the background (no frames), and
+  /// the next frame shown on wake, or the recent-apps snapshot, must not
+  /// be an unprotected picture of the vault.
   static Future<void> setVaultOpen(bool open) async {
     _vaultOpen = open;
-    await _apply();
+    if (open) {
+      await _apply();
+      return;
+    }
+    try {
+      final binding = WidgetsBinding.instance;
+      // After the first frame, wait a little longer: a screen that was
+      // already closing when the app went to the background finishes its
+      // exit animation (up to ~300 ms) over the cover app on wake.
+      binding.addPostFrameCallback((_) {
+        Future<void>.delayed(const Duration(milliseconds: 700), () {
+          if (!_vaultOpen) _apply();
+        });
+      });
+      binding.scheduleFrame();
+    } catch (_) {
+      await _apply(); // no Flutter binding (plain unit tests)
+    }
   }
 
   /// `true` acquires a hold, `false` releases one (lock screen).
@@ -45,6 +67,19 @@ class SecurityChannelService {
   static Future<void> clearAll() async {
     _holders = 0;
     await _apply();
+  }
+
+  /// Milliseconds since boot and the boot count, which, unlike the wall
+  /// clock, can't be changed from Settings. Null where unavailable.
+  static Future<({int elapsed, int boot})?> monotonicClock() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>('clock');
+      if (m == null) return null;
+      return (elapsed: (m['elapsed'] as num).toInt(), boot: (m['boot'] as num).toInt());
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Keeps the screen on while a video plays. Audio doesn't: when the

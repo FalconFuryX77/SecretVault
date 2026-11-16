@@ -76,7 +76,9 @@ void main() {
       await s.close();
       final raw = String.fromCharCodes(await containerFile.readAsBytes());
       expect(raw.contains('TOPSECRET'), isFalse);
-      expect(raw.contains('"v"'), isFalse);
+      // A plaintext index would start like this. (A 3-byte probe such as
+      // '"v"' turns up by chance in a megabyte of random filler ~6% of runs.)
+      expect(raw.contains('{"v":'), isFalse);
     });
 
     test('a different device cannot unlock even with the right PIN', () async {
@@ -297,6 +299,115 @@ void main() {
     });
   });
 
+  group('review fixes', () {
+    Future<VaultSession> reopen(String pin) async =>
+        (await VaultContainer(containerFile, crypto).unlockWithPin(pin))!;
+
+    test('setup builds the container under a temporary name and leaves none behind', () async {
+      final s = await createVault();
+      expect(await File('${containerFile.path}.tmp').exists(), isFalse);
+      await s.importBytes(Uint8List.fromList([1, 2, 3]), _meta('x', 'x'));
+      await s.close();
+      final r = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+      expect(await r.readAll(r.entryById('x')!), [1, 2, 3]);
+      await r.close();
+    });
+
+    test("the decoy keeps its space after the real vault writes", () async {
+      // Before: the decoy's own new index chunk counted as a real-vault chunk,
+      // so its ceiling dropped to just above its index and its next import
+      // had to grow the file.
+      final s = await createVault(chunks: 64);
+      await s.importFile(await sourceFile('r1', 65508 * 4), _meta('r1', 'r1'));
+      await s.createDecoy(pin: '111222');
+      await s.importFile(await sourceFile('r2', 65508 * 4, seed: 2), _meta('r2', 'r2'));
+      await s.importFile(await sourceFile('r3', 65508 * 2, seed: 3), _meta('r3', 'r3'));
+      await s.close();
+      final size = await containerFile.length();
+      final d = await reopen('111222');
+      await d.importFile(await sourceFile('d1', 65508 * 10, seed: 4), _meta('d1', 'd1'));
+      await d.close();
+      expect(await containerFile.length(), size, reason: 'room below the ceiling, no growth');
+      final r = await reopen('482913');
+      expect(await r.readAll(r.entryById('r2')!), await File('${tmp.path}/r2').readAsBytes());
+      await r.close();
+    });
+
+    test('a lock arriving mid-save never loses the edit (with a decoy)', () async {
+      for (var round = 0; round < 6; round++) {
+        final s = await createVault(chunks: 32);
+        await s.createDecoy(pin: '111222');
+        await s.importBytes(Uint8List.fromList(List.filled(90000, 1)), _meta('t', 't.txt'));
+        final edited = Uint8List.fromList(List.filled(70000 + round, 2));
+        final item = s.entryById('t')!.item;
+        // Lock while the save is in flight; delay the lock a little more
+        // each round to land at different points.
+        final save = s.replaceContent('t', edited, item);
+        await Future<void>.delayed(Duration(milliseconds: round * 3));
+        final closing = s.close();
+        Object? err;
+        try {
+          await save;
+        } catch (e) {
+          err = e;
+        }
+        await closing;
+        final r = await reopen('482913');
+        final got = await r.readAll(r.entryById('t')!);
+        // A save already queued when the lock comes always lands (it's how
+        // unsaved edits are written on lock).
+        expect(err, isNull, reason: 'round $round');
+        expect(got, edited, reason: 'round $round');
+        await r.close();
+        await containerFile.delete();
+      }
+    });
+
+    test('a file that changes size during import is refused, the vault intact', () async {
+      final s = await createVault(chunks: 80);
+      final src = await sourceFile('grows', 65508 * 40);
+      var shrunk = false;
+      await expectLater(
+        s.importFile(src, _meta('g', 'g'), onProgress: (_) {
+          if (!shrunk) {
+            shrunk = true;
+            final raf = src.openSync(mode: FileMode.append);
+            raf.truncateSync(65508 * 20 + 7);
+            raf.closeSync();
+          }
+        }),
+        throwsA(isA<StateError>()),
+      );
+      expect(s.entryById('g'), isNull);
+      await s.close();
+      final r = await reopen('482913');
+      expect(r.entries, isEmpty);
+      await r.close();
+    });
+
+    test('locking during a long import stops it and leaves the vault openable', () async {
+      final s = await createVault(chunks: 80);
+      final src = await sourceFile('big', 65508 * 60);
+      final import = s.importFile(src, _meta('big', 'big'));
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      final closing = s.close();
+      await expectLater(import, throwsA(anything));
+      await closing;
+      final r = await reopen('482913');
+      expect(r.entryById('big'), isNull);
+      await r.close();
+    });
+
+    test('the container grows in whole steps, whatever the import size', () async {
+      final s = await createVault(chunks: 4);
+      final size0 = await containerFile.length();
+      await s.importFile(await sourceFile('a', 65508 * 21), _meta('a', 'a'));
+      final grown = (await containerFile.length() - size0) ~/ ContainerLayout.chunkSize;
+      expect(grown % crypto.growChunks, 0, reason: 'grew by $grown chunks');
+      await s.close();
+    });
+  });
+
   group('decoy vault', () {
     test('decoy PIN opens a vault that cannot see the real one', () async {
       final s = await createVault();
@@ -314,6 +425,27 @@ void main() {
       expect(d.hasDecoy, isFalse);
       expect(d.type, VaultType.decoy);
       await d.close();
+    });
+
+    test("the decoy's stand-in decoy setup reveals nothing and opens nothing", () async {
+      final s = await createVault();
+      await s.createDecoy(pin: '111222');
+      await s.close();
+      final d = (await VaultContainer(containerFile, crypto).unlockWithPin('111222'))!;
+      expect(d.showsDecoy, isFalse, reason: 'looks like a lone vault');
+      // The real PIN is accepted like any free PIN: no "already in use".
+      await d.standInDecoySetup('482913', shown: true);
+      expect(d.showsDecoy, isTrue);
+      // Its own PIN is refused, as a lone vault refuses its own.
+      await expectLater(d.standInDecoySetup('111222', shown: true), throwsA(isA<CredentialInUseException>()));
+      await d.standInDecoySetup('765432', shown: true);
+      await d.close();
+      final c = VaultContainer(containerFile, crypto);
+      expect(await c.unlockWithPin('765432'), isNull, reason: 'the stand-in PIN opens nothing');
+      final r = (await c.unlockWithPin('482913'))!;
+      expect(r.type, VaultType.primary, reason: 'the real vault is untouched');
+      expect(r.hasDecoy, isTrue);
+      await r.close();
     });
 
     test('decoy cannot reuse the real PIN', () async {

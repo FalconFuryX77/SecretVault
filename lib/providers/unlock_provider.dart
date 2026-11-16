@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:vibration/vibration.dart';
 import '../models/vault_state.dart';
@@ -88,10 +89,20 @@ class UnlockProvider extends ChangeNotifier {
 
   bool get _shouldLockInBackground => _autoLockOnSwitch && _suppressAutoLock == 0;
 
+  Timer? _suppressedPauseTimer;
+
   void onAppPaused() {
     _backgrounded = true;
     if (_shouldLockInBackground) {
       lockVault();
+    } else if (_autoLockOnSwitch && _suppressAutoLock > 0 && state == UnlockState.unlocked) {
+      // A system screen (file picker, permission prompt) is up. If the user
+      // leaves it with Home instead of coming back, the vault must not stay
+      // open in the background indefinitely.
+      _suppressedPauseTimer?.cancel();
+      _suppressedPauseTimer = Timer(const Duration(minutes: 3), () {
+        if (_backgrounded && state == UnlockState.unlocked) lockVault();
+      });
     }
   }
 
@@ -110,6 +121,8 @@ class UnlockProvider extends ChangeNotifier {
     // The app never prompts on resume: an unprompted dialog would give away
     // that this is not a regular Files app.
     _backgrounded = false;
+    _suppressedPauseTimer?.cancel();
+    if (state == UnlockState.unlocked) _resetInactivityTimer();
   }
 
   // ─── Shake-to-lock ───────────────────────────────────────
@@ -136,8 +149,23 @@ class UnlockProvider extends ChangeNotifier {
     if (state == UnlockState.lockout || state == UnlockState.authenticating) {
       return false;
     }
+    // Busy before the first await, so a burst of submissions can't get
+    // several guesses in flight at once.
     state = UnlockState.authenticating;
     notifyListeners();
+    // A lockout may have started while a vault was open (refused PIN
+    // changes count too); honour it before checking anything.
+    DateTime? lockoutEnd;
+    try {
+      lockoutEnd = await _authService.getLockoutEndTime();
+    } catch (_) {
+      // Unreadable lockout state: fall through to a normal check rather
+      // than leaving the screen stuck "authenticating".
+    }
+    if (lockoutEnd != null) {
+      _startLockoutCountdown(max(1, lockoutEnd.difference(DateTime.now()).inSeconds));
+      return false;
+    }
 
     try {
       final session = await _vault.unlockWithPin(pin);
@@ -154,7 +182,14 @@ class UnlockProvider extends ChangeNotifier {
         return true;
       }
     } catch (_) {}
-    await _onFailedAttempt();
+    try {
+      await _onFailedAttempt();
+    } finally {
+      if (state == UnlockState.authenticating) {
+        state = UnlockState.locked;
+        notifyListeners();
+      }
+    }
     return false;
   }
 
@@ -164,8 +199,7 @@ class UnlockProvider extends ChangeNotifier {
     VaultType vaultType, {
     bool announce = true,
   }) async {
-    _failedAttempts = 0;
-    await _authService.resetAfterSuccess();
+    await _authService.recordSuccess();
     activeVaultType = vaultType;
     state = UnlockState.unlocked;
     _vibrateSuccess();
@@ -177,9 +211,21 @@ class UnlockProvider extends ChangeNotifier {
     }
   }
 
+  /// A PIN change refused because the PIN is taken (or unusable) tells
+  /// whoever tried it something, so it costs the same as a wrong PIN at the
+  /// lock screen. The current screen is left alone; a lockout it starts
+  /// applies to the next unlock.
+  Future<void> registerRefusedPin() async {
+    _failedAttempts = await _authService.recordFailure();
+    if (_failedAttempts >= maxFailedAttempts) {
+      await _authService.beginLockout();
+      _failedAttempts = 0;
+      await _authService.setFailedAttempts(0);
+    }
+  }
+
   Future<void> _onFailedAttempt() async {
-    _failedAttempts++;
-    await _authService.setFailedAttempts(_failedAttempts);
+    _failedAttempts = await _authService.recordFailure();
     _vibrateError();
 
     if (_failedAttempts >= maxFailedAttempts) {
@@ -223,9 +269,25 @@ class UnlockProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  final List<VoidCallback> _beforeLock = [];
+
+  /// Editors register here to save unsaved text when the vault locks. A
+  /// callback that starts a vault write synchronously gets it in before the
+  /// session closes (close waits for queued writes).
+  void addBeforeLock(VoidCallback cb) => _beforeLock.add(cb);
+  void removeBeforeLock(VoidCallback cb) => _beforeLock.remove(cb);
+
   void _resetLockState() {
     _inactivityTimer?.cancel();
+    _suppressedPauseTimer?.cancel();
     _stopShakeWatch();
+    if (_vault.isUnlocked) {
+      for (final cb in List.of(_beforeLock)) {
+        try {
+          cb();
+        } catch (_) {}
+      }
+    }
     _vault.lock();
   }
 
@@ -254,6 +316,21 @@ class UnlockProvider extends ChangeNotifier {
 
   // ─── Inactivity Auto-Lock ────────────────────────────────
 
+  DateTime? _inactivityHold;
+
+  /// Holds off the inactivity lock (not the app-switch lock) while [op]
+  /// runs, for at most 10 minutes: for screens the user reads or copies
+  /// from without touching it, like the recovery code.
+  Future<T> holdingInactivityLock<T>(Future<T> Function() op) async {
+    _inactivityHold = DateTime.now();
+    try {
+      return await op();
+    } finally {
+      _inactivityHold = null;
+      if (state == UnlockState.unlocked) _resetInactivityTimer();
+    }
+  }
+
   void onUserActivity() {
     if (state == UnlockState.unlocked) {
       _resetInactivityTimer();
@@ -266,8 +343,12 @@ class UnlockProvider extends ChangeNotifier {
 
     _inactivityTimer = Timer(Duration(seconds: _inactivityTimeoutSeconds), () {
       if (state != UnlockState.unlocked) return;
-      if (_vault.isBusy) {
-        _resetInactivityTimer(); // don't cut off an import in progress
+      final held = _inactivityHold != null &&
+          DateTime.now().difference(_inactivityHold!) < const Duration(minutes: 10);
+      if (_vault.isBusy || _suppressAutoLock > 0 || held) {
+        // Don't cut off an import, an export, the user picking files, or
+        // the user copying a recovery code onto paper.
+        _resetInactivityTimer();
       } else {
         lockVault();
       }
