@@ -413,3 +413,60 @@ def test_concurrent_uploads_to_one_account_do_not_stall_the_server(settings):
         assert codes == [201] * 4
         assert time.time() - start < 6
         assert client.get("/health").status_code == 200
+
+
+# ─── restore, revocation, starting over ──────────────────────────────────
+
+
+def _lookup(client, key, ts=None, pub=None):
+    import time
+
+    from conftest import pub_bytes
+
+    ts = int(time.time()) if ts is None else ts
+    p = b64(pub if pub is not None else pub_bytes(key))
+    sig = key.sign(signed_message(f"lookup:{p}", "-", str(ts), b""))
+    return client.post("/v1/recovery/lookup", json={"public_key": p, "ts": ts, "signature": b64(sig)})
+
+
+def test_recovery_key_finds_its_account_and_only_with_its_signature(client, account):
+    other = Account(client)
+    r = _lookup(client, account.recovery[2])
+    assert r.status_code == 200 and r.json()["accounts"] == [account.id]
+    assert _lookup(client, other.recovery[0]).json()["accounts"] == [other.id]
+    # Someone else's signature over this key: refused.
+    from conftest import pub_bytes
+
+    impostor = Ed25519PrivateKey.generate()
+    assert _lookup(client, impostor, pub=pub_bytes(account.recovery[2])).status_code == 401
+    # A signature from long ago: refused.
+    assert _lookup(client, account.recovery[0], ts=1).status_code == 401
+    # A key that's in no account: nothing.
+    assert _lookup(client, Ed25519PrivateKey.generate()).json()["accounts"] == []
+
+
+def test_device_list_says_when_a_device_was_revoked(phone):
+    account, dev, auth = phone
+    other = account.add_device()
+    account.client.delete(f"/v1/accounts/{account.id}/devices/{other}", headers=account.recovery_header(f"revoke-device:{other}"))
+    rows = {d["device_id"]: d for d in account.client.get(f"/v1/accounts/{account.id}/devices", headers=auth).json()}
+    assert rows[dev]["revoked"] is False and rows[dev]["revoked_at"] is None
+    assert rows[other]["revoked"] is True and rows[other]["revoked_at"]
+
+
+def test_deleting_an_account_needs_the_recovery_key_and_removes_everything(client, phone):
+    account, dev, auth = phone
+    data = os.urandom(5000)
+    pid = piece_id(data)
+    assert client.put(f"/v1/pieces/{pid}", content=data, headers=auth).status_code in (200, 201)
+    other = Account(client)
+    # A device token can't do it, nor another account's recovery key.
+    assert client.delete(f"/v1/accounts/{account.id}", headers=auth).status_code == 401
+    assert client.delete(f"/v1/accounts/{account.id}", headers=other.recovery_header("delete-account")).status_code == 401
+    assert client.delete(f"/v1/accounts/{account.id}", headers=account.recovery_header("delete-account")).status_code == 204
+    # Gone: the device can't log in, the account doesn't exist, lookup finds nothing.
+    assert client.get("/v1/log", headers=auth).status_code == 401
+    assert client.post("/v1/challenges", json={"account_id": account.id}).status_code == 404
+    assert _lookup(client, account.recovery[0]).json()["accounts"] == []
+    # Other accounts are untouched.
+    assert _lookup(client, other.recovery[0]).json()["accounts"] == [other.id]

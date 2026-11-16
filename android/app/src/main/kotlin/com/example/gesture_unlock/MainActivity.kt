@@ -183,6 +183,44 @@ class MainActivity : FlutterActivity() {
             handleRecorder(call, result)
         }
 
+        // Network availability, for automatic backup (a pocket of signal
+        // starts a backup at once).
+        io.flutter.plugin.common.EventChannel(messenger, "app.vault/network").setStreamHandler(
+            object : io.flutter.plugin.common.EventChannel.StreamHandler {
+                private var callback: android.net.ConnectivityManager.NetworkCallback? = null
+
+                override fun onListen(arguments: Any?, events: io.flutter.plugin.common.EventChannel.EventSink) {
+                    val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                    fun send() {
+                        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+                        val online = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                        val unmetered = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+                        mainHandler.post { events.success(mapOf("online" to online, "unmetered" to unmetered)) }
+                    }
+                    val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+                        override fun onAvailable(network: android.net.Network) = send()
+                        override fun onLost(network: android.net.Network) = send()
+                        override fun onCapabilitiesChanged(network: android.net.Network, c: android.net.NetworkCapabilities) = send()
+                    }
+                    callback = cb
+                    try {
+                        cm.registerDefaultNetworkCallback(cb)
+                    } catch (_: Exception) {
+                    }
+                    send()
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    val cb = callback ?: return
+                    callback = null
+                    try {
+                        getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(cb)
+                    } catch (_: Exception) {
+                    }
+                }
+            },
+        )
+
         val cam = VaultCamera(this, flutterEngine.renderer)
         camera = cam
         MethodChannel(messenger, CAMERA_CHANNEL).setMethodCallHandler { call, result ->

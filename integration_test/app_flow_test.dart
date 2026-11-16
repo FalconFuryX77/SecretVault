@@ -136,7 +136,7 @@ void main() {
     );
     await tapWhenReady(t, find.byIcon(Icons.check_rounded));
     await waitFor(t, find.text(noteTitle));
-    expect(find.text('1 protected item (41 B)'), findsOneWidget);
+    await waitFor(t, find.text('1 protected item (41 B)'), timeout: const Duration(seconds: 10));
 
     // ── Lock: back to the cover app, vault UI gone ──
     await lock(t);
@@ -214,7 +214,7 @@ void main() {
     await Provider.of<VaultProvider>(ctx, listen: false).loadVault(VaultType.primary);
     expect(SecurityChannelService.isSecure, isTrue, reason: 'vault open → protected');
     await tapWhenReady(t, find.text('evidence.png'));
-    await waitFor(t, find.byType(Image));
+    await waitFor(t, find.byKey(const Key('image-sandboxed')));
     expect(find.textContaining('integrity check'), findsNothing);
     expect(SecurityChannelService.isSecure, isTrue);
     await settle(t, 500);
@@ -258,6 +258,16 @@ void main() {
       await tapWhenReady(t, find.text('Back up now'));
       await waitFor(t, find.textContaining('Backup finished: 0 sent, 2 already up to date'),
           timeout: const Duration(seconds: 60));
+      // Automatic backup is on by default once connected.
+      expect(t.widget<SwitchListTile>(find.byKey(const Key('auto-backup'))).value, isTrue);
+      // Restoring finds nothing missing.
+      await tapWhenReady(t, find.byKey(const Key('restore-missing')));
+      await tapWhenReady(t, find.byKey(const Key('restore-latest')));
+      await waitFor(t, find.textContaining('Nothing to restore'), timeout: const Duration(seconds: 60));
+      // The account's phones: just this one.
+      await tapWhenReady(t, find.byKey(const Key('devices-load')));
+      await waitFor(t, find.text('This phone'));
+      expect(find.text('Another phone'), findsNothing);
       await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
       // Settings is still scrolled down to Backup, so look for its title.
       await waitFor(t, find.text('Security & Settings'));
