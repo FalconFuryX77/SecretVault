@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
         private const val KEYS_CHANNEL = "app.vault/keys"
         private const val PDF_CHANNEL = "app.vault/pdf"
         private const val RECORDER_CHANNEL = "app.vault/recorder"
+        private const val CAMERA_CHANNEL = "app.vault/camera"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
         // Neutral alias names: nothing in the keystore says "vault".
@@ -71,6 +72,20 @@ class MainActivity : FlutterActivity() {
     private class ChunkAuthException(val index: Int) : Exception()
 
     private val pdfSandbox by lazy { PdfSandbox(this) }
+    private var camera: VaultCamera? = null
+
+    /** Videos being streamed into the vault, by handle. */
+    private val exports = HashMap<Int, Mp4Exporter>()
+    private var nextExport = 1
+
+    override fun onDestroy() {
+        camera?.shutdown()
+        synchronized(exports) {
+            exports.values.forEach { it.close() }
+            exports.clear()
+        }
+        super.onDestroy()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -138,6 +153,12 @@ class MainActivity : FlutterActivity() {
             handleRecorder(call, result)
         }
 
+        val cam = VaultCamera(this, flutterEngine.renderer)
+        camera = cam
+        MethodChannel(messenger, CAMERA_CHANNEL).setMethodCallHandler { call, result ->
+            cam.handle(call, result)
+        }
+
         worker.execute {
             try {
                 LEGACY_BIO_ALIASES.forEach { if (keyStore.containsAlias(it)) keyStore.deleteEntry(it) }
@@ -150,6 +171,9 @@ class MainActivity : FlutterActivity() {
             try {
                 when (call.method) {
                     "deviceHmac" -> result.success(deviceHmac(call.argument<ByteArray>("data")!!))
+                    "nfc" -> result.success(
+                        java.text.Normalizer.normalize(call.argument<String>("text")!!, java.text.Normalizer.Form.NFC),
+                    )
                     "gcmSealChunks" -> inBackground(result) {
                         gcmSealChunks(
                             call.argument<ByteArray>("key")!!,
@@ -259,9 +283,9 @@ class MainActivity : FlutterActivity() {
                     // way round, a rotation in between would offer the part
                     // that was just started.
                     val listed = RecorderService.stagingDir(this).listFiles()
-                    val active = RecorderService.activeFile
+                    val active = setOfNotNull(RecorderService.activeFile, VaultCamera.activeFile)
                     val files = listed
-                        ?.filter { it.isFile && it.name.endsWith(".bin") && it != active }
+                        ?.filter { it.isFile && it.name.endsWith(".bin") && it !in active }
                         ?.sortedBy { it.lastModified() }
                         ?: emptyList()
                     result.success(
@@ -274,7 +298,7 @@ class MainActivity : FlutterActivity() {
                     val pub = call.argument<ByteArray>("pub")
                     try {
                         // Never open a file that is still being written.
-                        val usable = file.exists() && file != RecorderService.activeFile
+                        val usable = file.exists() && !isActive(file)
                         val kind = if (usable) RecordingReader.probe(file, pub, key) else null
                         val rec = if (kind == RecordingReader.Kind.AUDIO || kind == RecordingReader.Kind.EMPTY) {
                             RecordingReader.open(file, pub, key)
@@ -304,14 +328,109 @@ class MainActivity : FlutterActivity() {
                 }
                 "discard" -> inBackground(result) {
                     val f = stagedFile(call.argument<String>("id")!!)
-                    if (f.exists() && f != RecorderService.activeFile) RecordingFormat.shred(f)
+                    if (f.exists() && !isActive(f)) RecordingFormat.shred(f)
                     true
+                }
+                "videoOpen" -> inBackground(result) {
+                    val file = stagedFile(call.argument<String>("id")!!)
+                    val key = call.argument<ByteArray>("key")!!
+                    val pub = call.argument<ByteArray>("pub")
+                    try {
+                        val ex = if (file.exists() && !isActive(file)) Mp4Exporter.open(file, pub, key) else null
+                        if (ex == null) {
+                            null
+                        } else if (ex.scan.count == 0) {
+                            ex.close()
+                            mapOf("empty" to true)
+                        } else {
+                            val handle = synchronized(exports) { (nextExport++).also { exports[it] = ex } }
+                            val v = ex.scan.tracks.firstOrNull { it.isVideo }
+                            mapOf(
+                                "handle" to handle,
+                                "length" to ex.length,
+                                "startedAt" to ex.scan.startedAtMs,
+                                "durationMs" to ex.scan.durationMs,
+                                "complete" to ex.scan.complete,
+                                "width" to (v?.a ?: 0),
+                                "height" to (v?.b ?: 0),
+                                "rotation" to (v?.rotation ?: 0),
+                            )
+                        }
+                    } finally {
+                        key.fill(0)
+                    }
+                }
+                "videoRead" -> inBackground(result) {
+                    val ex = synchronized(exports) { exports[call.argument<Int>("handle")!!] }
+                        ?: throw IllegalStateException("no such export")
+                    ex.read(call.argument<Int>("max") ?: (1 shl 20))
+                }
+                "videoClose" -> {
+                    val ex = synchronized(exports) { exports.remove(call.argument<Int>("handle")!!) }
+                    worker.execute { ex?.close() }
+                    result.success(true)
+                }
+                "probeMedia" -> inBackground(result) {
+                    // Debug builds only: what Android's own parser makes of an
+                    // MP4 (tests check the vault's MP4 writer with it).
+                    check(applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0)
+                    probeMedia(call.argument<ByteArray>("data")!!)
                 }
                 "stagingPath" -> result.success(RecorderService.stagingDir(this).absolutePath)
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
             result.error("recorder", e.message, null)
+        }
+    }
+
+    private fun isActive(f: File) = f == RecorderService.activeFile || f == VaultCamera.activeFile
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun probeMedia(data: ByteArray): Map<String, Any?> {
+        val fd = android.system.Os.memfd_create("probe", 0)
+        try {
+            var off = 0
+            while (off < data.size) off += android.system.Os.write(fd, data, off, data.size - off)
+            android.system.Os.lseek(fd, 0, android.system.OsConstants.SEEK_SET)
+            val ex = android.media.MediaExtractor()
+            ex.setDataSource(fd)
+            val tracks = (0 until ex.trackCount).map { i ->
+                val f = ex.getTrackFormat(i)
+                mapOf(
+                    "mime" to f.getString(android.media.MediaFormat.KEY_MIME),
+                    "durationUs" to (if (f.containsKey(android.media.MediaFormat.KEY_DURATION)) f.getLong(android.media.MediaFormat.KEY_DURATION) else -1L),
+                    "width" to (if (f.containsKey(android.media.MediaFormat.KEY_WIDTH)) f.getInteger(android.media.MediaFormat.KEY_WIDTH) else 0),
+                    "height" to (if (f.containsKey(android.media.MediaFormat.KEY_HEIGHT)) f.getInteger(android.media.MediaFormat.KEY_HEIGHT) else 0),
+                )
+            }
+            var samples = 0
+            var syncs = 0
+            for (i in 0 until ex.trackCount) ex.selectTrack(i)
+            while (ex.sampleTime >= 0) {
+                samples++
+                if (ex.sampleFlags and android.media.MediaExtractor.SAMPLE_FLAG_SYNC != 0) syncs++
+                ex.advance()
+            }
+            ex.release()
+            val r = android.media.MediaMetadataRetriever()
+            r.setDataSource(fd)
+            val rotation = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            val duration = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val frame = r.getFrameAtTime(500_000)
+            val frameSize = frame?.let { listOf(it.width, it.height) }
+            frame?.recycle()
+            r.release()
+            return mapOf(
+                "tracks" to tracks,
+                "samples" to samples,
+                "syncs" to syncs,
+                "rotation" to rotation,
+                "durationMs" to duration,
+                "frame" to frameSize,
+            )
+        } finally {
+            android.system.Os.close(fd)
         }
     }
 

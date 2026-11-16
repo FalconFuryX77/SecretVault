@@ -18,7 +18,7 @@ phone_guard "$ADB" "$DEVICE" "$PKG" || exit 1
 (
   for _ in $(seq 1 600); do
     if "$ADB" -s "$DEVICE" shell pm list packages 2>/dev/null | grep -q "$PKG"; then
-      for p in READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_AUDIO RECORD_AUDIO; do
+      for p in READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_AUDIO RECORD_AUDIO CAMERA; do
         "$ADB" -s "$DEVICE" shell pm grant "$PKG" "android.permission.$p" >/dev/null 2>&1 || true
       done
       "$ADB" -s "$DEVICE" shell appops set --uid "$PKG" MANAGE_EXTERNAL_STORAGE allow >/dev/null 2>&1 || true

@@ -213,6 +213,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: 'A second PIN that opens a harmless vault',
                 onTap: _createDecoy,
               )
+            else if (session?.canManageDecoy == true && session!.decoyDamaged)
+              _buildSettingCard(
+                icon: Icons.report_problem_rounded,
+                color: const Color(0xFFFB7185),
+                title: 'Decoy Vault Is Damaged',
+                subtitle: "It can't be opened. Remove it and set it up again; this vault is unaffected.",
+                onTap: _removeDecoy,
+              )
             else ...[
               _buildSettingCard(
                 icon: Icons.pin_outlined,
