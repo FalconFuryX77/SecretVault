@@ -54,6 +54,13 @@ class ContainerLayout {
   static int recordOffset(int r) => recordsOffset + r * recordSize;
   static int chunkOffset(int c) => c * chunkSize;
 
+  /// Where a copy made to move the container to another install carries its
+  /// transfer slot: inside header chunk 0's random tail, so the copy looks
+  /// like any container. Never written in the container itself.
+  static const int transferSlotOffset = 0x9000;
+  static const int transferSlotPlain = 2048;
+  static const int transferSlotLen = transferSlotPlain + sealOverhead;
+
   /// Default pre-allocation: 256 MiB, and grow in 256 MiB steps.
   static const int defaultInitialChunks = 4096;
   static const int defaultGrowChunks = 4096;
@@ -145,6 +152,86 @@ class VaultContainer {
   VaultContainer(this.file, this.crypto);
 
   Future<bool> exists() => file.exists();
+
+  // ─── Moving to another install ──────────────────────────────────
+
+  static const String _transferInfo = 'sv/transfer';
+
+  static Future<Uint8List> _transferKey(Uint8List code, Uint8List salt) =>
+      CryptoPrimitives.hkdf(code, salt: salt, info: _transferInfo);
+
+  /// Reads the vaults (record, key) from the transfer slot of a copy made
+  /// by [VaultSession.exportForTransfer]. Throws if [code] doesn't fit.
+  static Future<List<(int, Uint8List)>> _readTransfer(RandomAccessFile raf, Uint8List code) async {
+    final salt = _readAt(raf, 0, ContainerLayout.saltLen);
+    final key = await _transferKey(code, salt);
+    try {
+      final sealed = _readAt(raf, ContainerLayout.transferSlotOffset, ContainerLayout.transferSlotLen);
+      final plain = await CryptoPrimitives.tryOpen(key, sealed, utf8.encode(_transferInfo));
+      if (plain == null) throw const FormatException('that transfer code does not open this file');
+      final len = (plain[0] << 8) | plain[1];
+      final j = jsonDecode(utf8.decode(plain.sublist(2, 2 + len))) as Map<String, dynamic>;
+      CryptoPrimitives.wipe(plain);
+      return [
+        for (final v in (j['vaults'] as List).cast<Map<String, dynamic>>())
+          (v['r'] as int, Uint8List.fromList(base64Decode(v['k'] as String))),
+      ];
+    } finally {
+      CryptoPrimitives.wipe(key);
+    }
+  }
+
+  /// How many vaults a moved copy holds (the first is the one it was moved
+  /// from, the rest its decoy), or throws if [code] doesn't fit.
+  static Future<int> transferVaultCount(File copy, Uint8List code) async {
+    final raf = await copy.open();
+    try {
+      final vaults = await _readTransfer(raf, code);
+      for (final (_, vk) in vaults) {
+        CryptoPrimitives.wipe(vk);
+      }
+      return vaults.length;
+    } finally {
+      await raf.close();
+    }
+  }
+
+  /// Finishes moving a copy onto this install: each vault's PIN slot is
+  /// written again under [pins] (in the order [transferVaultCount] counts
+  /// them) and this phone's hardware binding, the transfer slot is erased,
+  /// and the copy becomes [destination]. The contents are untouched.
+  static Future<void> completeTransfer(
+    File copy,
+    File destination,
+    VaultCrypto crypto,
+    Uint8List code,
+    List<String> pins,
+  ) async {
+    final session = await VaultContainer(copy, crypto)._openSession();
+    try {
+      final vaults = await _readTransfer(session._raf, code);
+      if (pins.length != vaults.length) throw ArgumentError('one PIN per vault');
+      if (pins.toSet().length != pins.length) throw CredentialInUseException();
+      for (var i = 0; i < vaults.length; i++) {
+        final (record, vk) = vaults[i];
+        // The keys must really open their vaults before anything is written.
+        await session._loadVault(record, vk, depth: 0);
+      }
+      for (var i = 0; i < vaults.length; i++) {
+        final (record, vk) = vaults[i];
+        final kek = await crypto.pinKek(pins[i], session._salt);
+        await session._writePinSlot(record, kek, vk);
+        CryptoPrimitives.wipe(kek);
+        CryptoPrimitives.wipe(vk);
+      }
+      await session._fillRandom(ContainerLayout.transferSlotOffset, ContainerLayout.transferSlotLen);
+      await session._raf.flush();
+    } finally {
+      await session.close();
+    }
+    await destination.parent.create(recursive: true);
+    await copy.rename(destination.path);
+  }
 
   /// Creates a fresh container with a single (real) vault protected by [pin].
   /// Every byte is random until something is written.
@@ -945,6 +1032,39 @@ class VaultSession {
       throw StateError('no decoy');
     }
     return root.children.first;
+  }
+
+  /// Writes a copy of the whole container for moving it to another phone or
+  /// app: [writeCopy] copies the container file, putting [slot] at
+  /// [slotOffset] in the copy. The slot holds this vault's key and its
+  /// decoy's, sealed under the returned transfer code; another install can't
+  /// use the PIN slots (they're bound to this phone's hardware), so it opens
+  /// them with the code instead and sets PINs of its own. Nothing in this
+  /// container changes, and no other write happens during the copy.
+  ///
+  /// Anyone with the copy and the code can open these vaults without a PIN:
+  /// the code is shown once and never stored.
+  Future<Uint8List> exportForTransfer(Future<void> Function(int slotOffset, Uint8List slot) writeCopy) {
+    return _locked(() async {
+      final root = _r;
+      final code = CryptoPrimitives.randomBytes(16);
+      final vaults = [
+        {'r': root.record, 'k': base64Encode(root.vk)},
+        for (final c in root.children) {'r': c.record, 'k': base64Encode(c.vk)},
+      ];
+      final json = utf8.encode(jsonEncode({'v': 1, 'vaults': vaults}));
+      final plain = Uint8List(ContainerLayout.transferSlotPlain);
+      plain[0] = json.length >> 8;
+      plain[1] = json.length & 0xff;
+      plain.setRange(2, 2 + json.length, json);
+      final key = await VaultContainer._transferKey(code, _salt);
+      final sealed = await CryptoPrimitives.seal(key, plain, utf8.encode(VaultContainer._transferInfo));
+      CryptoPrimitives.wipe(key);
+      CryptoPrimitives.wipe(plain);
+      await _raf.flush();
+      await writeCopy(ContainerLayout.transferSlotOffset, sealed);
+      return code;
+    });
   }
 
   /// Tests: each loaded vault's record, index chunks and all chunks.

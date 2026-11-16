@@ -6,6 +6,7 @@ import '../services/vault_service.dart';
 import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
+import 'move_in_screen.dart';
 import 'normal_files_screen.dart';
 import 'vault_home_screen.dart';
 
@@ -335,6 +336,15 @@ class _SetupScreenState extends State<SetupScreen> {
                     _restore ? 'Start an empty vault instead' : 'Restore from a backup instead',
                     style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontSize: 13),
                   ),
+                ),
+              if (_restoreInto == null && !_restore)
+                TextButton(
+                  key: const Key('setup-move-in'),
+                  onPressed: _busy
+                      ? null
+                      : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoveInScreen())),
+                  child: Text('Move a vault here from another phone or app',
+                      style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontSize: 13)),
                 ),
               Text(
                 'You can add a decoy vault with its own PIN later, in Settings.',

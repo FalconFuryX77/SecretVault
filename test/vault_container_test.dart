@@ -657,6 +657,57 @@ void main() {
       });
     }
 
+    test('moving to another phone: the copy opens there with the transfer code and new PINs, decoy included', () async {
+      final s = await createVault(chunks: 32);
+      final photo = Uint8List.fromList(List.generate(150000, (i) => i % 253));
+      await s.importBytes(photo, _meta('p1', 'photo.jpg'));
+      await s.createDecoy(pin: '111222');
+      await s.close();
+      final d = (await VaultContainer(containerFile, crypto).unlockWithPin('111222'))!;
+      await d.importBytes(Uint8List.fromList([1, 2, 3]), _meta('d1', 'decoy.txt'));
+      await d.close();
+
+      final original = await containerFile.readAsBytes();
+      final copy = File('${tmp.path}/moved.bin');
+      final s2 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+      final code = await s2.exportForTransfer((offset, slot) async {
+        final bytes = await containerFile.readAsBytes();
+        bytes.setRange(offset, offset + slot.length, slot);
+        await copy.writeAsBytes(bytes, flush: true);
+      });
+      await s2.close();
+      expect(code, hasLength(16));
+      expect(await containerFile.readAsBytes(), original, reason: 'the container itself is untouched');
+
+      // The other phone: a different hardware key.
+      final other = VaultCrypto(
+        binding: FixedDeviceBinding(Uint8List.fromList(List.filled(32, 7))),
+        pinParams: KdfParams.testing,
+        growChunks: 8,
+      );
+      expect(await VaultContainer(copy, other).unlockWithPin('482913'), isNull,
+          reason: 'PINs are bound to the old phone');
+      await expectLater(VaultContainer.transferVaultCount(copy, Uint8List(16)), throwsFormatException);
+      expect(await VaultContainer.transferVaultCount(copy, code), 2);
+      final dest = File('${tmp.path}/other/thumbnails.cache');
+      await expectLater(
+        VaultContainer.completeTransfer(copy, dest, other, code, ['same', 'same']),
+        throwsA(isA<CredentialInUseException>()),
+      );
+      await VaultContainer.completeTransfer(copy, dest, other, code, ['new-real-pin', 'new-decoy-pin']);
+      expect(await copy.exists(), isFalse);
+
+      final real = (await VaultContainer(dest, other).unlockWithPin('new-real-pin'))!;
+      expect(await real.readAll(real.entryById('p1')!), photo);
+      expect(real.hasDecoy, isTrue);
+      await real.close();
+      final decoy = (await VaultContainer(dest, other).unlockWithPin('new-decoy-pin'))!;
+      expect(decoy.entries.single.item.id, 'd1');
+      await decoy.close();
+      // The transfer slot is gone: the code no longer opens anything.
+      await expectLater(VaultContainer.transferVaultCount(dest, code), throwsFormatException);
+    });
+
     test('with or without a decoy, the file has the same shape', () async {
       final s = await createVault();
       final sizeNoDecoy = await containerFile.length();
