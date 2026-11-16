@@ -71,6 +71,10 @@ class Token(Base):
     account_id: Mapped[str] = mapped_column(String(32), index=True)
     device_id: Mapped[str] = mapped_column(String(32), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
+    # "full", or "upload": a token a phone keeps for uploading while its
+    # vault is locked, which can add pieces and log records but read or
+    # delete nothing.
+    scope: Mapped[str] = mapped_column(String(8), default="full", server_default="full")
 
 
 class Piece(Base):
@@ -112,6 +116,11 @@ def make_sessionmaker(db_url: str):
 def _migrate(engine) -> None:
     """In-place upgrades for databases created by older versions. Each runs
     only when needed (an ALTER takes an exclusive lock on the table)."""
+    from sqlalchemy import inspect, text
+
+    if "scope" not in {c["name"] for c in inspect(engine).get_columns("tokens")}:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE tokens ADD COLUMN scope VARCHAR(8) NOT NULL DEFAULT 'full'"))
     if engine.dialect.name == "postgresql":
         from sqlalchemy import text
 

@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../models/vault_item.dart';
 import '../vault/vault_container.dart';
 import '../vault/vault_index.dart';
+import 'outbox.dart';
 import 'previews.dart';
 
 /// Reads one vault item for the sync engine, decrypting only in memory.
@@ -65,6 +66,10 @@ class BackupSummary {
 
   /// Originals held back until the phone is on Wi-Fi.
   final int waitingForWifi;
+
+  /// Items sealed into the upload queue because there was no connection;
+  /// the phone sends them when a network appears, even while locked.
+  final int queued;
   const BackupSummary({
     required this.total,
     required this.uploaded,
@@ -76,6 +81,7 @@ class BackupSummary {
     required this.elapsed,
     this.previews = 0,
     this.waitingForWifi = 0,
+    this.queued = 0,
   });
 }
 
@@ -157,7 +163,80 @@ class VaultSync {
   /// Makes the small copies sent first (see [previewsFirst]).
   final PreviewMaker previews;
 
-  VaultSync({this.previews = const PlatformPreviewMaker()});
+  /// The queue that uploads while the vault is locked (see [lockedUpload]).
+  final Outbox outbox;
+
+  /// How hard to retry over a bad connection before giving up for now.
+  final RetryPolicy retry;
+
+  static const RetryPolicy defaultRetry =
+      RetryPolicy(maxAttempts: 8, initialBackoff: Duration(milliseconds: 500), maxBackoff: Duration(seconds: 8));
+
+  VaultSync({
+    this.previews = const PlatformPreviewMaker(),
+    this.outbox = const PlatformOutbox(),
+    this.retry = defaultRetry,
+  });
+
+  // ─── Uploading while locked ───────────────────────────────────
+
+  static const String _lockedKey = 'sync.locked';
+  static Map<String, dynamic> _locked(VaultSession s) => Map<String, dynamic>.from((s.extras[_lockedKey] as Map?) ?? const {});
+
+  /// Whether this vault keeps uploading while it's locked (on by default):
+  /// when backup can't reach the server, what it would have sent is sealed
+  /// into a queue that the phone sends when a network appears. The phone
+  /// holds only a login that can add to the backup, never read or delete.
+  static bool lockedUpload(VaultSession s) {
+    final c = _locked(s);
+    return c['on'] != false && c['stopped'] != true;
+  }
+
+  /// The queue was wiped by the emergency stop ("Clear cache" in the cover
+  /// app, or the stop code on the lock screen). It stays off until it's
+  /// turned on again here.
+  static bool lockedUploadStopped(VaultSession s) => _locked(s)['stopped'] == true;
+
+  /// Whether a stop code is set for this vault.
+  static bool hasStopCode(VaultSession s) => _locked(s)['tag'] != null;
+
+  Future<void> setLockedUpload(VaultSession s, bool on) async {
+    final c = _locked(s);
+    if (on) {
+      c['on'] = true;
+      c.remove('stopped');
+    } else {
+      c['on'] = false;
+      // Wiped now; the next backup sends what it held directly, and turns
+      // the login it had off on the server.
+      if (await _queueIsMine(s)) await outbox.stop();
+    }
+    await s.putExtra(_lockedKey, c);
+  }
+
+  /// Sets ([code]) or removes (null) the stop code: typed on the lock
+  /// screen, it looks like a wrong PIN and wipes the upload queue and its
+  /// login. It must open nothing (throws CredentialInUseException).
+  Future<void> setStopCode(VaultSession s, String? code) async {
+    final c = _locked(s);
+    final tag = code == null ? null : await s.stopTag(code);
+    if (tag == null) {
+      c.remove('tag');
+    } else {
+      c['tag'] = base64Encode(tag);
+    }
+    if (await _queueIsMine(s)) await outbox.setStopTag(tag);
+    await s.putExtra(_lockedKey, c);
+  }
+
+  /// What the queue holds for this vault (null if it isn't this vault's).
+  Future<OutboxStatus?> queueStatus(VaultSession s) async {
+    final st = await outbox.status();
+    final arm = _locked(s)['arm'] as String?;
+    return st.armed && arm != null && st.armId == arm ? st : null;
+  }
+
+  Future<bool> _queueIsMine(VaultSession s) async => await queueStatus(s) != null;
 
   /// Whether a new photo, video or recording goes up first as a small copy,
   /// then in full (on by default): on a bad connection the copy is what
@@ -338,7 +417,7 @@ class VaultSync {
       api: api,
       keys: await identity.keys(),
       journal: VaultJournalStore(session),
-      retry: const RetryPolicy(maxAttempts: 8, initialBackoff: Duration(milliseconds: 500), maxBackoff: Duration(seconds: 8)),
+      retry: retry,
     );
   }
 
@@ -704,13 +783,17 @@ class VaultSync {
   /// Backs up every item in the open vault: new and changed items are
   /// uploaded, unchanged ones are skipped, and items deleted from the vault
   /// are marked deleted on the server.
+  ///
+  /// [offline]: the phone knows there's no network. Then nothing is tried;
+  /// if this vault uploads while locked, what's left goes into the queue.
   Future<BackupSummary> backupAll(
     VaultSession session, {
     void Function(int done, int total, String title)? onProgress,
+    bool offline = false,
   }) =>
       _exclusive(session, () async {
         final before = fingerprint(session);
-        final summary = await _backupAll(session, onProgress: onProgress);
+        final summary = await _backupAll(session, onProgress: onProgress, offline: offline);
         _clean[session] = before;
         return summary;
       });
@@ -718,37 +801,72 @@ class VaultSync {
   Future<BackupSummary> _backupAll(
     VaultSession session, {
     void Function(int done, int total, String title)? onProgress,
+    bool offline = false,
   }) async {
     final cfg = session.extras[_configKey] as Map?;
     if (cfg == null) throw SyncSetupException('Backup is not set up for this vault.');
     final identity = SyncIdentity.fromJson(Map<String, dynamic>.from(cfg['identity'] as Map));
     final api = _api(Uri.parse(cfg['server'] as String), tor: usesTor(session));
     final clock = Stopwatch()..start();
+    final journal = VaultJournalStore(session);
+    final keys = await identity.keys();
     try {
+      if (offline) throw const SocketException('no network');
       await useIdentity(api, identity);
-      final journal = VaultJournalStore(session);
-      final engine = await SyncEngine.create(
-        api: api,
-        keys: await identity.keys(),
-        journal: journal,
-        retry: const RetryPolicy(
-          maxAttempts: 8,
-          initialBackoff: Duration(milliseconds: 500),
-          maxBackoff: Duration(seconds: 8),
-        ),
-      );
+      final engine = await SyncEngine.create(api: api, keys: keys, journal: journal, retry: retry);
+      // What was queued for the locked phone goes first, and what arrived
+      // of it is settled, before anything is sent directly (the server
+      // takes each phone's records in order).
+      await _settleQueue(session, api, engine, journal);
+      await _keepArmed(session, api, cfg['server'] as String);
+      return await _run(session, engine, journal, clock, api, onProgress: onProgress);
+    } catch (e) {
+      if (!session.isOpen || !isTransient(e) || !lockedUpload(session) || !await _queueIsMine(session)) rethrow;
+      // No connection: seal what's left into the queue for the phone to
+      // send when a network appears, even while locked.
+      final q = QueueSyncApi(outbox, queued: {for (final e in await outbox.entries()) if (!e.log) e.id});
+      q.useDevice(identity.account, identity.device, await identity.deviceKey());
+      final engine = await SyncEngine.create(api: q, keys: keys, journal: journal, retry: const RetryPolicy(maxAttempts: 1));
+      final summary = await _run(session, engine, journal, clock, q, onProgress: onProgress, queue: true);
+      await outbox.kick();
+      return summary;
+    } finally {
+      api.close();
+    }
+  }
 
-      final entries = session.entries;
-      var uploaded = 0, unchanged = 0, removed = 0, payload = 0, retries = 0;
+  /// Backs up every item through [engine]: deletions, then previews, then
+  /// originals. With [queue], into the upload queue: every version and
+  /// deletion is marked as queued until the server is seen to have it.
+  Future<BackupSummary> _run(
+    VaultSession session,
+    SyncEngine engine,
+    VaultJournalStore journal,
+    Stopwatch clock,
+    SyncApi api, {
+    void Function(int done, int total, String title)? onProgress,
+    bool queue = false,
+  }) async {
+    final entries = session.entries;
+    var uploaded = 0, unchanged = 0, removed = 0, payload = 0, retries = 0, queued = 0;
 
-      // Items that were backed up before but are gone from the vault now.
-      // Done first: when the account is full, uploads fail, and a deletion
-      // should still get through.
-      final current = {
-        for (final e in entries) ...[e.item.id, previewId(e.item.id)],
-      };
+    Future<void> markQueued(String fileId) async {
+      if (!queue) return;
       final j = await journal.load();
-      final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
+      ((j['jobs'] as Map?)?[fileId] as Map?)?['queued'] = true;
+      await journal.save(j);
+      queued++;
+    }
+
+    // Items that were backed up before but are gone from the vault now.
+    // Done first: when the account is full, uploads fail, and a deletion
+    // should still get through.
+    final current = {
+      for (final e in entries) ...[e.item.id, previewId(e.item.id)],
+    };
+    final j = await journal.load();
+    final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
+    try {
       for (final id in jobs.keys.toList()) {
         if (current.contains(id)) continue;
         final job = jobs[id] as Map;
@@ -768,6 +886,13 @@ class VaultSync {
         }
         final fresh = await journal.load();
         ((fresh['jobs'] as Map?) ?? {}).remove(id);
+        if (queue && versions.isNotEmpty) {
+          // Until the server is seen to have the deletion, remember it.
+          final qdel = ((fresh['qdel'] as Map?) ?? {}).cast<String, dynamic>();
+          qdel[id] = versions;
+          fresh['qdel'] = qdel;
+          queued++;
+        }
         await journal.save(fresh);
       }
 
@@ -806,12 +931,15 @@ class VaultSync {
             previewsSent++;
             payload += report.payloadBytes;
             retries += report.retries;
+            await markQueued(pid);
           } finally {
             await p.close();
           }
         }
       }
-      final holdOriginals = originalsOnWifiOnly(session) && !await previews.unmetered();
+      // The queue can't know what network it'll be sent over: originals
+      // that should wait for Wi-Fi aren't queued at all.
+      final holdOriginals = originalsOnWifiOnly(session) && (queue || !await previews.unmetered());
 
       for (var i = 0; i < entries.length; i++) {
         final entry = entries[i];
@@ -832,27 +960,144 @@ class VaultSync {
             ? VaultEntrySource(session, entry)
             : MemorySyncSource(Uint8List.fromList(utf8.encode(item.content ?? '')));
         final report = await engine.backupSource(source, fileId: item.id, meta: meta);
-        uploaded++;
+        if (!queue) uploaded++;
         payload += report.payloadBytes;
         retries += report.retries;
+        await markQueued(item.id);
       }
 
       onProgress?.call(entries.length, entries.length, '');
-      await session.putExtra(_lastKey, {'at': DateTime.now().toIso8601String(), 'items': entries.length});
+      if (!queue) await session.putExtra(_lastKey, {'at': DateTime.now().toIso8601String(), 'items': entries.length});
       return BackupSummary(
         total: entries.length,
         uploaded: uploaded,
         unchanged: unchanged,
-        removed: removed,
+        removed: queue ? 0 : removed,
         payloadBytes: payload,
         wireBytes: api.bytesSent,
         retries: retries,
         elapsed: clock.elapsed,
-        previews: previewsSent,
+        previews: queue ? 0 : previewsSent,
         waitingForWifi: waiting,
+        queued: queued,
       );
-    } finally {
-      api.close();
+    } on OutboxFull {
+      // The queue is full: the rest waits for the next unlock.
+      return BackupSummary(
+        total: entries.length,
+        uploaded: 0,
+        unchanged: unchanged,
+        removed: 0,
+        payloadBytes: payload,
+        wireBytes: 0,
+        retries: retries,
+        elapsed: clock.elapsed,
+        queued: queued,
+      );
+    }
+  }
+
+  /// Sends what the queue still holds, directly, in order; then checks
+  /// what of everything queued reached the server. A version that didn't
+  /// (the queue was wiped, or a record got lost) is backed up again; a
+  /// deletion that didn't is sent again.
+  Future<void> _settleQueue(VaultSession session, SyncApi api, SyncEngine engine, VaultJournalStore journal) async {
+    if (await _queueIsMine(session)) {
+      for (final e in await outbox.entries()) {
+        final data = await outbox.read(e.name);
+        try {
+          if (e.log) {
+            await api.appendLog(e.counter, data);
+          } else {
+            await api.putPiece(e.id, data);
+          }
+        } on ApiException catch (x) {
+          if (isTransient(x) || x.status == 401) rethrow;
+          final expected = int.tryParse(RegExp(r'"expected"\s*:\s*(\d+)').firstMatch(x.body)?.group(1) ?? '');
+          if (!(e.log && x.status == 409 && expected != null && expected > e.counter)) {
+            // Refused, or a record before this one is missing: the rest
+            // can't follow in order. Drop it all; the check below redoes
+            // whatever didn't arrive.
+            for (final rest in await outbox.entries()) {
+              await outbox.remove(rest.name);
+            }
+            break;
+          }
+          // Otherwise it was appended already (an earlier reply was lost).
+        }
+        await outbox.remove(e.name);
+      }
+    }
+    final j = await journal.load();
+    final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
+    final qdel = ((j['qdel'] as Map?) ?? {}).cast<String, dynamic>();
+    if (!jobs.values.any((v) => v is Map && v['queued'] == true) && qdel.isEmpty) return;
+    final arrived = await engine.syncOwnChain();
+    final k = await journal.load();
+    final kjobs = ((k['jobs'] as Map?) ?? {}).cast<String, dynamic>();
+    for (final id in kjobs.keys.toList()) {
+      final job = kjobs[id] as Map;
+      if (job['queued'] != true) continue;
+      job.remove('queued');
+      if (!arrived.puts.contains('$id/${job['version']}')) {
+        // Never arrived: plan it again (as an edit of whatever came before).
+        job['state'] = 'planned';
+        job['meta'] = {'_requeue': true};
+      }
+    }
+    final redo = <String, List<String>>{};
+    for (final e in ((k['qdel'] as Map?) ?? {}).cast<String, dynamic>().entries) {
+      final versions = (e.value as List).cast<String>();
+      if (!versions.any((v) => arrived.dels.contains('${e.key}/$v'))) redo[e.key] = versions;
+    }
+    k.remove('qdel');
+    await journal.save(k);
+    for (final e in redo.entries) {
+      await engine.deleteVersions(e.key, e.value);
+    }
+  }
+
+  /// Keeps the queue armed with a fresh upload-only login while locked
+  /// upload is on; notices when it was stopped; turns the login off on the
+  /// server when it's no longer used. Needs the network.
+  Future<void> _keepArmed(VaultSession session, SyncApi api, String server) async {
+    final c = _locked(session);
+    final st = await outbox.status();
+    if (!st.supported) return;
+    final arm = c['arm'] as String?;
+    final mine = arm != null && st.armed && st.armId == arm;
+    if (!lockedUpload(session)) {
+      if (mine) await outbox.stop();
+      if (arm != null) {
+        await api.revokeUploadTokens();
+        c.remove('arm');
+        await session.putExtra(_lockedKey, c);
+      }
+      return;
+    }
+    if (st.armed && !mine) return; // another vault's queue: left alone
+    if (!st.armed && arm != null) {
+      // It was armed and is gone: the emergency stop. Off until turned on
+      // again here, and the login it had stops working.
+      await api.revokeUploadTokens();
+      c
+        ..['on'] = false
+        ..['stopped'] = true
+        ..remove('arm');
+      await session.putExtra(_lockedKey, c);
+      return;
+    }
+    final tag = c['tag'] == null ? null : base64Decode(c['tag'] as String);
+    if (!mine || st.expires == null || st.expires!.isBefore(DateTime.now().add(const Duration(days: 7)))) {
+      final t = await api.uploadToken();
+      final id = arm ?? hex(randomBytes(16));
+      await outbox.arm(server: server, tor: usesTor(session), token: t.token, expires: t.expires, armId: id, stopTag: tag);
+      if (arm == null) {
+        c['arm'] = id;
+        await session.putExtra(_lockedKey, c);
+      }
+    } else if (tag != null && !st.hasStopCode) {
+      await outbox.setStopTag(tag);
     }
   }
 }

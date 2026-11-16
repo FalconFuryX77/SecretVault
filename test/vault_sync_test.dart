@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
 import 'package:gesture_unlock/services/vault_service.dart';
 import 'package:gesture_unlock/sync/auto_backup.dart';
+import 'package:gesture_unlock/sync/outbox.dart';
 import 'package:gesture_unlock/sync/previews.dart';
 import 'package:gesture_unlock/sync/vault_sync.dart';
 import 'package:gesture_unlock/vault/crypto_primitives.dart';
@@ -505,6 +506,123 @@ void main() {
       for (final v in [s, b, c, d]) {
         await v.close();
       }
+    });
+
+    test('locked upload: offline backups queue up, the phone sends them with an upload-only login, the next unlock settles', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      const fast = RetryPolicy(maxAttempts: 2, initialBackoff: Duration(milliseconds: 10), maxBackoff: Duration(milliseconds: 20));
+      final outbox = MemoryOutbox();
+      final sync = VaultSync(outbox: outbox, retry: fast);
+      var s = await newVault();
+      final rs = VaultSync.newRecoverySecret();
+      await sync.connect(s, server: serverUrl.toString(), recoverySecret: rs);
+      expect(VaultSync.lockedUpload(s), isTrue, reason: 'on by default');
+      await sync.backupAll(s);
+      expect(await sync.queueStatus(s), isNotNull, reason: 'armed by the first backup');
+      final account = sync.status(s).account!;
+      final real = Map<String, dynamic>.from(s.extras['sync.config'] as Map);
+      Future<void> offline(VaultSession v) => v.putExtra('sync.config', {...real, 'server': 'http://127.0.0.1:1'});
+      Future<void> online(VaultSession v) => v.putExtra('sync.config', real);
+
+      // No connection: the new items go into the queue, sealed.
+      final photo = noise(300000, 51);
+      await s.importBytes(photo, fileItem('pic', 'photo.jpg', 'image/jpeg', VaultCategory.image));
+      await s.upsertItem(fileItem('note', 'Notes', 'text/plain', VaultCategory.note).copyWith(content: 'gate at 6'));
+      await offline(s);
+      final q = await sync.backupAll(s);
+      expect(q.queued, 2);
+      expect(q.uploaded, 0);
+      expect(outbox.queue, isNotEmpty);
+      for (final (_, data) in outbox.queue) {
+        expect(latin1.decode(data).contains('gate at 6'), isFalse);
+      }
+
+      // The phone, locked, sends them with its upload-only login, which
+      // can read nothing back.
+      final up = SyncApi(serverUrl)..useUploadToken(account, outbox.state!['token'] as String);
+      expect(await outbox.deliver(up), greaterThan(2));
+      await expectLater(up.readLog(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 403)));
+      up.close();
+
+      // Next unlock, online: everything arrived, nothing goes twice.
+      await online(s);
+      final settled = await sync.backupAll(s);
+      expect(settled.uploaded, 0);
+      expect(settled.unchanged, 2);
+      final b = await VaultContainer.create(File('${tmp.path}/c2.bin'), crypto, pin: '111222', initialChunks: 64);
+      expect((await VaultSync(outbox: MemoryOutbox()).recoverInto(b, server: serverUrl.toString(), recoverySecret: rs)).restored, 2);
+      expect(await b.readAll(b.entryById('pic')!), photo);
+      await b.close();
+
+      // A stop code, typed on the lock screen, wipes the queue and its login.
+      await expectLater(sync.setStopCode(s, '482913'), throwsA(isA<CredentialInUseException>()));
+      await sync.setStopCode(s, 'stop-code-77');
+      expect(VaultSync.hasStopCode(s), isTrue);
+      expect((await outbox.status()).hasStopCode, isTrue);
+      final token = outbox.state!['token'] as String;
+      await s.upsertItem(fileItem('n2', 'More', 'text/plain', VaultCategory.note).copyWith(content: 'later'));
+      await offline(s);
+      expect((await sync.backupAll(s)).queued, 1);
+      await s.close();
+      final c = VaultContainer(File('${tmp.path}/c.bin'), crypto);
+      expect(await c.unlockWithPin('not-the-stop-code', onNoMatch: outbox.stopIfMatches), isNull);
+      expect((await outbox.status()).armed, isTrue);
+      expect(await c.unlockWithPin('stop-code-77', onNoMatch: outbox.stopIfMatches), isNull, reason: 'looks like a wrong PIN');
+      expect((await outbox.status()).armed, isFalse);
+      expect(outbox.queue, isEmpty);
+
+      // Next unlock: what was queued goes directly; locked upload stays off,
+      // and the old login no longer works.
+      s = (await c.unlockWithPin('482913'))!;
+      await online(s);
+      expect((await sync.backupAll(s)).uploaded, 1);
+      expect(VaultSync.lockedUploadStopped(s), isTrue);
+      expect(VaultSync.lockedUpload(s), isFalse);
+      expect((await outbox.status()).armed, isFalse);
+      final old = SyncApi(serverUrl)..useUploadToken(account, token);
+      await expectLater(old.missing(['00' * 32]), throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)));
+      old.close();
+
+      // Turned on again here: armed again, the stop code with it.
+      await sync.setLockedUpload(s, true);
+      await sync.backupAll(s);
+      expect(await sync.queueStatus(s), isNotNull);
+      expect((await outbox.status()).hasStopCode, isTrue);
+
+      // Known offline: straight into the queue, nothing tried on the
+      // network; the next online backup sends the queue itself.
+      await s.upsertItem(fileItem('n3', 'Third', 'text/plain', VaultCategory.note).copyWith(content: 'q3'));
+      expect((await sync.backupAll(s, offline: true)).queued, 1);
+      expect(outbox.queue, isNotEmpty);
+      final drained = await sync.backupAll(s);
+      expect(drained.uploaded, 0);
+      expect(outbox.queue, isEmpty);
+
+      // Another vault on the phone leaves this vault's queue alone, and
+      // without a queue of its own an offline backup just fails as before.
+      final d = await VaultContainer.create(File('${tmp.path}/c3.bin'), crypto, pin: '333444', initialChunks: 64);
+      await sync.connect(d, server: serverUrl.toString(), recoverySecret: VaultSync.newRecoverySecret());
+      await sync.backupAll(d);
+      expect(await sync.queueStatus(d), isNull);
+      expect(await sync.queueStatus(s), isNotNull);
+      await d.upsertItem(fileItem('dn', 'Decoy', 'text/plain', VaultCategory.note).copyWith(content: 'x'));
+      await offline(d);
+      await expectLater(sync.backupAll(d), throwsA(anything));
+      await d.close();
+
+      // A full queue: what doesn't fit waits for the next unlock.
+      outbox.cap = 2000;
+      await s.importBytes(noise(200000, 52), fileItem('big', 'big.bin', 'application/octet-stream', VaultCategory.document));
+      await offline(s);
+      final full = await sync.backupAll(s);
+      expect(full.queued, 0);
+      outbox.cap = 1 << 30;
+      await online(s);
+      expect((await sync.backupAll(s)).uploaded, 1);
+      await s.close();
     });
   });
 

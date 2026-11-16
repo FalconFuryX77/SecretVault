@@ -237,7 +237,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (go != true || !mounted) return;
-    final uri = await unlock.withoutAutoLock(() => VaultMover.pickDestination('vault-move.bin'));
+    final uri = await unlock.withoutAutoLock(() => VaultMover.pickDestination('trim-projects.bak'));
     if (uri == null || !mounted) return;
     final progress = ValueNotifier<double?>(null);
     var copying = true;

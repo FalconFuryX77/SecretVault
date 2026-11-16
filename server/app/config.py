@@ -40,4 +40,9 @@ class Settings:
 
     # Auth
     token_ttl_seconds: int = 15 * 60
+    # Upload-only tokens, kept on a phone for uploading while its vault is
+    # locked; renewed at each unlock.
+    upload_token_ttl_seconds: int = field(
+        default_factory=lambda: int(os.environ.get("SYNC_UPLOAD_TOKEN_TTL", str(14 * 24 * 3600)))
+    )
     challenge_ttl_seconds: int = 120

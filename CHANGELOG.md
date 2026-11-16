@@ -3,6 +3,28 @@
 Every release of Undertow (called SecretVault until v3.0.0), newest first.
 Security-relevant changes are marked **security**.
 
+## v3.1.0 (unreleased): uploading while locked
+
+- **Keeps uploading while locked** (on by default, with an off switch in
+  Settings → Backup). When backup can't reach the server, what's left is
+  sealed into a queue that the phone sends whenever a network appears, even
+  with the vault locked, in order, through Tor if the vault uses it. The
+  next online backup settles it: anything that didn't arrive goes again.
+- **security** The phone keeps only an upload-only login for this: the
+  server lets it add pieces and log records, never read, list or delete
+  anything. It's renewed at each backup and revoked when no longer used.
+- **security** Emergency stop, without unlocking anything: "Clear cache" in
+  Video Trimmer's menu, or a stop code typed on the lock screen (it looks
+  like a wrong PIN). Either wipes the queue, its state and login. Nothing in
+  the vault or on the server is touched, and locked upload stays off until
+  it's turned on again inside the vault.
+- The queue uses at most 1 GiB, or a tenth of the free space, and always
+  leaves 2 GiB free. Only one vault on a phone uses it at a time.
+- Server: upload-only tokens (`POST`/`DELETE /v1/auth/upload-token`), with
+  read and delete endpoints refusing them; older databases are upgraded.
+- **security** The file a vault is moved out to is suggested as
+  `trim-projects.bak` instead of a name with "vault" in it.
+
 ## v3.0.0 (2026-11-16): Undertow
 
 The app is renamed Undertow and shows up as a working **Video Trimmer**,
