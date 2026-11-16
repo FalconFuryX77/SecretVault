@@ -16,6 +16,7 @@ import '../viewers/media_player_view.dart';
 import '../viewers/pdf_view.dart';
 import '../viewers/text_file_view.dart';
 import 'export_dialog.dart';
+import '../theme/ui.dart';
 
 /// Opens a vault file inside the app: no other app is ever involved, and
 /// nothing decrypted is written to storage.
@@ -111,12 +112,12 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           'Rename File',
-          style: AppFonts.outfit(
-            color: Colors.white,
+          style: AppFonts.ui(
+            color: Ui.ink,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -124,10 +125,10 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
           controller: controller,
           autofocus: true,
-          style: AppFonts.outfit(color: Colors.white),
+          style: AppFonts.ui(color: Ui.ink),
           decoration: InputDecoration(
             filled: true,
-            fillColor: const Color(0xFF21262D),
+            fillColor: Ui.raised,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide.none,
@@ -139,18 +140,18 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: Text(
               'Cancel',
-              style: AppFonts.outfit(color: Colors.white54),
+              style: AppFonts.ui(color: Ui.ink2),
             ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFA78BFA),
-              foregroundColor: const Color(0xFF090D16),
+              backgroundColor: Ui.signal,
+              foregroundColor: Ui.canvas,
             ),
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             child: Text(
               'Rename',
-              style: AppFonts.outfit(fontWeight: FontWeight.bold),
+              style: AppFonts.ui(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -179,19 +180,19 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               _currentItem.title,
-              style: AppFonts.outfit(
+              style: AppFonts.ui(
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: Ui.ink,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -199,7 +200,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
               children: [
                 const Icon(
                   Icons.shield_rounded,
-                  color: Color(0xFF34D399),
+                  color: Ui.ink,
                   size: 12,
                 ),
                 const SizedBox(width: 4),
@@ -210,9 +211,9 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
                     'Protected view · no screenshots',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppFonts.outfit(
+                    style: AppFonts.ui(
                       fontSize: 10,
-                      color: const Color(0xFF34D399),
+                      color: Ui.ink,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -225,7 +226,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           IconButton(
             icon: const Icon(
               Icons.drive_file_rename_outline_rounded,
-              color: Colors.white70,
+              color: Ui.ink2,
             ),
             tooltip: 'Rename',
             onPressed: _renameFile,
@@ -233,7 +234,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           IconButton(
             icon: const Icon(
               Icons.file_download_outlined,
-              color: Color(0xFF38BDF8),
+              color: Ui.ink2,
             ),
             tooltip: 'Export File',
             onPressed: _exportFile,
@@ -241,7 +242,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           IconButton(
             icon: const Icon(
               Icons.delete_outline_rounded,
-              color: Color(0xFFFB7185),
+              color: Ui.alert,
             ),
             tooltip: 'Shred',
             onPressed: _deleteAndExit,
@@ -256,7 +257,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
 
   Widget _body() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFFA78BFA)));
+      return const Center(child: CircularProgressIndicator(color: Ui.signal));
     }
     if (_errorMessage != null) {
       return Center(
@@ -264,7 +265,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
           padding: const EdgeInsets.all(24),
           child: Text(
             _errorMessage!,
-            style: AppFonts.outfit(color: const Color(0xFFFB7185)),
+            style: AppFonts.ui(color: Ui.alert),
             textAlign: TextAlign.center,
           ),
         ),
@@ -276,7 +277,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     final bytes = _decryptedBytes;
     if (bytes == null || bytes.isEmpty) {
       return Center(
-        child: Text('This file is empty.', style: AppFonts.outfit(color: Colors.white54)),
+        child: Text('This file is empty.', style: AppFonts.ui(color: Ui.ink2)),
       );
     }
     switch (_kind) {
@@ -322,24 +323,24 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.insert_drive_file_outlined, size: 56, color: const Color(0xFFA78BFA).withValues(alpha: 0.8)),
+            Icon(Icons.insert_drive_file_outlined, size: 56, color: Ui.signal.withValues(alpha: 0.8)),
             const SizedBox(height: 16),
             Text(
               _currentItem.title,
               textAlign: TextAlign.center,
-              style: AppFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              style: AppFonts.ui(fontSize: 16, fontWeight: FontWeight.bold, color: Ui.ink),
             ),
             const SizedBox(height: 6),
             Text(
               '${formatBytes(bytes.length)} · stored encrypted',
-              style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+              style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
             ),
             const SizedBox(height: 16),
             Text(
               why,
               key: const Key('no-preview'),
               textAlign: TextAlign.center,
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+              style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
             ),
           ],
         ),

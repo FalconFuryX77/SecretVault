@@ -5,8 +5,9 @@ import '../services/vault_clipboard.dart';
 import '../theme/app_fonts.dart';
 import 'file_kind.dart';
 import 'office_text.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
+const _accent = Ui.signal;
 
 /// What an office file turned into.
 sealed class OfficeContent {}
@@ -85,7 +86,7 @@ class _OfficeViewState extends State<OfficeView> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(_error!, key: const Key('office-error'), textAlign: TextAlign.center,
-              style: AppFonts.outfit(color: Colors.white54)),
+              style: AppFonts.ui(color: Colors.white54)),
         ),
       );
     }
@@ -108,7 +109,7 @@ class _OfficeViewState extends State<OfficeView> {
             child: SelectableText(
               lines[i].replaceAll('\t', '    '),
               contextMenuBuilder: vaultContextMenu,
-              style: AppFonts.outfit(fontSize: 14, color: const Color(0xFF111827), height: 1.45),
+              style: AppFonts.ui(fontSize: 14, color: Ui.surface, height: 1.45),
             ),
           ),
         ),
@@ -135,7 +136,7 @@ class _OfficeViewState extends State<OfficeView> {
           padding: const EdgeInsets.symmetric(horizontal: 6),
           alignment: head ? Alignment.center : Alignment.centerLeft,
           decoration: BoxDecoration(
-            color: head ? const Color(0xFF161B22) : const Color(0xFF0D1117),
+            color: head ? Ui.surface : Ui.canvas,
             border: Border.all(color: Colors.white10, width: 0.5),
           ),
           child: Text(
@@ -160,7 +161,7 @@ class _OfficeViewState extends State<OfficeView> {
                     padding: const EdgeInsets.only(right: 6),
                     child: ChoiceChip(
                       key: Key('office-sheet-$i'),
-                      label: Text(sheets[i].name, style: AppFonts.outfit(fontSize: 12)),
+                      label: Text(sheets[i].name, style: AppFonts.ui(fontSize: 12)),
                       selected: i == _sheet,
                       selectedColor: _accent.withValues(alpha: 0.35),
                       onSelected: (_) => setState(() => _sheet = i),
@@ -173,7 +174,7 @@ class _OfficeViewState extends State<OfficeView> {
           Padding(
             padding: const EdgeInsets.all(8),
             child: Text('A very large sheet: only the first part is shown.',
-                style: AppFonts.outfit(fontSize: 12, color: const Color(0xFFFBBF24))),
+                style: AppFonts.ui(fontSize: 12, color: Ui.signal)),
           ),
         Expanded(
           child: SingleChildScrollView(
@@ -214,22 +215,22 @@ class _OfficeViewState extends State<OfficeView> {
             margin: const EdgeInsets.only(bottom: 14),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF161B22),
+              color: Ui.surface,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Slide ${s.number}', style: AppFonts.outfit(fontSize: 11, color: _accent)),
+                Text('Slide ${s.number}', style: AppFonts.ui(fontSize: 11, color: _accent)),
                 const SizedBox(height: 8),
                 if (s.paragraphs.isEmpty)
-                  Text('(no text)', style: AppFonts.outfit(fontSize: 13, color: Colors.white38))
+                  Text('(no text)', style: AppFonts.ui(fontSize: 13, color: Colors.white38))
                 else ...[
                   SelectableText(
                     s.paragraphs.first,
                     contextMenuBuilder: vaultContextMenu,
-                    style: AppFonts.outfit(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: AppFonts.ui(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                   for (final p in s.paragraphs.skip(1))
                     Padding(
@@ -237,7 +238,7 @@ class _OfficeViewState extends State<OfficeView> {
                       child: SelectableText(
                         p,
                         contextMenuBuilder: vaultContextMenu,
-                        style: AppFonts.outfit(fontSize: 14, color: Colors.white70),
+                        style: AppFonts.ui(fontSize: 14, color: Colors.white70),
                       ),
                     ),
                 ],

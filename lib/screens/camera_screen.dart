@@ -11,8 +11,9 @@ import '../providers/vault_provider.dart';
 import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFF472B6);
+const _accent = Ui.ink2;
 
 /// Asks for a permission without the vault locking while Android's prompt
 /// is up.
@@ -247,10 +248,10 @@ class _CameraScreenState extends State<CameraScreen> {
       onPressed: _recording ? null : () => _setMode(video),
       child: Text(
         label,
-        style: AppFonts.outfit(
+        style: AppFonts.ui(
           fontSize: 13,
           fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-          color: selected ? _accent : Colors.white70,
+          color: selected ? _accent : Ui.ink2,
           letterSpacing: 1.2,
         ),
       ),
@@ -272,7 +273,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      icon: const Icon(Icons.close_rounded, color: Ui.ink),
                       onPressed: () => Navigator.pop(context),
                     ),
                     const Spacer(),
@@ -280,14 +281,14 @@ class _CameraScreenState extends State<CameraScreen> {
                       Container(
                         key: const Key('camera-timer'),
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(color: const Color(0xFFF43F5E), borderRadius: BorderRadius.circular(8)),
-                        child: Text(_elapsed, style: AppFonts.firaCode(fontSize: 13, color: Colors.white)),
+                        decoration: BoxDecoration(color: Ui.alert, borderRadius: BorderRadius.circular(8)),
+                        child: Text(_elapsed, style: AppFonts.firaCode(fontSize: 13, color: Ui.ink)),
                       ),
                     const Spacer(),
                     if (c?.hasFlash == true)
                       IconButton(
                         key: const Key('camera-torch'),
-                        icon: Icon(_torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Colors.white),
+                        icon: Icon(_torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Ui.ink),
                         onPressed: _toggleTorch,
                       )
                     else
@@ -301,7 +302,7 @@ class _CameraScreenState extends State<CameraScreen> {
                   children: [
                     if (c != null) Center(child: _preview(c)),
                     if (c == null && _message == null) const CircularProgressIndicator(color: _accent),
-                    if (_flash) Positioned.fill(child: Container(color: Colors.white)),
+                    if (_flash) Positioned.fill(child: Container(color: Ui.ink)),
                     if (progress != null)
                       Positioned.fill(
                         child: Container(
@@ -316,7 +317,7 @@ class _CameraScreenState extends State<CameraScreen> {
                               ),
                               const SizedBox(height: 12),
                               Text('Moving the video into the vault…',
-                                  style: AppFonts.outfit(fontSize: 13, color: Colors.white70)),
+                                  style: AppFonts.ui(fontSize: 13, color: Ui.ink2)),
                             ],
                           ),
                         ),
@@ -331,7 +332,7 @@ class _CameraScreenState extends State<CameraScreen> {
                     _message!,
                     key: const Key('camera-status'),
                     textAlign: TextAlign.center,
-                    style: AppFonts.outfit(fontSize: 12, color: _messageIsError ? const Color(0xFFFB7185) : Colors.white70),
+                    style: AppFonts.ui(fontSize: 12, color: _messageIsError ? Ui.alert : Ui.ink2),
                   ),
                 ),
               Row(
@@ -348,7 +349,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: Text(
                         _saved == 0 ? '' : '$_saved saved',
                         key: const Key('camera-saved'),
-                        style: AppFonts.outfit(fontSize: 11, color: Colors.white54),
+                        style: AppFonts.ui(fontSize: 11, color: Ui.ink2),
                       ),
                     ),
                     GestureDetector(
@@ -359,7 +360,7 @@ class _CameraScreenState extends State<CameraScreen> {
                         height: 74,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 4),
+                          border: Border.all(color: Ui.ink, width: 4),
                         ),
                         alignment: Alignment.center,
                         child: AnimatedContainer(
@@ -367,7 +368,7 @@ class _CameraScreenState extends State<CameraScreen> {
                           width: _recording ? 28 : 58,
                           height: _recording ? 28 : 58,
                           decoration: BoxDecoration(
-                            color: _video ? const Color(0xFFF43F5E) : Colors.white,
+                            color: _video ? Ui.alert : Ui.ink,
                             borderRadius: BorderRadius.circular(_recording ? 6 : 29),
                           ),
                         ),
@@ -378,7 +379,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       child: c?.canSwitch == true
                           ? IconButton(
                               key: const Key('camera-switch'),
-                              icon: const Icon(Icons.cameraswitch_rounded, color: Colors.white, size: 30),
+                              icon: const Icon(Icons.cameraswitch_rounded, color: Ui.ink, size: 30),
                               onPressed: _recording ? null : _switchCamera,
                             )
                           : null,

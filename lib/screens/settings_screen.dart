@@ -12,6 +12,7 @@ import '../vault/vault_container.dart';
 import 'backup_screen.dart';
 import 'hidden_recorder_screen.dart';
 import 'recorder_screen.dart';
+import '../theme/ui.dart';
 
 /// Security & Preferences Settings Screen.
 ///
@@ -53,9 +54,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: error
-            ? const Color(0xFFE11D48)
-            : const Color(0xFF059669),
-        content: Text(msg, style: AppFonts.outfit(color: Colors.white)),
+            ? Ui.alert
+            : Ui.raised,
+        content: Text(msg, style: AppFonts.ui(color: Ui.ink)),
       ),
     );
   }
@@ -123,13 +124,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (_) => PopScope(
           canPop: false,
           child: AlertDialog(
-            backgroundColor: const Color(0xFF161B22),
+            backgroundColor: Ui.surface,
             content: ValueListenableBuilder<double>(
               valueListenable: progress,
               builder: (_, v, _) => Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Making room for the decoy…', style: AppFonts.outfit(color: Colors.white)),
+                  Text('Making room for the decoy…', style: AppFonts.ui(color: Ui.ink)),
                   const SizedBox(height: 16),
                   LinearProgressIndicator(key: const Key('decoy-progress'), value: v > 0 ? v : null),
                 ],
@@ -165,22 +166,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Duress PIN', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Ui.surface,
+        title: Text('Duress PIN', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
         content: Text(
           'If this PIN is ever entered on the lock screen, this vault and everything in it '
           'is erased for good, and your decoy vault opens instead, as if it were the only one.\n\n'
           'There is no undo, and no warning when it happens. Use it only if you could be '
           'forced to unlock in front of someone.\n\n'
           'If this vault is backed up, its recovery code can still restore it from your server later.',
-          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           TextButton(
             key: const Key('duress-understood'),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('I understand', style: TextStyle(color: Color(0xFFFB7185))),
+            child: const Text('I understand', style: TextStyle(color: Ui.alert)),
           ),
         ],
       ),
@@ -219,8 +220,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Move to another phone or app', style: AppFonts.outfit(color: Colors.white)),
+        backgroundColor: Ui.surface,
+        title: Text('Move to another phone or app', style: AppFonts.ui(color: Ui.ink)),
         content: Text(
           'This copies the vault file, still encrypted, to a place you choose (a memory card, a USB drive, '
           'your computer). You then get a one-time transfer code.\n\n'
@@ -228,7 +229,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'pick the file and enter the code. You set new PINs there.\n\n'
           'Anyone with both the file and the code can open what\'s in it without a PIN: keep them apart, and '
           'delete the file once the move is done. This vault stays as it is.',
-          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -247,15 +248,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => PopScope(
         canPop: false,
         child: AlertDialog(
-          backgroundColor: const Color(0xFF161B22),
+          backgroundColor: Ui.surface,
           content: ValueListenableBuilder<double?>(
             valueListenable: progress,
             builder: (_, v, _) => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Copying the vault…', style: AppFonts.outfit(color: Colors.white70)),
+                Text('Copying the vault…', style: AppFonts.ui(color: Ui.ink2)),
                 const SizedBox(height: 14),
-                LinearProgressIndicator(value: v, color: const Color(0xFF34D399)),
+                LinearProgressIndicator(value: v, color: Ui.ink),
               ],
             ),
           ),
@@ -297,16 +298,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            backgroundColor: const Color(0xFF161B22),
-            title: Text('Transfer code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+            backgroundColor: Ui.surface,
+            title: Text('Transfer code', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Write this down. It is shown only now, and the copy can\'t be moved in without it.',
-                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70)),
+                    style: AppFonts.ui(fontSize: 13, color: Ui.ink2)),
                 const SizedBox(height: 14),
-                Text(text, key: const Key('move-code'), style: AppFonts.firaCode(fontSize: 16, color: Colors.white, height: 1.6)),
+                Text(text, key: const Key('move-code'), style: AppFonts.firaCode(fontSize: 16, color: Ui.ink, height: 1.6)),
               ],
             ),
             actions: [
@@ -320,14 +321,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         title: Text(
           'Remove decoy vault?',
-          style: AppFonts.outfit(color: Colors.white),
+          style: AppFonts.ui(color: Ui.ink),
         ),
         content: Text(
           'Everything in the decoy vault is erased. This cannot be undone.',
-          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
         ),
         actions: [
           TextButton(
@@ -338,7 +339,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               'Remove',
-              style: TextStyle(color: Color(0xFFFB7185)),
+              style: TextStyle(color: Ui.alert),
             ),
           ),
         ],
@@ -358,375 +359,152 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final session = context.read<VaultService>().session;
-    // Both vaults show the same decoy section, so it can't tell them apart.
-    const canDecoy = true;
+    // Every vault shows the same decoy section, so it can't tell them apart.
     final hasDecoy = session?.showsDecoy ?? false;
+    void open(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.white70,
-            size: 18,
-          ),
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
-          'Security & Settings',
-          style: AppFonts.outfit(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
+        title: const Text('Settings'),
       ),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        padding: const EdgeInsets.only(top: 8, bottom: 24),
         children: [
-          _buildSectionHeader('ACCESS & CREDENTIALS'),
-          _buildSettingCard(
-            icon: Icons.pin_rounded,
-            color: const Color(0xFF34D399),
-            title: 'Change PIN',
-            subtitle: 'The PIN that opens this vault',
-            onTap: () => _runPinChange(decoy: false),
-          ),
-
-          if (canDecoy) ...[
-            const SizedBox(height: 24),
-            _buildSectionHeader('DECOY VAULT'),
+          UiGroup(label: 'Access', children: [
+            UiRow(
+              icon: Icons.pin_outlined,
+              title: 'Change PIN',
+              detail: 'The PIN that opens this vault',
+              onTap: () => _runPinChange(decoy: false),
+            ),
+          ]),
+          UiGroup(label: 'Decoy vault', children: [
             if (!hasDecoy)
-              _buildSettingCard(
-                icon: Icons.theater_comedy_rounded,
-                color: const Color(0xFFF59E0B),
-                title: 'Set Up Decoy Vault',
-                subtitle: 'A second PIN that opens a harmless vault',
+              UiRow(
+                icon: Icons.theater_comedy_outlined,
+                title: 'Set up a decoy vault',
+                detail: 'A second PIN that opens a harmless vault',
                 onTap: _createDecoy,
               )
             else if (session?.canManageDecoy == true && session!.decoyDamaged)
-              _buildSettingCard(
-                icon: Icons.report_problem_rounded,
-                color: const Color(0xFFFB7185),
-                title: 'Decoy Vault Is Damaged',
-                subtitle: "It can't be opened. Remove it and set it up again; this vault is unaffected.",
+              UiRow(
+                icon: Icons.report_problem_outlined,
+                title: 'The decoy vault is damaged',
+                detail: "It can't be opened. Remove it and set it up again; this vault is unaffected.",
+                destructive: true,
                 onTap: _removeDecoy,
               )
             else ...[
-              _buildSettingCard(
+              UiRow(
                 icon: Icons.pin_outlined,
-                color: const Color(0xFFF59E0B),
-                title: 'Change Decoy PIN',
-                subtitle: 'The PIN you can give up under pressure',
+                title: 'Change decoy PIN',
+                detail: 'The PIN you can give up under pressure',
                 onTap: () => _runPinChange(decoy: true),
               ),
-              const SizedBox(height: 8),
-              _buildSettingCard(
-                icon: Icons.delete_forever_rounded,
-                color: const Color(0xFFFB7185),
-                title: 'Remove Decoy Vault',
-                subtitle: 'Erases the decoy and its contents',
-                onTap: _removeDecoy,
-              ),
-              const SizedBox(height: 8),
               if (session?.hasDuressPin == true) ...[
-                _buildSettingCard(
-                  icon: Icons.local_fire_department_rounded,
-                  color: const Color(0xFFFB7185),
-                  title: 'Change Duress PIN',
-                  subtitle: 'Opens the decoy and erases this vault',
+                UiRow(
+                  icon: Icons.local_fire_department_outlined,
+                  title: 'Change duress PIN',
+                  detail: 'Opens the decoy and erases this vault',
                   onTap: _setDuressPin,
                 ),
-                const SizedBox(height: 8),
-                _buildSettingCard(
+                UiRow(
                   icon: Icons.remove_circle_outline_rounded,
-                  color: Colors.white54,
-                  title: 'Remove Duress PIN',
-                  subtitle: 'Only your PIN and the decoy PIN will open anything',
+                  title: 'Remove duress PIN',
                   onTap: _removeDuressPin,
                 ),
               ] else
-                _buildSettingCard(
-                  icon: Icons.local_fire_department_rounded,
-                  color: const Color(0xFFFB7185),
-                  title: 'Set Up Duress PIN',
-                  subtitle: 'A PIN that opens the decoy and erases this vault',
+                UiRow(
+                  icon: Icons.local_fire_department_outlined,
+                  title: 'Set up a duress PIN',
+                  detail: 'Opens the decoy and erases this vault',
                   onTap: _setDuressPin,
                 ),
+              UiRow(
+                icon: Icons.delete_outline_rounded,
+                title: 'Remove decoy vault',
+                detail: 'Erases the decoy and everything in it',
+                destructive: true,
+                onTap: _removeDecoy,
+              ),
             ],
-          ],
-
-          const SizedBox(height: 24),
-          _buildSectionHeader('RECORDING'),
-          _buildSettingCard(
-            icon: Icons.mic_rounded,
-            color: const Color(0xFFF43F5E),
-            title: 'Record audio',
-            subtitle: 'Straight into the vault, encrypted as it goes',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const RecorderScreen()),
+          ]),
+          UiGroup(label: 'Recording', children: [
+            UiRow(
+              icon: Icons.mic_none_rounded,
+              title: 'Record audio',
+              onTap: () => open(const RecorderScreen()),
             ),
-          ),
-          _buildSettingCard(
-            icon: Icons.screen_lock_portrait_rounded,
-            color: const Color(0xFFA78BFA),
-            title: 'Hidden recorder',
-            subtitle: 'Volume or assistant button records with the screen off',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const HiddenRecorderScreen()),
+            UiRow(
+              icon: Icons.screen_lock_portrait_outlined,
+              title: 'Hidden recorder',
+              detail: 'Record with the screen off',
+              onTap: () => open(const HiddenRecorderScreen()),
             ),
-          ),
-
-          const SizedBox(height: 24),
-          _buildSectionHeader('BACKUP'),
-          _buildSettingCard(
-            icon: Icons.cloud_upload_rounded,
-            color: const Color(0xFF38BDF8),
-            title: 'Backup',
-            subtitle: 'Send encrypted copies to a server you trust',
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const BackupScreen()),
+          ]),
+          UiGroup(label: 'Backup', children: [
+            UiRow(
+              icon: Icons.cloud_upload_outlined,
+              title: 'Backup',
+              detail: 'Encrypted copies on a server you trust',
+              onTap: () => open(const BackupScreen()),
             ),
-          ),
-          const SizedBox(height: 8),
-          _buildSettingCard(
-            icon: Icons.drive_file_move_rounded,
-            color: const Color(0xFF34D399),
-            title: 'Move to Another Phone or App',
-            subtitle: 'Copy this vault, encrypted, to a file the other side opens',
-            onTap: _moveOut,
-          ),
-
-          const SizedBox(height: 24),
-          _buildSectionHeader('LOCKDOWN & TIMEOUTS'),
-
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF161B22),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            UiRow(
+              icon: Icons.drive_file_move_outline,
+              title: 'Move to another phone or app',
+              onTap: _moveOut,
             ),
-            child: Column(
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    'Auto-Lock on App Switch',
-                    style: AppFonts.outfit(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Lock and clear keys from memory when you leave the app',
-                    style: AppFonts.outfit(
-                      fontSize: 12,
-                      color: Colors.white54,
-                    ),
-                  ),
-                  value: _autoLockOnSwitch,
-                  activeThumbColor: const Color(0xFFA78BFA),
-                  onChanged: (val) async {
-                    setState(() => _autoLockOnSwitch = val);
-                    await _authService.setAutoLockOnSwitch(val);
-                    if (context.mounted) {
-                      await context
-                          .read<UnlockProvider>()
-                          .reloadSettings();
-                    }
-                  },
-                ),
-                const Divider(color: Colors.white10),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    'Inactivity Auto-Lock Timeout',
-                    style: AppFonts.outfit(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '$_inactivityTimeout seconds of idle touch',
-                    style: AppFonts.outfit(
-                      fontSize: 12,
-                      color: Colors.white54,
-                    ),
-                  ),
-                  trailing: DropdownButton<int>(
-                    value: _inactivityTimeout,
-                    dropdownColor: const Color(0xFF1F2937),
-                    underline: const SizedBox(),
-                    style: AppFonts.outfit(
-                      color: const Color(0xFFA78BFA),
-                      fontWeight: FontWeight.bold,
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 15, child: Text('15s')),
-                      DropdownMenuItem(value: 30, child: Text('30s')),
-                      DropdownMenuItem(value: 60, child: Text('60s')),
-                      DropdownMenuItem(value: 120, child: Text('2m')),
-                    ],
-                    onChanged: (val) async {
-                      if (val == null) return;
-                      setState(() => _inactivityTimeout = val);
-                      await _authService.setInactivityTimeout(val);
-                      if (context.mounted) {
-                        await context
-                            .read<UnlockProvider>()
-                            .reloadSettings();
-                      }
-                    },
-                  ),
-                ),
-              ],
+          ]),
+          UiGroup(label: 'Locking', children: [
+            UiSwitchRow(
+              icon: Icons.swap_horiz_rounded,
+              title: 'Lock when I leave the app',
+              value: _autoLockOnSwitch,
+              onChanged: (val) async {
+                setState(() => _autoLockOnSwitch = val);
+                await _authService.setAutoLockOnSwitch(val);
+                if (context.mounted) await context.read<UnlockProvider>().reloadSettings();
+              },
             ),
-          ),
-
-          const SizedBox(height: 24),
-          _buildSectionHeader('SECURITY & THREAT MODEL'),
-
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF161B22),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            UiRow(
+              icon: Icons.timer_outlined,
+              title: 'Lock when idle',
+              chevron: false,
+              trailing: DropdownButton<int>(
+                key: const Key('idle-timeout'),
+                value: _inactivityTimeout,
+                dropdownColor: Ui.raised,
+                underline: const SizedBox(),
+                borderRadius: BorderRadius.circular(12),
+                icon: const Icon(Icons.unfold_more_rounded, size: 16, color: Ui.ink3),
+                style: Ui.data(size: 14, color: Ui.ink),
+                items: const [
+                  DropdownMenuItem(value: 15, child: Text('15s')),
+                  DropdownMenuItem(value: 30, child: Text('30s')),
+                  DropdownMenuItem(value: 60, child: Text('60s')),
+                  DropdownMenuItem(value: 120, child: Text('2m')),
+                ],
+                onChanged: (val) async {
+                  if (val == null) return;
+                  setState(() => _inactivityTimeout = val);
+                  await _authService.setInactivityTimeout(val);
+                  if (context.mounted) await context.read<UnlockProvider>().reloadSettings();
+                },
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSecurityBadge(
-                  'File Encryption',
-                  'AES-256-GCM per 64 KB chunk; any tampering is detected',
-                ),
-                const SizedBox(height: 10),
-                _buildSecurityBadge(
-                  'Key Protection',
-                  'PIN stretched with Argon2id and bound to this phone\'s secure hardware',
-                ),
-                const SizedBox(height: 10),
-                _buildSecurityBadge(
-                  'Hard Shake Panic',
-                  'Shake hard to lock instantly and clear keys from memory',
-                ),
-                const SizedBox(height: 10),
-                _buildSecurityBadge(
-                  'Plausible Cover',
-                  'Native-styled Files Explorer disguise with covert entry',
-                ),
-                const SizedBox(height: 10),
-                _buildSecurityBadge(
-                  'Memory Protection',
-                  'Keys cleared on lock; open files cleared when closed',
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 30),
+          ]),
+          const UiGroup(label: "How it's protected", dividerIndent: 16, children: [
+            UiRow(title: 'Files', detail: 'AES-256-GCM in 64 KB pieces; any change to them is detected', chevron: false),
+            UiRow(title: 'Keys', detail: "Your PIN, stretched with Argon2id and bound to this phone's secure hardware", chevron: false),
+            UiRow(title: 'Panic', detail: 'Shake hard, or tap the power icon, to lock at once and clear the keys', chevron: false),
+            UiRow(title: 'Cover', detail: 'A working video trimmer; three taps on its title open this lock screen', chevron: false),
+          ]),
         ],
       ),
-    );
-  }
-
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10, left: 4),
-      child: Text(
-        title,
-        style: AppFonts.outfit(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.2,
-          color: Colors.white38,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingCard({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        leading: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: color, size: 22),
-        ),
-        title: Text(
-          title,
-          style: AppFonts.outfit(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
-        ),
-        trailing: const Icon(
-          Icons.arrow_forward_ios_rounded,
-          color: Colors.white24,
-          size: 14,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSecurityBadge(String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(
-          Icons.check_circle_outline_rounded,
-          color: Color(0xFF34D399),
-          size: 16,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: RichText(
-            text: TextSpan(
-              style: AppFonts.outfit(fontSize: 12, color: Colors.white70),
-              children: [
-                TextSpan(
-                  text: '$label: ',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                TextSpan(
-                  text: value,
-                  style: const TextStyle(color: Colors.white60),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -771,22 +549,22 @@ class _NewPinDialogState extends State<_NewPinDialog> {
     keyboardType: TextInputType.visiblePassword,
     obscureText: true,
     maxLength: 64,
-    style: AppFonts.outfit(
+    style: AppFonts.ui(
       fontSize: 18,
-      color: Colors.white,
+      color: Ui.ink,
       letterSpacing: 4,
     ),
     textAlign: TextAlign.center,
     decoration: InputDecoration(
       counterText: '',
       hintText: hint,
-      hintStyle: AppFonts.outfit(
+      hintStyle: AppFonts.ui(
         fontSize: 13,
         letterSpacing: 0,
-        color: Colors.white24,
+        color: Ui.ink3,
       ),
       filled: true,
-      fillColor: const Color(0xFF21262D),
+      fillColor: Ui.raised,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide.none,
@@ -797,12 +575,12 @@ class _NewPinDialogState extends State<_NewPinDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: Ui.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Text(
         widget.title,
-        style: AppFonts.outfit(
-          color: Colors.white,
+        style: AppFonts.ui(
+          color: Ui.ink,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -812,7 +590,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           children: [
             Text(
               widget.hint,
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+              style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
             ),
             const SizedBox(height: 16),
             _field(_a, 'New PIN'),
@@ -822,9 +600,9 @@ class _NewPinDialogState extends State<_NewPinDialog> {
               const SizedBox(height: 10),
               Text(
                 _error!,
-                style: AppFonts.outfit(
+                style: AppFonts.ui(
                   fontSize: 12,
-                  color: const Color(0xFFFB7185),
+                  color: Ui.alert,
                 ),
               ),
             ],
@@ -836,13 +614,13 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           onPressed: () => Navigator.pop(context),
           child: Text(
             'Cancel',
-            style: AppFonts.outfit(color: Colors.white54),
+            style: AppFonts.ui(color: Ui.ink2),
           ),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFA78BFA),
-            foregroundColor: const Color(0xFF090D16),
+            backgroundColor: Ui.signal,
+            foregroundColor: Ui.canvas,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
@@ -850,7 +628,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           onPressed: _submit,
           child: Text(
             'Save',
-            style: AppFonts.outfit(fontWeight: FontWeight.bold),
+            style: AppFonts.ui(fontWeight: FontWeight.bold),
           ),
         ),
       ],

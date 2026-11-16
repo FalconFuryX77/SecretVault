@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
 import '../providers/unlock_provider.dart';
 import '../services/security_channel_service.dart';
-import '../theme/app_fonts.dart';
+import '../theme/ui.dart';
 
 /// The hidden lock screen: type the PIN, press Unlock.
 ///
@@ -18,9 +21,12 @@ class LockScreen extends StatefulWidget {
   State<LockScreen> createState() => _LockScreenState();
 }
 
-class _LockScreenState extends State<LockScreen> {
+class _LockScreenState extends State<LockScreen> with SingleTickerProviderStateMixin {
   final TextEditingController _pinController = TextEditingController();
   final FocusNode _pinFocus = FocusNode();
+  late final AnimationController _shake =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 420));
+  bool _wasFailed = false;
 
   @override
   void initState() {
@@ -32,6 +38,7 @@ class _LockScreenState extends State<LockScreen> {
   void dispose() {
     _pinController.dispose();
     _pinFocus.dispose();
+    _shake.dispose();
     SecurityChannelService.setSecureFlag(false);
     super.dispose();
   }
@@ -59,96 +66,93 @@ class _LockScreenState extends State<LockScreen> {
     final isLockout = provider.state == UnlockState.lockout;
     final isFailed = provider.state == UnlockState.failed;
     final isChecking = provider.state == UnlockState.authenticating;
-    final accent = isFailed ? const Color(0xFFFB7185) : const Color(0xFFA78BFA);
+    if (isFailed && !_wasFailed) {
+      // A wrong PIN: the field gives a short shake and the phone a light tick.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _shake.forward(from: 0);
+        HapticFeedback.lightImpact();
+      });
+    }
+    _wasFailed = isFailed;
 
     final status = isLockout
         ? 'Too many failed attempts. Try again in ${_formatSeconds(provider.lockoutRemaining)}'
         : isFailed
-        ? 'Not recognised.'
-        : isChecking
-        ? 'Checking…'
-        : 'Enter your PIN.';
+            ? 'Not recognised.'
+            : isChecking
+                ? 'Checking…'
+                : 'Enter your PIN.';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 20),
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          padding: const EdgeInsets.fromLTRB(Ui.gutter, 24, Ui.gutter, 16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: accent.withValues(alpha: 0.12),
-                  border: Border.all(color: accent, width: 2),
+              Row(children: [
+                Icon(isLockout ? Icons.lock_clock_outlined : Icons.lock_outline_rounded,
+                    size: 20, color: isFailed ? Ui.alert : Ui.ink2),
+                const SizedBox(width: 8),
+                Text(isLockout ? 'Temporarily locked' : 'Locked', style: Ui.label()),
+              ]),
+              const SizedBox(height: 14),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: Text(
+                  status,
+                  key: ValueKey(status),
+                  style: Ui.title(color: isFailed ? Ui.alert : Ui.ink),
                 ),
-                child: Icon(Icons.lock_outline_rounded, size: 32, color: accent),
+              ),
+              const SizedBox(height: 32),
+              AnimatedBuilder(
+                animation: _shake,
+                builder: (_, child) {
+                  final t = _shake.value;
+                  final dx = math.sin(t * math.pi * 6) * 9 * (1 - t);
+                  return Transform.translate(offset: Offset(dx, 0), child: child);
+                },
+                child: TextField(
+                  enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
+                  controller: _pinController,
+                  focusNode: _pinFocus,
+                  autofocus: true,
+                  enabled: !isLockout && !isChecking,
+                  keyboardType: TextInputType.visiblePassword,
+                  obscureText: true,
+                  obscuringCharacter: '•',
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  maxLength: 64,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _submit(),
+                  style: Ui.body(size: 22).copyWith(letterSpacing: 4),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    hintText: 'PIN or passphrase',
+                    hintStyle: Ui.body(color: Ui.ink3).copyWith(letterSpacing: 0),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(Ui.control),
+                      borderSide: BorderSide(color: isFailed ? Ui.alert : Colors.transparent, width: 1.2),
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 14),
-              Text(
-                isLockout ? 'Temporarily Locked' : 'Locked',
-                style: AppFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                status,
-                textAlign: TextAlign.center,
-                style: AppFonts.outfit(fontSize: 13, color: isFailed ? const Color(0xFFFB7185) : Colors.white60),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
-                controller: _pinController,
-                focusNode: _pinFocus,
-                autofocus: true,
-                enabled: !isLockout && !isChecking,
-                keyboardType: TextInputType.visiblePassword,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                maxLength: 64,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _submit(),
-                style: AppFonts.outfit(
-                  fontSize: 22,
-                  letterSpacing: 8,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-                textAlign: TextAlign.center,
-                decoration: InputDecoration(
-                  counterText: '',
-                  filled: true,
-                  fillColor: const Color(0xFF161B22),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: isLockout || isChecking ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFA78BFA),
-                    foregroundColor: const Color(0xFF090D16),
-                    disabledBackgroundColor: const Color(0xFF21262D),
-                    disabledForegroundColor: Colors.white38,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: Text('Unlock', style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold)),
-                ),
+              UiPrimaryButton(
+                label: 'Unlock',
+                busy: isChecking,
+                onPressed: isLockout ? null : _submit,
               ),
             ],
           ),

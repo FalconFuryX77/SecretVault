@@ -11,8 +11,9 @@ import '../services/security_channel_service.dart';
 import '../theme/app_fonts.dart';
 import '../vault/crypto_primitives.dart';
 import 'vault_media_server.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
+const _accent = Ui.signal;
 
 /// Plays a vault video or audio file with the phone's own media engine,
 /// fed from a private in-memory stream ([VaultMediaServer]): nothing
@@ -211,7 +212,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
             text,
             key: const Key('media-error'),
             textAlign: TextAlign.center,
-            style: AppFonts.outfit(color: const Color(0xFFFB7185), fontSize: 14),
+            style: AppFonts.ui(color: Ui.alert, fontSize: 14),
           ),
         ),
       );
@@ -269,7 +270,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
                     height: 156,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: const RadialGradient(colors: [Color(0xFF2E1065), Color(0xFF0F172A)]),
+                      gradient: const RadialGradient(colors: [Ui.raised, Color(0xFF0F172A)]),
                       border: Border.all(color: _accent.withValues(alpha: 0.4), width: 2),
                     ),
                     child: Icon(
@@ -282,7 +283,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
                   Text(
                     widget.item.title,
                     textAlign: TextAlign.center,
-                    style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                 ],
               ),
@@ -299,7 +300,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
     final totalMs = v.duration.inMilliseconds.toDouble();
     final posMs = (_dragMs ?? v.position.inMilliseconds.toDouble()).clamp(0.0, totalMs <= 0 ? 0.0 : totalMs);
     return Container(
-      color: const Color(0xFF161B22),
+      color: Ui.surface,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       child: SafeArea(
         top: false,
@@ -369,7 +370,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
                     child: Icon(
                       v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                       size: 32,
-                      color: const Color(0xFF090D16),
+                      color: Ui.canvas,
                     ),
                   ),
                 ),

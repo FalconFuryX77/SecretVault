@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../models/vault_item.dart';
 import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
+import '../theme/ui.dart';
 
 /// Encrypted Note & Crypto Seed Editor.
 class NoteEditorScreen extends StatefulWidget {
@@ -111,14 +112,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         if (didPop) _flush();
       },
       child: Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: Colors.white70,
+            Icons.arrow_back_rounded,
+            color: Ui.ink2,
             size: 18,
           ),
           onPressed: _saveAndPop,
@@ -127,23 +128,23 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           children: [
             Icon(
               isSeed ? Icons.key_rounded : Icons.description_rounded,
-              color: isSeed ? const Color(0xFF38BDF8) : const Color(0xFFA78BFA),
+              color: isSeed ? Ui.ink2 : Ui.signal,
               size: 20,
             ),
             const SizedBox(width: 8),
             Text(
               isSeed ? 'Crypto Seed' : 'Encrypted Note',
-              style: AppFonts.outfit(
+              style: AppFonts.ui(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: Ui.ink,
               ),
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.check_rounded, color: Color(0xFF34D399)),
+            icon: const Icon(Icons.check_rounded, color: Ui.ink),
             onPressed: _saveAndPop,
           ),
         ],
@@ -158,18 +159,18 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 contextMenuBuilder: vaultContextMenu,
                 controller: _titleController,
                 onChanged: (_) => _onChanged(),
-                style: AppFonts.outfit(
+                style: AppFonts.ui(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: Ui.ink,
                 ),
                 decoration: InputDecoration(
                   hintText: isSeed
                       ? 'Wallet / Key Label (e.g. Ledger Main)'
                       : 'Note Title...',
-                  hintStyle: AppFonts.outfit(
+                  hintStyle: AppFonts.ui(
                     fontSize: 22,
-                    color: Colors.white30,
+                    color: Ui.ink3,
                     fontWeight: FontWeight.bold,
                   ),
                   border: InputBorder.none,
@@ -186,16 +187,16 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                   expands: true,
                   style: AppFonts.firaCode(
                     fontSize: 14,
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: Ui.ink.withValues(alpha: 0.85),
                     height: 1.6,
                   ),
                   decoration: InputDecoration(
                     hintText: isSeed
                         ? 'Enter 12/24 recovery words (e.g. abandon ability able about...)'
                         : 'Type confidential note here...',
-                    hintStyle: AppFonts.outfit(
+                    hintStyle: AppFonts.ui(
                       fontSize: 14,
-                      color: Colors.white24,
+                      color: Ui.ink3,
                     ),
                     border: InputBorder.none,
                   ),

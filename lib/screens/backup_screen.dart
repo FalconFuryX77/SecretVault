@@ -12,6 +12,7 @@ import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import 'backup_history_screen.dart';
+import '../theme/ui.dart';
 
 /// Backup for the vault that is currently open: connect it to a server,
 /// then back it up. Files are encrypted on the phone; the server never
@@ -161,15 +162,15 @@ class _BackupScreenState extends State<BackupScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         title: Text(
           'Disconnect backup?',
-          style: AppFonts.outfit(color: Colors.white),
+          style: AppFonts.ui(color: Ui.ink),
         ),
         content: Text(
           'This phone forgets the backup account. Nothing already on the server is deleted, '
           'and you can still restore it with your recovery code.',
-          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
         ),
         actions: [
           TextButton(
@@ -180,7 +181,7 @@ class _BackupScreenState extends State<BackupScreen> {
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               'Disconnect',
-              style: TextStyle(color: Color(0xFFFB7185)),
+              style: TextStyle(color: Ui.alert),
             ),
           ),
         ],
@@ -238,13 +239,13 @@ class _BackupScreenState extends State<BackupScreen> {
             context: context,
             builder: (ctx) => StatefulBuilder(
               builder: (ctx, setLocal) => AlertDialog(
-                backgroundColor: const Color(0xFF161B22),
-                title: Text('Recovery code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+                backgroundColor: Ui.surface,
+                title: Text('Recovery code', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(why, style: AppFonts.outfit(fontSize: 13, color: Colors.white70)),
+                    Text(why, style: AppFonts.ui(fontSize: 13, color: Ui.ink2)),
                     const SizedBox(height: 12),
                     TextField(
                       key: const Key('recovery-input'),
@@ -254,13 +255,13 @@ class _BackupScreenState extends State<BackupScreen> {
                       enableIMEPersonalizedLearning: false,
                       maxLines: 3,
                       minLines: 2,
-                      style: AppFonts.firaCode(fontSize: 13, color: Colors.white),
+                      style: AppFonts.firaCode(fontSize: 13, color: Ui.ink),
                       decoration: InputDecoration(
                         hintText: 'xxxx xxxx xxxx …',
-                        hintStyle: AppFonts.firaCode(fontSize: 13, color: Colors.white24),
+                        hintStyle: AppFonts.firaCode(fontSize: 13, color: Ui.ink3),
                         errorText: problem,
                         filled: true,
-                        fillColor: const Color(0xFF0D1117),
+                        fillColor: Ui.canvas,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                       ),
                     ),
@@ -295,19 +296,19 @@ class _BackupScreenState extends State<BackupScreen> {
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Restore from the backup', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Ui.surface,
+        title: Text('Restore from the backup', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
         children: [
           SimpleDialogOption(
             key: const Key('restore-latest'),
             onPressed: () => Navigator.pop(ctx, 'latest'),
             child: Text('Files that are missing here, as backed up now',
-                style: AppFonts.outfit(color: Colors.white70)),
+                style: AppFonts.ui(color: Ui.ink2)),
           ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, 'asof'),
             child: Text('…as the backup was on a date I choose (undoes later changes and deletions)',
-                style: AppFonts.outfit(color: Colors.white70)),
+                style: AppFonts.ui(color: Ui.ink2)),
           ),
         ],
       ),
@@ -343,8 +344,8 @@ class _BackupScreenState extends State<BackupScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
-          backgroundColor: const Color(0xFF161B22),
-          title: Text('Free up server space', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          backgroundColor: Ui.surface,
+          title: Text('Free up server space', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,19 +353,19 @@ class _BackupScreenState extends State<BackupScreen> {
               Text(
                 'Removes versions of files that were replaced or deleted longer ago than this. '
                 'Current files are never touched. Removed versions are gone for good.',
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
               ),
               const SizedBox(height: 12),
               DropdownButton<int>(
                 key: const Key('retention-days'),
                 value: days,
-                dropdownColor: const Color(0xFF161B22),
+                dropdownColor: Ui.surface,
                 items: [
                   for (final d in const [7, 30, 90, 365])
                     DropdownMenuItem(
                       value: d,
                       child: Text(d == 365 ? 'Keep for a year' : 'Keep for $d days',
-                          style: AppFonts.outfit(color: Colors.white)),
+                          style: AppFonts.ui(color: Ui.ink)),
                     ),
                 ],
                 onChanged: (v) => setLocal(() => days = v ?? days),
@@ -449,12 +450,12 @@ class _BackupScreenState extends State<BackupScreen> {
         contentPadding: EdgeInsets.zero,
         value: value,
         onChanged: _busy ? null : onChanged,
-        activeThumbColor: const Color(0xFFA78BFA),
-        title: Text('Connect through Tor', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        activeThumbColor: Ui.signal,
+        title: Text('Connect through Tor', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
         subtitle: Text(
           'Through Orbot, so the server and the network in between never see this phone\'s address. '
           'Slower. Needs Orbot running; works with .onion servers.',
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+          style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
         ),
       );
 
@@ -491,9 +492,9 @@ class _BackupScreenState extends State<BackupScreen> {
                   await auto.setEnabled(session, v);
                   if (mounted) setState(() {});
                 },
-          activeThumbColor: const Color(0xFFA78BFA),
-          title: Text('Back up automatically', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-          subtitle: Text(line, key: const Key('auto-backup-state'), style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+          activeThumbColor: Ui.signal,
+          title: Text('Back up automatically', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
+          subtitle: Text(line, key: const Key('auto-backup-state'), style: AppFonts.ui(fontSize: 12, color: Ui.ink2)),
         );
       },
     );
@@ -507,8 +508,8 @@ class _BackupScreenState extends State<BackupScreen> {
         child: TextButton.icon(
           key: const Key('devices-load'),
           onPressed: _busy ? null : _loadDevices,
-          icon: const Icon(Icons.devices_rounded, size: 18, color: Colors.white54),
-          label: Text('Phones with access to this backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+          icon: const Icon(Icons.devices_rounded, size: 18, color: Ui.ink2),
+          label: Text('Phones with access to this backup', style: AppFonts.ui(color: Ui.ink2, fontSize: 13)),
         ),
       );
     }
@@ -516,29 +517,29 @@ class _BackupScreenState extends State<BackupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Phones with access', style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+        Text('Phones with access', style: AppFonts.ui(fontSize: 12, color: Ui.ink2)),
         for (final d in list)
           ListTile(
             contentPadding: EdgeInsets.zero,
             dense: true,
             leading: Icon(
               d.revoked != null ? Icons.block_rounded : (d.isThisPhone ? Icons.smartphone_rounded : Icons.phone_android_rounded),
-              color: d.revoked != null ? Colors.white24 : Colors.white70,
+              color: d.revoked != null ? Ui.ink3 : Ui.ink2,
             ),
             title: Text(
               d.isThisPhone ? 'This phone' : 'Another phone',
-              style: AppFonts.outfit(fontSize: 13, color: d.revoked != null ? Colors.white38 : Colors.white),
+              style: AppFonts.ui(fontSize: 13, color: d.revoked != null ? Ui.ink3 : Ui.ink),
             ),
             subtitle: Text(
               d.revoked != null ? 'Added ${day(d.added)} · revoked ${day(d.revoked!)}' : 'Added ${day(d.added)}',
-              style: AppFonts.outfit(fontSize: 11, color: Colors.white38),
+              style: AppFonts.ui(fontSize: 11, color: Ui.ink3),
             ),
             trailing: d.isThisPhone || d.revoked != null
                 ? null
                 : TextButton(
                     key: Key('revoke-${d.id}'),
                     onPressed: _busy ? null : () => _revoke(d),
-                    child: const Text('Revoke', style: TextStyle(color: Color(0xFFFB7185))),
+                    child: const Text('Revoke', style: TextStyle(color: Ui.alert)),
                   ),
           ),
       ],
@@ -562,24 +563,24 @@ class _BackupScreenState extends State<BackupScreen> {
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-        backgroundColor: const Color(0xFF090D16),
+        backgroundColor: Ui.canvas,
         appBar: AppBar(
-          backgroundColor: const Color(0xFF161B22),
+          backgroundColor: Ui.surface,
           elevation: 0,
           leading: IconButton(
             icon: const Icon(
-              Icons.arrow_back_ios_new_rounded,
-              color: Colors.white70,
+              Icons.arrow_back_rounded,
+              color: Ui.ink2,
               size: 18,
             ),
             onPressed: _busy ? null : () => Navigator.pop(context),
           ),
           title: Text(
             'Backup',
-            style: AppFonts.outfit(
+            style: AppFonts.ui(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: Ui.ink,
             ),
           ),
         ),
@@ -590,7 +591,7 @@ class _BackupScreenState extends State<BackupScreen> {
               Text(
                 'Files are encrypted on this phone before they leave it. The server stores '
                 'scrambled pieces and never receives a key, a file name or anything readable.',
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white60),
+                style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
               ),
               const SizedBox(height: 20),
               if (!status.isConnected)
@@ -601,14 +602,14 @@ class _BackupScreenState extends State<BackupScreen> {
                 const SizedBox(height: 20),
                 LinearProgressIndicator(
                   value: _progressValue,
-                  color: const Color(0xFFA78BFA),
+                  color: Ui.signal,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   _progress!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                  style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
                 ),
               ],
               if (_lastRun != null) ...[
@@ -617,23 +618,23 @@ class _BackupScreenState extends State<BackupScreen> {
               ],
               if (_note != null) ...[
                 const SizedBox(height: 12),
-                Text(_note!, key: const Key('backup-note'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFF6EE7B7))),
+                Text(_note!, key: const Key('backup-note'), style: AppFonts.ui(fontSize: 13, color: Ui.ink)),
               ],
               if (_error != null) ...[
                 const SizedBox(height: 20),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE11D48).withValues(alpha: 0.15),
+                    color: Ui.alert.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: const Color(0xFFE11D48).withValues(alpha: 0.4),
+                      color: Ui.alert.withValues(alpha: 0.4),
                     ),
                   ),
                   child: Text(
                     _error!,
-                    style: AppFonts.outfit(
-                      color: const Color(0xFFFB7185),
+                    style: AppFonts.ui(
+                      color: Ui.alert,
                       fontSize: 13,
                     ),
                   ),
@@ -666,7 +667,7 @@ class _BackupScreenState extends State<BackupScreen> {
     const SizedBox(height: 10),
     Text(
       'Use a server run by someone you trust, such as your newsroom or organisation.',
-      style: AppFonts.outfit(fontSize: 12, color: Colors.white38),
+      style: AppFonts.ui(fontSize: 12, color: Ui.ink3),
     ),
   ];
 
@@ -674,24 +675,24 @@ class _BackupScreenState extends State<BackupScreen> {
     Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: Ui.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Ui.ink.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Connected to',
-            style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+            style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
           ),
           const SizedBox(height: 2),
           Text(
             status.server ?? '',
-            style: AppFonts.outfit(
+            style: AppFonts.ui(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.white,
+              color: Ui.ink,
             ),
           ),
           const SizedBox(height: 10),
@@ -700,7 +701,7 @@ class _BackupScreenState extends State<BackupScreen> {
                 ? 'Not backed up yet'
                 : 'Last backup ${_ago(status.lastBackup!)} · ${status.lastItemCount} '
                       '${status.lastItemCount == 1 ? 'item' : 'items'}',
-            style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+            style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
           ),
         ],
       ),
@@ -718,12 +719,12 @@ class _BackupScreenState extends State<BackupScreen> {
                 await _sync.setPreviewsFirst(s, v);
                 if (mounted) setState(() {});
               },
-        activeThumbColor: const Color(0xFFA78BFA),
-        title: Text('Small previews first', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        activeThumbColor: Ui.signal,
+        title: Text('Small previews first', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
         subtitle: Text(
           'New photos, videos and recordings go up as a small copy, then in full. '
           'On a bad connection the copy is what gets through.',
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+          style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
         ),
       ),
       SwitchListTile(
@@ -736,11 +737,11 @@ class _BackupScreenState extends State<BackupScreen> {
                 await _sync.setOriginalsOnWifiOnly(s, v);
                 if (mounted) setState(() {});
               },
-        activeThumbColor: const Color(0xFFA78BFA),
-        title: Text('Full size only on Wi-Fi', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        activeThumbColor: Ui.signal,
+        title: Text('Full size only on Wi-Fi', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
         subtitle: Text(
           'Large originals wait for Wi-Fi; everything else still goes on mobile data.',
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+          style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
         ),
       ),
     ],
@@ -762,8 +763,8 @@ class _BackupScreenState extends State<BackupScreen> {
       child: TextButton.icon(
         key: const Key('restore-missing'),
         onPressed: _busy ? null : _restoreMissing,
-        icon: const Icon(Icons.restore_rounded, size: 18, color: Colors.white54),
-        label: Text('Restore files from the backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+        icon: const Icon(Icons.restore_rounded, size: 18, color: Ui.ink2),
+        label: Text('Restore files from the backup', style: AppFonts.ui(color: Ui.ink2, fontSize: 13)),
       ),
     ),
     Align(
@@ -773,8 +774,8 @@ class _BackupScreenState extends State<BackupScreen> {
         onPressed: _busy
             ? null
             : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupHistoryScreen())),
-        icon: const Icon(Icons.history_rounded, size: 18, color: Colors.white54),
-        label: Text('Version history', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+        icon: const Icon(Icons.history_rounded, size: 18, color: Ui.ink2),
+        label: Text('Version history', style: AppFonts.ui(color: Ui.ink2, fontSize: 13)),
       ),
     ),
     Align(
@@ -782,8 +783,8 @@ class _BackupScreenState extends State<BackupScreen> {
       child: TextButton.icon(
         key: const Key('free-space'),
         onPressed: _busy ? null : _freeUpSpace,
-        icon: const Icon(Icons.cleaning_services_rounded, size: 18, color: Colors.white54),
-        label: Text('Free up server space', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+        icon: const Icon(Icons.cleaning_services_rounded, size: 18, color: Ui.ink2),
+        label: Text('Free up server space', style: AppFonts.ui(color: Ui.ink2, fontSize: 13)),
       ),
     ),
     _devicesCard(),
@@ -792,10 +793,10 @@ class _BackupScreenState extends State<BackupScreen> {
       child: TextButton.icon(
         key: const Key('start-over'),
         onPressed: _busy ? null : _startOver,
-        icon: const Icon(Icons.gpp_maybe_rounded, size: 18, color: Color(0xFFFBBF24)),
+        icon: const Icon(Icons.gpp_maybe_rounded, size: 18, color: Ui.signal),
         label: Text(
           _startOverPending ? 'Finish starting over on a new account' : 'A phone was taken? Start over on a new account',
-          style: AppFonts.outfit(color: const Color(0xFFFBBF24), fontSize: 13),
+          style: AppFonts.ui(color: Ui.signal, fontSize: 13),
         ),
       ),
     ),
@@ -805,7 +806,7 @@ class _BackupScreenState extends State<BackupScreen> {
         onPressed: _busy ? null : _disconnect,
         child: Text(
           'Disconnect',
-          style: AppFonts.outfit(color: Colors.white54, fontSize: 13),
+          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
         ),
       ),
     ),
@@ -826,16 +827,16 @@ class _BackupScreenState extends State<BackupScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF059669).withValues(alpha: 0.15),
+        color: Ui.raised.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: const Color(0xFF059669).withValues(alpha: 0.4),
+          color: Ui.raised.withValues(alpha: 0.4),
         ),
       ),
       child: Text(
         'Backup finished: ${parts.join(', ')}. '
         '${formatBytes(s.wireBytes)} sent in ${s.elapsed.inSeconds} s.',
-        style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13),
+        style: AppFonts.ui(color: Ui.ink, fontSize: 13),
       ),
     );
   }
@@ -843,11 +844,11 @@ class _BackupScreenState extends State<BackupScreen> {
   Widget _okCard(String text) => Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFF059669).withValues(alpha: 0.15),
+          color: Ui.raised.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.4)),
+          border: Border.all(color: Ui.raised.withValues(alpha: 0.4)),
         ),
-        child: Text(text, style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13)),
+        child: Text(text, style: AppFonts.ui(color: Ui.ink, fontSize: 13)),
       );
 
   /// Locked upload: the switch, what the queue holds, and the stop code.
@@ -884,9 +885,9 @@ class _BackupScreenState extends State<BackupScreen> {
                       await _sync.setLockedUpload(s, v);
                       if (mounted) setState(() {});
                     },
-              activeThumbColor: const Color(0xFFA78BFA),
-              title: Text('Keep uploading while locked', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-              subtitle: Text(line, key: const Key('locked-upload-state'), style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+              activeThumbColor: Ui.signal,
+              title: Text('Keep uploading while locked', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
+              subtitle: Text(line, key: const Key('locked-upload-state'), style: AppFonts.ui(fontSize: 12, color: Ui.ink2)),
             ),
             if (on)
               Align(
@@ -894,10 +895,10 @@ class _BackupScreenState extends State<BackupScreen> {
                 child: TextButton.icon(
                   key: const Key('stop-code'),
                   onPressed: _busy ? null : () => _setStopCode(s),
-                  icon: const Icon(Icons.front_hand_rounded, size: 18, color: Colors.white54),
+                  icon: const Icon(Icons.front_hand_rounded, size: 18, color: Ui.ink2),
                   label: Text(
                     VaultSync.hasStopCode(s) ? 'Change the stop code' : 'Set a stop code',
-                    style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+                    style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
                   ),
                 ),
               ),
@@ -915,8 +916,8 @@ class _BackupScreenState extends State<BackupScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Stop code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Ui.surface,
+        title: Text('Stop code', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -924,7 +925,7 @@ class _BackupScreenState extends State<BackupScreen> {
               'If you type this code on the lock screen, it looks like a wrong PIN, and the upload queue and its '
               'login are wiped. Your vault and your backup stay as they are. "Clear cache" in Video Trimmer\'s menu '
               'does the same. Uploading while locked then stays off until you turn it on here.',
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+              style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -933,7 +934,7 @@ class _BackupScreenState extends State<BackupScreen> {
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
-              style: AppFonts.outfit(color: Colors.white),
+              style: AppFonts.ui(color: Ui.ink),
               decoration: const InputDecoration(labelText: 'New stop code'),
             ),
             TextField(
@@ -942,7 +943,7 @@ class _BackupScreenState extends State<BackupScreen> {
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
-              style: AppFonts.outfit(color: Colors.white),
+              style: AppFonts.ui(color: Ui.ink),
               decoration: const InputDecoration(labelText: 'Confirm'),
             ),
           ],
@@ -989,14 +990,14 @@ class _BackupScreenState extends State<BackupScreen> {
     autocorrect: false,
     enableSuggestions: false,
     inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'\s'))],
-    style: AppFonts.outfit(fontSize: 15, color: Colors.white),
+    style: AppFonts.ui(fontSize: 15, color: Ui.ink),
     decoration: InputDecoration(
       labelText: label,
-      labelStyle: AppFonts.outfit(fontSize: 13, color: Colors.white54),
+      labelStyle: AppFonts.ui(fontSize: 13, color: Ui.ink2),
       hintText: hint,
-      hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
+      hintStyle: AppFonts.ui(fontSize: 14, color: Ui.ink3),
       filled: true,
-      fillColor: const Color(0xFF161B22),
+      fillColor: Ui.surface,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide.none,
@@ -1009,17 +1010,17 @@ class _BackupScreenState extends State<BackupScreen> {
     child: ElevatedButton(
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFA78BFA),
-        foregroundColor: const Color(0xFF090D16),
-        disabledBackgroundColor: const Color(0xFF21262D),
-        disabledForegroundColor: Colors.white38,
+        backgroundColor: Ui.signal,
+        foregroundColor: Ui.canvas,
+        disabledBackgroundColor: Ui.raised,
+        disabledForegroundColor: Ui.ink3,
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(vertical: 14),
       ),
       child: Text(
         label,
-        style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold),
+        style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.bold),
       ),
     ),
   );
@@ -1062,8 +1063,8 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
       ].every((ok) => ok);
 
   ButtonStyle get _primary => ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFA78BFA),
-        foregroundColor: const Color(0xFF090D16),
+        backgroundColor: Ui.signal,
+        foregroundColor: Ui.canvas,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       );
 
@@ -1076,12 +1077,12 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
           enableSuggestions: false,
           enableIMEPersonalizedLearning: false,
           onChanged: (_) => setState(() {}),
-          style: AppFonts.firaCode(color: Colors.white),
+          style: AppFonts.firaCode(color: Ui.ink),
           decoration: InputDecoration(
             labelText: 'Group ${_asked[i] + 1} of ${_groups.length}',
-            labelStyle: AppFonts.outfit(color: Colors.white54),
+            labelStyle: AppFonts.ui(color: Ui.ink2),
             filled: true,
-            fillColor: const Color(0xFF0D1117),
+            fillColor: Ui.canvas,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
           ),
         ),
@@ -1091,11 +1092,11 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
   Widget build(BuildContext context) {
     final showCode = !_checking;
     return AlertDialog(
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: Ui.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Text(
         showCode ? 'Write this down first' : 'Check what you wrote',
-        style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+        style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold),
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -1107,30 +1108,30 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
                     'This recovery code is the only way to get your backup onto a new phone, '
                     'or to cut off a phone that was taken. It is never stored on this phone. '
                     'Write it on paper and keep it away from the phone.',
-                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                    style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
                   ),
                   const SizedBox(height: 16),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D1117),
+                      color: Ui.canvas,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.4)),
+                      border: Border.all(color: Ui.signal.withValues(alpha: 0.4)),
                     ),
                     // Not selectable: the clipboard (and keyboard clipboard
                     // history) is the last place this code should end up.
                     child: Text(
                       widget.code,
                       key: const Key('recovery-code'),
-                      style: AppFonts.firaCode(fontSize: 15, color: Colors.white, height: 1.7),
+                      style: AppFonts.firaCode(fontSize: 15, color: Ui.ink, height: 1.7),
                     ),
                   ),
                 ]
               : [
                   Text(
                     'Type these two groups from your paper copy. The groups are counted from 1, left to right.',
-                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                    style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
                   ),
                   const SizedBox(height: 14),
                   _field(0),
@@ -1142,25 +1143,25 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
           ? [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: Text('Cancel', style: AppFonts.outfit(color: Colors.white54)),
+                child: Text('Cancel', style: AppFonts.ui(color: Ui.ink2)),
               ),
               ElevatedButton(
                 key: const Key('recovery-written'),
                 style: _primary,
                 onPressed: () => setState(() => _checking = true),
-                child: Text('I wrote it down', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+                child: Text('I wrote it down', style: AppFonts.ui(fontWeight: FontWeight.bold)),
               ),
             ]
           : [
               TextButton(
                 onPressed: () => setState(() => _checking = false),
-                child: Text('Show the code again', style: AppFonts.outfit(color: Colors.white54)),
+                child: Text('Show the code again', style: AppFonts.ui(color: Ui.ink2)),
               ),
               ElevatedButton(
                 key: const Key('recovery-confirm'),
                 style: _primary,
                 onPressed: _matches ? () => Navigator.pop(context, true) : null,
-                child: Text('Confirm', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+                child: Text('Confirm', style: AppFonts.ui(fontWeight: FontWeight.bold)),
               ),
             ],
     );

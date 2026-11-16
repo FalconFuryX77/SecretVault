@@ -97,7 +97,7 @@ void main() {
 
   Future<void> lock(WidgetTester t) async {
     await tapWhenReady(t, find.byTooltip('Lock Safe'));
-    await waitFor(t, find.text('Add File'), gone: true);
+    await waitFor(t, find.text('Add'), gone: true);
     await waitFor(t, find.text('Video Trimmer'));
   }
 
@@ -116,15 +116,15 @@ void main() {
     await t.enterText(fields.at(1), realPin);
     final setupClock = Stopwatch()..start();
     await tapWhenReady(t, find.text('Create Vault'));
-    await waitFor(t, find.text('Add File'), timeout: const Duration(seconds: 90));
+    await waitFor(t, find.text('Add'), timeout: const Duration(seconds: 90));
     // ignore: avoid_print
     print('[timing] setup → inside vault: ${setupClock.elapsedMilliseconds} ms');
     expect(await container.exists(), isTrue);
 
     // ── Add a note ──
-    await tapWhenReady(t, find.text('Add File'));
-    await waitFor(t, find.text('Create Encrypted Secret Note'));
-    await tapWhenReady(t, find.text('Create Encrypted Secret Note'));
+    await tapWhenReady(t, find.text('Add'));
+    await waitFor(t, find.text('Note'));
+    await tapWhenReady(t, find.text('Note'));
     await waitFor(t, find.text('Encrypted Note'));
     // Let the editor finish sliding in: until then the vault list (with its
     // own search field) is still on screen underneath.
@@ -136,7 +136,7 @@ void main() {
     );
     await tapWhenReady(t, find.byIcon(Icons.check_rounded));
     await waitFor(t, find.text(noteTitle));
-    await waitFor(t, find.text('1 protected item (41 B)'), timeout: const Duration(seconds: 10));
+    await waitFor(t, find.text('1 item'), timeout: const Duration(seconds: 10));
 
     // ── Lock: back to the cover app, vault UI gone ──
     await lock(t);
@@ -146,7 +146,7 @@ void main() {
     await openLockScreen(t);
     await enterPin(t, 'not-the-pin');
     await waitFor(t, find.text('Not recognised.'), timeout: const Duration(seconds: 20));
-    expect(find.text('Add File'), findsNothing);
+    expect(find.text('Add'), findsNothing);
     await settle(t, 1500);
 
     // ── Right PIN reopens the vault with the note ──
@@ -158,31 +158,31 @@ void main() {
 
     // ── Create a decoy from Settings ──
     await tapWhenReady(t, find.byTooltip('Settings'));
-    await waitFor(t, find.text('Set Up Decoy Vault'));
-    await tapWhenReady(t, find.text('Set Up Decoy Vault'));
+    await waitFor(t, find.text('Set up a decoy vault'));
+    await tapWhenReady(t, find.text('Set up a decoy vault'));
     await waitFor(t, find.text('Save'));
     await t.enterText(find.widgetWithText(TextField, 'New PIN'), decoyPin);
     await t.enterText(find.widgetWithText(TextField, 'Confirm'), decoyPin);
     await tapWhenReady(t, find.text('Save'));
-    await waitFor(t, find.text('Change Decoy PIN'), timeout: const Duration(seconds: 30));
-    await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
-    await waitFor(t, find.text('Add File'));
+    await waitFor(t, find.text('Change decoy PIN'), timeout: const Duration(seconds: 30));
+    await tapWhenReady(t, find.byIcon(Icons.arrow_back_rounded));
+    await waitFor(t, find.text('Add'));
     await lock(t);
 
     // ── Decoy PIN opens an empty vault with no trace of the real one ──
     await openLockScreen(t);
     await enterPin(t, decoyPin);
-    await waitFor(t, find.text('Add File'));
+    await waitFor(t, find.text('Add'));
     expect(find.text(noteTitle), findsNothing);
     await tapWhenReady(t, find.byTooltip('Settings'));
     await waitFor(t, find.text('Change PIN'));
     // The decoy's Settings look like a lone real vault's: the same decoy
     // section, offering to set one up (it can't be told apart at a glance).
-    expect(find.text('DECOY VAULT'), findsOneWidget);
-    expect(find.text('Set Up Decoy Vault'), findsOneWidget);
-    expect(find.text('Change Decoy PIN'), findsNothing);
-    await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
-    await waitFor(t, find.text('Add File'));
+    expect(find.text('Decoy vault'), findsOneWidget);
+    expect(find.text('Set up a decoy vault'), findsOneWidget);
+    expect(find.text('Change decoy PIN'), findsNothing);
+    await tapWhenReady(t, find.byIcon(Icons.arrow_back_rounded));
+    await waitFor(t, find.text('Add'));
     await lock(t);
 
     // ── And the real vault still has its note ──
@@ -192,7 +192,7 @@ void main() {
 
     // ── An encrypted image opens in the viewer, and closing the viewer
     //    must NOT drop screenshot protection for the vault underneath ──
-    final ctx = t.element(find.text('Add File'));
+    final ctx = t.element(find.text('Add'));
     final vaultService = Provider.of<VaultService>(ctx, listen: false);
     final tmp = await getTemporaryDirectory();
     final png = File('${tmp.path}/pic.png')
@@ -219,7 +219,7 @@ void main() {
     expect(SecurityChannelService.isSecure, isTrue);
     await settle(t, 500);
     await t.pageBack();
-    await waitFor(t, find.text('Add File'));
+    await waitFor(t, find.text('Add'));
     await settle(t, 600);
     expect(SecurityChannelService.isSecure, isTrue, reason: 'closing the viewer must keep the vault protected');
 
@@ -268,30 +268,30 @@ void main() {
       await tapWhenReady(t, find.byKey(const Key('devices-load')));
       await waitFor(t, find.text('This phone'));
       expect(find.text('Another phone'), findsNothing);
-      await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
+      await tapWhenReady(t, find.byIcon(Icons.arrow_back_rounded));
       // Settings is still scrolled down to Backup, so look for its title.
-      await waitFor(t, find.text('Security & Settings'));
+      await waitFor(t, find.text('Settings'));
       await waitFor(t, find.text('Back up now'), gone: true);
-      await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
-      await waitFor(t, find.text('Add File'));
+      await tapWhenReady(t, find.byIcon(Icons.arrow_back_rounded));
+      await waitFor(t, find.text('Add'));
     }
 
     // ── A duress PIN, set from Settings: it opens the decoy and erases this
     //    vault for good ──
     await tapWhenReady(t, find.byTooltip('Settings'));
-    await tapWhenReady(t, find.text('Set Up Duress PIN'));
+    await tapWhenReady(t, find.text('Set up a duress PIN'));
     await tapWhenReady(t, find.byKey(const Key('duress-understood')));
     await waitFor(t, find.text('Save'));
     await t.enterText(find.widgetWithText(TextField, 'New PIN'), duressPin);
     await t.enterText(find.widgetWithText(TextField, 'Confirm'), duressPin);
     await tapWhenReady(t, find.text('Save'));
-    await waitFor(t, find.text('Change Duress PIN'), timeout: const Duration(seconds: 30));
-    await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
-    await waitFor(t, find.text('Add File'));
+    await waitFor(t, find.text('Change duress PIN'), timeout: const Duration(seconds: 30));
+    await tapWhenReady(t, find.byIcon(Icons.arrow_back_rounded));
+    await waitFor(t, find.text('Add'));
     await lock(t);
     await openLockScreen(t);
     await enterPin(t, duressPin);
-    await waitFor(t, find.text('Add File'), timeout: const Duration(seconds: 30));
+    await waitFor(t, find.text('Add'), timeout: const Duration(seconds: 30));
     expect(find.text(noteTitle), findsNothing);
     expect(find.text('evidence.png'), findsNothing);
     await lock(t);
@@ -300,7 +300,7 @@ void main() {
     await waitFor(t, find.text('Not recognised.'), timeout: const Duration(seconds: 20));
     await settle(t, 1500);
     await enterPin(t, decoyPin);
-    await waitFor(t, find.text('Add File'));
+    await waitFor(t, find.text('Add'));
     expect(find.text(noteTitle), findsNothing);
 
     await lock(t);

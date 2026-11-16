@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'navigation/vault_routes.dart';
-import 'theme/app_fonts.dart';
+import 'theme/ui.dart';
 import 'package:provider/provider.dart';
 import 'providers/unlock_provider.dart';
 import 'providers/vault_provider.dart';
@@ -52,15 +52,7 @@ class SecretVaultApp extends StatelessWidget {
             navigatorObservers: [vaultRoutes],
             title: coverName,
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(
-              brightness: Brightness.dark,
-              scaffoldBackgroundColor: const Color(0xFF090D16),
-              textTheme: AppFonts.outfitTextTheme(
-                ThemeData.dark().textTheme,
-              ),
-              useMaterial3: true,
-              colorSchemeSeed: const Color(0xFFA78BFA),
-            ),
+            theme: Ui.theme(),
             builder: (ctx, child) {
               return AppLifecycleScope(
                 child: Listener(

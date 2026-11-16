@@ -10,9 +10,10 @@ import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
 import 'hidden_recorder_screen.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
-const _red = Color(0xFFF43F5E);
+const _accent = Ui.signal;
+const _red = Ui.alert;
 
 /// Asks for the microphone, without the vault locking while the system
 /// dialog is up. Returns whether it was granted.
@@ -145,15 +146,15 @@ class _RecorderScreenState extends State<RecorderScreen> {
     final started = _status.startedAt;
     final elapsed = _recordingHere && started != null ? DateTime.now().difference(started) : Duration.zero;
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          icon: const Icon(Icons.arrow_back_rounded, color: Ui.ink2, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Record audio', style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+        title: Text('Record audio', style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.bold, color: Ui.ink)),
       ),
       body: SafeArea(
         child: ListView(
@@ -163,7 +164,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
               child: Text(
                 _clock(elapsed),
                 key: const Key('rec-clock'),
-                style: AppFonts.firaCode(fontSize: 44, color: _recordingHere ? Colors.white : Colors.white38),
+                style: AppFonts.firaCode(fontSize: 44, color: _recordingHere ? Ui.ink : Ui.ink3),
               ),
             ),
             const SizedBox(height: 28),
@@ -189,12 +190,12 @@ class _RecorderScreenState extends State<RecorderScreen> {
                   child: _busy
                       ? const Padding(
                           padding: EdgeInsets.all(40),
-                          child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF090D16)),
+                          child: CircularProgressIndicator(strokeWidth: 3, color: Ui.canvas),
                         )
                       : Icon(
                           _recordingHere ? Icons.stop_rounded : Icons.mic_rounded,
                           size: 52,
-                          color: const Color(0xFF090D16),
+                          color: Ui.canvas,
                         ),
                 ),
               ),
@@ -206,7 +207,7 @@ class _RecorderScreenState extends State<RecorderScreen> {
                       : 'Tap to record. The audio is encrypted as it\'s captured and goes straight into the vault.',
               key: const Key('rec-state'),
               textAlign: TextAlign.center,
-              style: AppFonts.outfit(fontSize: 14, color: Colors.white70, height: 1.4),
+              style: AppFonts.ui(fontSize: 14, color: Ui.ink2, height: 1.4),
             ),
             if (_message != null) ...[
               const SizedBox(height: 16),
@@ -214,30 +215,30 @@ class _RecorderScreenState extends State<RecorderScreen> {
                 _message!,
                 key: const Key('rec-message'),
                 textAlign: TextAlign.center,
-                style: AppFonts.outfit(
+                style: AppFonts.ui(
                   fontSize: 13,
-                  color: _messageIsError ? const Color(0xFFFB7185) : const Color(0xFF34D399),
+                  color: _messageIsError ? Ui.alert : Ui.ink,
                 ),
               ),
             ],
             const SizedBox(height: 40),
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF161B22),
+                color: Ui.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: Ui.ink.withValues(alpha: 0.08)),
               ),
               child: ListTile(
                 leading: const Icon(Icons.screen_lock_portrait_rounded, color: _accent),
                 title: Text(
                   'Record with the screen off',
-                  style: AppFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+                  style: AppFonts.ui(fontSize: 14, fontWeight: FontWeight.w600, color: Ui.ink),
                 ),
                 subtitle: Text(
                   'Press a volume button a few times, or the assistant button, to start or stop without unlocking.',
-                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                  style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
                 ),
-                trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+                trailing: const Icon(Icons.chevron_right_rounded, color: Ui.ink3),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const HiddenRecorderScreen()),

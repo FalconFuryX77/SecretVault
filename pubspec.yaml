@@ -79,9 +79,6 @@ flutter:
 
   # Bundled so the app never fetches fonts over the network (SIL OFL 1.1).
   fonts:
-    - family: Outfit
-      fonts:
-        - asset: assets/fonts/Outfit-Variable.ttf
     - family: FiraCode
       fonts:
         - asset: assets/fonts/FiraCode-Variable.ttf

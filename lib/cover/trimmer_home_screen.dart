@@ -124,17 +124,17 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.play_circle_outline_rounded, color: Colors.white70),
-              title: Text('Play', style: AppFonts.outfit(color: Colors.white)),
+              title: Text('Play', style: AppFonts.ui(color: Colors.white)),
               onTap: () => Navigator.pop(ctx, 'play'),
             ),
             ListTile(
               leading: const Icon(Icons.content_cut_rounded, color: Colors.white70),
-              title: Text('Trim again', style: AppFonts.outfit(color: Colors.white)),
+              title: Text('Trim again', style: AppFonts.ui(color: Colors.white)),
               onTap: () => Navigator.pop(ctx, 'trim'),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFB7185)),
-              title: Text('Delete', style: AppFonts.outfit(color: const Color(0xFFFB7185))),
+              title: Text('Delete', style: AppFonts.ui(color: const Color(0xFFFB7185))),
               onTap: () => Navigator.pop(ctx, 'delete'),
             ),
           ],
@@ -170,7 +170,7 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
             children: [
               const Icon(Icons.content_cut_rounded, color: _accent, size: 22),
               const SizedBox(width: 10),
-              Text(coverName, style: AppFonts.outfit(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text(coverName, style: AppFonts.ui(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
             ],
           ),
         ),
@@ -186,7 +186,7 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
               PopupMenuItem(
                 key: const Key('cover-clear-cache'),
                 value: 'cache',
-                child: Text('Clear cache', style: AppFonts.outfit(color: Colors.white)),
+                child: Text('Clear cache', style: AppFonts.ui(color: Colors.white)),
               ),
             ],
           ),
@@ -198,7 +198,7 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
         foregroundColor: const Color(0xFF0B0F17),
         onPressed: _newTrim,
         icon: const Icon(Icons.add_rounded),
-        label: Text('New trim', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+        label: Text('New trim', style: AppFonts.ui(fontWeight: FontWeight.bold)),
       ),
       body: clips == null
           ? const Center(child: CircularProgressIndicator(color: _accent))
@@ -215,7 +215,7 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 4),
                           child: Text('Your clips · Movies/Video Trimmer',
-                              style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+                              style: AppFonts.ui(fontSize: 12, color: Colors.white54)),
                         );
                       }
                       return _clipTile(clips[i - 1]);
@@ -237,13 +237,13 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
                 child: const Icon(Icons.movie_filter_rounded, color: _accent, size: 48),
               ),
               const SizedBox(height: 18),
-              Text('Trim a video', style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text('Trim a video', style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(height: 8),
               Text(
                 'Pick a video, cut its start and end, and save the clip. The original stays as it is. '
                 'Clips are saved to Movies/Video Trimmer, at full quality.',
                 textAlign: TextAlign.center,
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white60),
+                style: AppFonts.ui(fontSize: 13, color: Colors.white60),
               ),
             ],
           ),
@@ -280,10 +280,10 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: AppFonts.outfit(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)),
+                      style: AppFonts.ui(fontSize: 14, color: Colors.white, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
                   Text('${formatClock(c.duration)} · ${formatBytes(c.size)}',
-                      style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+                      style: AppFonts.ui(fontSize: 12, color: Colors.white54)),
                 ],
               ),
             ),

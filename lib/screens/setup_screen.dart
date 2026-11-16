@@ -9,6 +9,7 @@ import '../vault/vault_container.dart';
 import 'move_in_screen.dart';
 import '../cover/trimmer_home_screen.dart';
 import 'vault_home_screen.dart';
+import '../theme/ui.dart';
 
 /// First-run setup: choose the PIN that encrypts the vault, or restore a
 /// backed-up vault onto this phone (server address and recovery code; the
@@ -190,7 +191,7 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -201,13 +202,13 @@ class _SetupScreenState extends State<SetupScreen> {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: const Color(0xFFA78BFA).withValues(alpha: 0.15),
+                color: Ui.signal.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.shield_rounded, color: Color(0xFFA78BFA), size: 20),
+              child: const Icon(Icons.shield_rounded, color: Ui.signal, size: 20),
             ),
             const SizedBox(width: 10),
-            Text('Vault Setup', style: AppFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text('Vault Setup', style: AppFonts.ui(fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
       ),
@@ -219,7 +220,7 @@ class _SetupScreenState extends State<SetupScreen> {
               Text(
                 _restore ? 'Restore From a Backup' : 'Set Your Vault PIN',
                 textAlign: TextAlign.center,
-                style: AppFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                style: AppFonts.ui(fontSize: 22, fontWeight: FontWeight.bold, color: Ui.ink),
               ),
               const SizedBox(height: 8),
               Text(
@@ -229,7 +230,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     : 'This PIN encrypts your files, so there is no reset if you forget it. '
                         'Use $_minPinLen or more characters. A passphrase is best.',
                 textAlign: TextAlign.center,
-                style: AppFonts.outfit(fontSize: 14, color: Colors.white60),
+                style: AppFonts.ui(fontSize: 14, color: Ui.ink2),
               ),
               const SizedBox(height: 20),
               if (_restore) ...[
@@ -240,8 +241,8 @@ class _SetupScreenState extends State<SetupScreen> {
                   contentPadding: EdgeInsets.zero,
                   value: _tor,
                   onChanged: _busy ? null : (v) => setState(() => _tor = v),
-                  activeThumbColor: const Color(0xFFA78BFA),
-                  title: Text('Connect through Tor (Orbot)', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+                  activeThumbColor: Ui.signal,
+                  title: Text('Connect through Tor (Orbot)', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
                 ),
                 const SizedBox(height: 4),
               ],
@@ -257,24 +258,24 @@ class _SetupScreenState extends State<SetupScreen> {
                   icon: Icon(
                     _showPin ? Icons.visibility_off_rounded : Icons.visibility_rounded,
                     size: 16,
-                    color: Colors.white54,
+                    color: Ui.ink2,
                   ),
                   label: Text(
                     _showPin ? 'Hide' : 'Show',
-                    style: AppFonts.outfit(color: Colors.white54, fontSize: 13),
+                    style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
                   ),
                 ),
               ),
               if (_busy) ...[
                 const SizedBox(height: 12),
-                LinearProgressIndicator(value: _progress, color: const Color(0xFFA78BFA)),
+                LinearProgressIndicator(value: _progress, color: Ui.signal),
                 const SizedBox(height: 8),
                 Text(
                   _progressText,
                   key: const Key('setup-progress'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppFonts.outfit(color: Colors.white54, fontSize: 12),
+                  style: AppFonts.ui(color: Ui.ink2, fontSize: 12),
                 ),
               ],
               if (_errorMessage != null) ...[
@@ -282,18 +283,18 @@ class _SetupScreenState extends State<SetupScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE11D48).withValues(alpha: 0.15),
+                    color: Ui.alert.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFE11D48).withValues(alpha: 0.4)),
+                    border: Border.all(color: Ui.alert.withValues(alpha: 0.4)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: Color(0xFFFB7185), size: 18),
+                      const Icon(Icons.error_outline_rounded, color: Ui.alert, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: AppFonts.outfit(color: const Color(0xFFFB7185), fontSize: 13),
+                          style: AppFonts.ui(color: Ui.alert, fontSize: 13),
                         ),
                       ),
                     ],
@@ -306,8 +307,8 @@ class _SetupScreenState extends State<SetupScreen> {
                 child: ElevatedButton(
                   onPressed: _busy ? null : _submit,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFA78BFA),
-                    foregroundColor: const Color(0xFF090D16),
+                    backgroundColor: Ui.signal,
+                    foregroundColor: Ui.canvas,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
@@ -315,7 +316,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   child: Text(
                     _restoreInto != null ? 'Try Again' : (_restore ? 'Restore Vault' : 'Create Vault'),
                     key: const Key('setup-submit'),
-                    style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold),
+                    style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -323,7 +324,7 @@ class _SetupScreenState extends State<SetupScreen> {
               if (_restoreInto != null)
                 TextButton(
                   onPressed: _busy ? null : () => _open(_restoreInto!),
-                  child: Text('Open the vault and restore later', style: AppFonts.outfit(color: Colors.white54, fontSize: 13)),
+                  child: Text('Open the vault and restore later', style: AppFonts.ui(color: Ui.ink2, fontSize: 13)),
                 )
               else
                 TextButton(
@@ -334,7 +335,7 @@ class _SetupScreenState extends State<SetupScreen> {
                   }),
                   child: Text(
                     _restore ? 'Start an empty vault instead' : 'Restore from a backup instead',
-                    style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontSize: 13),
+                    style: AppFonts.ui(color: Ui.signal, fontSize: 13),
                   ),
                 ),
               if (_restoreInto == null && !_restore)
@@ -344,12 +345,12 @@ class _SetupScreenState extends State<SetupScreen> {
                       ? null
                       : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoveInScreen())),
                   child: Text('Move a vault here from another phone or app',
-                      style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontSize: 13)),
+                      style: AppFonts.ui(color: Ui.signal, fontSize: 13)),
                 ),
               Text(
                 'You can add a decoy vault with its own PIN later, in Settings.',
                 textAlign: TextAlign.center,
-                style: AppFonts.outfit(fontSize: 12, color: Colors.white38),
+                style: AppFonts.ui(fontSize: 12, color: Ui.ink3),
               ),
             ],
           ),
@@ -369,12 +370,12 @@ class _SetupScreenState extends State<SetupScreen> {
       enableIMEPersonalizedLearning: false,
       minLines: lines,
       maxLines: lines,
-      style: AppFonts.firaCode(fontSize: 14, color: Colors.white),
+      style: AppFonts.firaCode(fontSize: 14, color: Ui.ink),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
+        hintStyle: AppFonts.ui(fontSize: 14, color: Ui.ink3),
         filled: true,
-        fillColor: const Color(0xFF161B22),
+        fillColor: Ui.surface,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
       ),
     );
@@ -397,14 +398,14 @@ class _SetupScreenState extends State<SetupScreen> {
       maxLength: 64,
       textInputAction: action,
       onSubmitted: onSubmitted,
-      style: AppFonts.outfit(fontSize: 20, letterSpacing: _showPin ? 1 : 6, color: Colors.white),
+      style: AppFonts.ui(fontSize: 20, letterSpacing: _showPin ? 1 : 6, color: Ui.ink),
       textAlign: TextAlign.center,
       decoration: InputDecoration(
         counterText: '',
         hintText: hint,
-        hintStyle: AppFonts.outfit(fontSize: 14, letterSpacing: 0, color: Colors.white24),
+        hintStyle: AppFonts.ui(fontSize: 14, letterSpacing: 0, color: Ui.ink3),
         filled: true,
-        fillColor: const Color(0xFF161B22),
+        fillColor: Ui.surface,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
       ),
     );

@@ -12,8 +12,9 @@ import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import '../cover/trimmer_home_screen.dart';
 import 'vault_home_screen.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
+const _accent = Ui.signal;
 
 /// First run on a new phone (or after reinstalling or renaming the app):
 /// brings in a vault moved out with "Move to another phone or app". Pick the
@@ -167,12 +168,12 @@ class _MoveInScreenState extends State<MoveInScreen> {
           minLines: lines,
           maxLines: lines,
           keyboardType: obscure ? TextInputType.visiblePassword : TextInputType.text,
-          style: AppFonts.firaCode(fontSize: 15, color: Colors.white),
+          style: AppFonts.firaCode(fontSize: 15, color: Ui.ink),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
+            hintStyle: AppFonts.ui(fontSize: 14, color: Ui.ink3),
             filled: true,
-            fillColor: const Color(0xFF161B22),
+            fillColor: Ui.surface,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
           ),
         ),
@@ -185,11 +186,11 @@ class _MoveInScreenState extends State<MoveInScreen> {
           onPressed: _busy ? null : onPressed,
           style: ElevatedButton.styleFrom(
             backgroundColor: _accent,
-            foregroundColor: const Color(0xFF090D16),
+            foregroundColor: Ui.canvas,
             padding: const EdgeInsets.symmetric(vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
-          child: Text(label, style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold)),
+          child: Text(label, style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.bold)),
         ),
       );
 
@@ -197,11 +198,11 @@ class _MoveInScreenState extends State<MoveInScreen> {
   Widget build(BuildContext context) {
     final n = _vaults ?? 0;
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text('Move a Vault Here', style: AppFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: Text('Move a Vault Here', style: AppFonts.ui(fontWeight: FontWeight.bold, fontSize: 18)),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -218,7 +219,7 @@ class _MoveInScreenState extends State<MoveInScreen> {
                             ? 'Choose a PIN for the vault on this phone (it can be the old one).'
                             : 'This file holds $n vaults: the one it was moved from, and its decoy. '
                                 'Choose a PIN for each (they can be the old ones).')),
-                style: AppFonts.outfit(fontSize: 14, color: Colors.white70),
+                style: AppFonts.ui(fontSize: 14, color: Ui.ink2),
               ),
               const SizedBox(height: 20),
               if (_copy == null)
@@ -237,7 +238,7 @@ class _MoveInScreenState extends State<MoveInScreen> {
               ],
               if (_error != null) ...[
                 const SizedBox(height: 14),
-                Text(_error!, key: const Key('move-in-error'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFFFB7185))),
+                Text(_error!, key: const Key('move-in-error'), style: AppFonts.ui(fontSize: 13, color: Ui.alert)),
               ],
             ],
           ),

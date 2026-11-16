@@ -9,8 +9,9 @@ import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import 'recorder_screen.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
+const _accent = Ui.signal;
 
 /// Arms the hidden trigger for the open vault: a volume button pressed a few
 /// times quickly with the screen off (volume-down three times by default),
@@ -182,9 +183,9 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFF161B22),
+          color: Ui.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          border: Border.all(color: Ui.ink.withValues(alpha: 0.08)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
       );
@@ -193,16 +194,16 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
         padding: const EdgeInsets.only(bottom: 10),
         child: Text.rich(
           TextSpan(children: [
-            TextSpan(text: '$bold ', style: AppFonts.outfit(fontWeight: FontWeight.w700, color: Colors.white)),
+            TextSpan(text: '$bold ', style: AppFonts.ui(fontWeight: FontWeight.w700, color: Ui.ink)),
             TextSpan(text: text),
           ]),
-          style: AppFonts.outfit(fontSize: 13, color: Colors.white70, height: 1.4),
+          style: AppFonts.ui(fontSize: 13, color: Ui.ink2, height: 1.4),
         ),
       );
 
   Widget _label(String text) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-        child: Text(text, style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        child: Text(text, style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
       );
 
   String _capitalised(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
@@ -217,7 +218,7 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
           for (final (value, label) in options)
             ChoiceChip(
               key: Key('trigger-button-$label'.toLowerCase()),
-              label: Text(label, style: AppFonts.outfit(fontSize: 13)),
+              label: Text(label, style: AppFonts.ui(fontSize: 13)),
               selected: _trigger.button == value,
               selectedColor: _accent.withValues(alpha: 0.35),
               onSelected: _busy ? null : (_) => _setTrigger(_trigger.copyWith(button: value)),
@@ -236,7 +237,7 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
           for (var n = TriggerSettings.minPresses; n <= TriggerSettings.maxPresses; n++)
             ChoiceChip(
               key: Key('trigger-presses-$n'),
-              label: Text('$n', style: AppFonts.outfit(fontSize: 13)),
+              label: Text('$n', style: AppFonts.ui(fontSize: 13)),
               selected: _trigger.presses == n,
               selectedColor: _accent.withValues(alpha: 0.35),
               onSelected: _busy || !_trigger.usesVolume ? null : (_) => _setTrigger(_trigger.copyWith(presses: n)),
@@ -261,15 +262,15 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
   Widget build(BuildContext context) {
     final what = _trigger.describe();
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          icon: const Icon(Icons.arrow_back_rounded, color: Ui.ink2, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Hidden recorder', style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+        title: Text('Hidden recorder', style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.bold, color: Ui.ink)),
       ),
       body: SafeArea(
         child: ListView(
@@ -283,7 +284,7 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
                 activeThumbColor: _accent,
                 title: Text(
                   '${_capitalised(what)} records',
-                  style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
+                  style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.w700, color: Ui.ink),
                 ),
                 subtitle: Text(
                   _recordingHere
@@ -292,17 +293,17 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
                           ? 'Armed. Works with the screen off.'
                           : 'Off',
                   key: const Key('hidden-state'),
-                  style: AppFonts.outfit(fontSize: 12, color: _recordingHere ? const Color(0xFFF43F5E) : Colors.white54),
+                  style: AppFonts.ui(fontSize: 12, color: _recordingHere ? Ui.alert : Ui.ink2),
                 ),
               ),
               SwitchListTile(
                 value: _vibrate,
                 onChanged: _busy ? null : _setVibrate,
                 activeThumbColor: _accent,
-                title: Text('Buzz to confirm', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+                title: Text('Buzz to confirm', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
                 subtitle: Text(
                   'One short buzz when recording starts, two when it stops.',
-                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                  style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
                 ),
               ),
             ]),
@@ -317,8 +318,8 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
                 value: _trigger.assist,
                 onChanged: _busy ? null : _setAssist,
                 activeThumbColor: _accent,
-                title: Text('Assistant button', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-                subtitle: Text(_assistSubtitle, style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+                title: Text('Assistant button', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
+                subtitle: Text(_assistSubtitle, style: AppFonts.ui(fontSize: 12, color: Ui.ink2)),
               ),
               if (_trigger.assist && !_assist.holder || !_trigger.assist && _assist.holder)
                 Padding(
@@ -326,14 +327,14 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
                   child: TextButton(
                     key: const Key('trigger-assist-settings'),
                     onPressed: _openAssistSettings,
-                    child: Text('Open assistant settings', style: AppFonts.outfit(color: _accent)),
+                    child: Text('Open assistant settings', style: AppFonts.ui(color: _accent)),
                   ),
                 ),
             ]),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 14),
-                child: Text(_error!, key: const Key('hidden-error'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFFFB7185))),
+                child: Text(_error!, key: const Key('hidden-error'), style: AppFonts.ui(fontSize: 13, color: Ui.alert)),
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),

@@ -108,7 +108,7 @@ class _TrimEditorScreenState extends State<TrimEditorScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved to Movies/Video Trimmer', style: AppFonts.outfit())),
+        SnackBar(content: Text('Saved to Movies/Video Trimmer', style: AppFonts.ui())),
       );
       Navigator.pop(context, true);
     } catch (e) {
@@ -129,17 +129,17 @@ class _TrimEditorScreenState extends State<TrimEditorScreen> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text('Trim', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+        title: Text('Trim', style: AppFonts.ui(fontWeight: FontWeight.bold)),
         actions: [
           TextButton(
             key: const Key('trim-save'),
             onPressed: c == null || _saving ? null : _save,
-            child: Text('Save', style: AppFonts.outfit(color: _accent, fontWeight: FontWeight.bold, fontSize: 15)),
+            child: Text('Save', style: AppFonts.ui(color: _accent, fontWeight: FontWeight.bold, fontSize: 15)),
           ),
         ],
       ),
       body: _error != null && c == null
-          ? Center(child: Text(_error!, style: AppFonts.outfit(color: Colors.white60)))
+          ? Center(child: Text(_error!, style: AppFonts.ui(color: Colors.white60)))
           : c == null
               ? const Center(child: CircularProgressIndicator(color: _accent))
               : Column(
@@ -208,7 +208,7 @@ class _TrimEditorScreenState extends State<TrimEditorScreen> {
                                     style: AppFonts.firaCode(fontSize: 12, color: Colors.white70)),
                                 Text('Clip ${formatClock(Duration(milliseconds: (_range.end - _range.start).round()))}',
                                     key: const Key('trim-length'),
-                                    style: AppFonts.outfit(fontSize: 12, color: _accent)),
+                                    style: AppFonts.ui(fontSize: 12, color: _accent)),
                                 Text(formatClock(Duration(milliseconds: _range.end.round())),
                                     style: AppFonts.firaCode(fontSize: 12, color: Colors.white70)),
                               ],
@@ -218,11 +218,11 @@ class _TrimEditorScreenState extends State<TrimEditorScreen> {
                               value: _mute,
                               onChanged: _saving ? null : (v) => setState(() => _mute = v),
                               activeThumbColor: _accent,
-                              title: Text('Remove sound', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+                              title: Text('Remove sound', style: AppFonts.ui(fontSize: 14, color: Colors.white)),
                             ),
                             if (_saving) const LinearProgressIndicator(color: _accent),
                             if (_error != null)
-                              Text(_error!, style: AppFonts.outfit(fontSize: 12, color: const Color(0xFFFB7185))),
+                              Text(_error!, style: AppFonts.ui(fontSize: 12, color: const Color(0xFFFB7185))),
                           ],
                         ),
                       ),

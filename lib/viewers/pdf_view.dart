@@ -8,8 +8,9 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_fonts.dart';
 import 'pdf_sandbox.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
+const _accent = Ui.signal;
 
 /// Shows a PDF page by page. Pages are drawn by the isolated renderer
 /// ([PdfSandbox]); this side only ever handles pixels.
@@ -243,7 +244,7 @@ class _PdfViewState extends State<PdfView> {
             _error!,
             key: const Key('pdf-error'),
             textAlign: TextAlign.center,
-            style: AppFonts.outfit(color: const Color(0xFFFB7185), fontSize: 14),
+            style: AppFonts.ui(color: Ui.alert, fontSize: 14),
           ),
         ),
       );
@@ -256,20 +257,20 @@ class _PdfViewState extends State<PdfView> {
       children: [
         Container(
           width: double.infinity,
-          color: const Color(0xFF161B22),
+          color: Ui.surface,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             children: [
-              const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFFB7185), size: 18),
+              const Icon(Icons.picture_as_pdf_rounded, color: Ui.alert, size: 18),
               const SizedBox(width: 8),
               Text(
                 'Page ${_current + 1} of ${pages.length}',
                 key: const Key('pdf-page-label'),
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
+                style: AppFonts.ui(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
               if (!_searching)
-                Text('Double-tap to zoom', style: AppFonts.outfit(fontSize: 11, color: Colors.white38)),
+                Text('Double-tap to zoom', style: AppFonts.ui(fontSize: 11, color: Colors.white38)),
               IconButton(
                 key: const Key('pdf-search-toggle'),
                 visualDensity: VisualDensity.compact,
@@ -288,7 +289,7 @@ class _PdfViewState extends State<PdfView> {
         ),
         if (_searching)
           Container(
-            color: const Color(0xFF161B22),
+            color: Ui.surface,
             padding: const EdgeInsets.fromLTRB(12, 0, 4, 8),
             child: Row(
               children: [
@@ -300,11 +301,11 @@ class _PdfViewState extends State<PdfView> {
                     enableIMEPersonalizedLearning: false,
                     textInputAction: TextInputAction.search,
                     onSubmitted: (_) => _search(),
-                    style: AppFonts.outfit(fontSize: 14, color: Colors.white),
+                    style: AppFonts.ui(fontSize: 14, color: Colors.white),
                     decoration: InputDecoration(
                       isDense: true,
                       hintText: 'Find in document',
-                      hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white38),
+                      hintStyle: AppFonts.ui(fontSize: 14, color: Colors.white38),
                       border: InputBorder.none,
                     ),
                   ),
@@ -312,7 +313,7 @@ class _PdfViewState extends State<PdfView> {
                 Text(
                   _searchNote ?? (_matches.isEmpty ? '' : '${_match + 1} of ${_matches.length}'),
                   key: const Key('pdf-search-count'),
-                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                  style: AppFonts.ui(fontSize: 12, color: Colors.white54),
                 ),
                 IconButton(
                   icon: const Icon(Icons.keyboard_arrow_up_rounded, color: Colors.white70),
@@ -390,7 +391,7 @@ class _PdfViewState extends State<PdfView> {
               width: max(2.0, r.width * sx),
               height: max(2.0, r.height * sy),
               child: Container(
-                color: (m == _match ? const Color(0xFFF59E0B) : const Color(0xFFFDE047)).withValues(alpha: 0.45),
+                color: (m == _match ? Ui.signal : Ui.signal).withValues(alpha: 0.45),
               ),
             ),
     ];
@@ -405,7 +406,7 @@ class _PdfViewState extends State<PdfView> {
               const Icon(Icons.lock_rounded, color: _accent, size: 40),
               const SizedBox(height: 12),
               Text('This PDF is password-protected.',
-                  textAlign: TextAlign.center, style: AppFonts.outfit(fontSize: 15, color: Colors.white)),
+                  textAlign: TextAlign.center, style: AppFonts.ui(fontSize: 15, color: Colors.white)),
               const SizedBox(height: 16),
               TextField(
                 key: const Key('pdf-password'),
@@ -415,12 +416,12 @@ class _PdfViewState extends State<PdfView> {
                 enableSuggestions: false,
                 enableIMEPersonalizedLearning: false,
                 onSubmitted: (_) => _open(password: _password.text),
-                style: AppFonts.outfit(color: Colors.white),
+                style: AppFonts.ui(color: Colors.white),
                 decoration: InputDecoration(
                   hintText: 'Password',
                   errorText: _wrongPassword ? 'That password is not right.' : null,
                   filled: true,
-                  fillColor: const Color(0xFF161B22),
+                  fillColor: Ui.surface,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 ),
               ),
@@ -492,16 +493,16 @@ class _ZoomedPageState extends State<_ZoomedPage> {
   Widget build(BuildContext context) {
     final img = _image;
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: Ui.surface,
         title: Text(
           'Page ${widget.page + 1} of ${widget.total}',
-          style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+          style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
         ),
       ),
       body: _failed
-          ? Center(child: Text('This page could not be drawn.', style: AppFonts.outfit(color: Colors.white54)))
+          ? Center(child: Text('This page could not be drawn.', style: AppFonts.ui(color: Colors.white54)))
           : img == null
               ? const Center(child: CircularProgressIndicator(color: _accent))
               : InteractiveViewer(
