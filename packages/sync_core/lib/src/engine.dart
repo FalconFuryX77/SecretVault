@@ -315,11 +315,18 @@ class SyncEngine {
     final stale = job != null && !committed && (replan || jsonEncode(job['meta']) != jsonEncode(meta));
     if (job == null || committed || stale) {
       final planned = await _plan(src);
+      // A version abandoned here may still have reached the server's log
+      // (its reply lost), so remember it until a later version commits:
+      // deleting the item must delete it too.
+      final abandoned = stale
+          ? <String>[...((job['abandoned'] as List?) ?? const []).cast<String>(), job['version'] as String]
+          : const <String>[];
       job = {
         'version': hex(randomBytes(16)),
         // After a committed version, that one; after an abandoned plan, the
         // version it was going to replace.
         'parent': committed ? job['version'] : job?['parent'],
+        if (abandoned.isNotEmpty) 'abandoned': abandoned,
         'size': planned.size,
         'mac': planned.mac,
         'meta': meta,
@@ -417,7 +424,8 @@ class SyncEngine {
     // would bloat the journal (thousands of entries for one long video).
     (jobs[fileId] as Map)
       ..['state'] = 'committed'
-      ..remove('plan');
+      ..remove('plan')
+      ..remove('abandoned');
   }
 
   /// Rebuilds this device's chain position from the server's log. Returns
@@ -535,7 +543,9 @@ class SyncEngine {
     final stem = dot > 0 ? name.substring(0, dot) : name;
     final ext = dot > 0 ? name.substring(dot) : '';
     bool taken(String c) =>
-        used.contains(c.toLowerCase()) || File('${dir.path}${Platform.pathSeparator}$c').existsSync();
+        used.contains(c.toLowerCase()) ||
+        File('${dir.path}${Platform.pathSeparator}$c').existsSync() ||
+        File('${dir.path}${Platform.pathSeparator}$c.part').existsSync();
     for (var n = 2; taken(candidate); n++) {
       candidate = '$stem ($n)$ext';
     }

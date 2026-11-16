@@ -42,7 +42,14 @@ class SecurityChannelService {
     }
     try {
       final binding = WidgetsBinding.instance;
-      binding.addPostFrameCallback((_) => _apply());
+      // After the first frame, wait a little longer: a screen that was
+      // already closing when the app went to the background finishes its
+      // exit animation (up to ~300 ms) over the cover app on wake.
+      binding.addPostFrameCallback((_) {
+        Future<void>.delayed(const Duration(milliseconds: 700), () {
+          if (!_vaultOpen) _apply();
+        });
+      });
       binding.scheduleFrame();
     } catch (_) {
       await _apply(); // no Flutter binding (plain unit tests)

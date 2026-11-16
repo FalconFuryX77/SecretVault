@@ -119,7 +119,8 @@ def _migrate(engine) -> None:
             kind = conn.execute(
                 text(
                     "SELECT data_type FROM information_schema.columns "
-                    "WHERE table_name = 'accounts' AND column_name = 'bytes_used'"
+                    "WHERE table_schema = current_schema() AND table_name = 'accounts' "
+                    "AND column_name = 'bytes_used'"
                 )
             ).scalar()
             if kind == "integer":

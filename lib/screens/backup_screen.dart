@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -81,11 +83,15 @@ class _BackupScreenState extends State<BackupScreen> {
 
   /// Shows the code and asks for its last group back. True once confirmed.
   Future<bool> _confirmRecoverySecret(String code) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _RecoveryCodeDialog(code: code),
-    );
+    // Copying 64 characters onto paper takes longer than the inactivity
+    // timeout, and writing produces no touches: hold that lock meanwhile.
+    final ok = await context.read<UnlockProvider>().holdingInactivityLock(
+          () => showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _RecoveryCodeDialog(code: code),
+          ),
+        );
     return ok == true;
   }
 
@@ -422,9 +428,10 @@ class _BackupScreenState extends State<BackupScreen> {
   );
 }
 
-/// Shows the recovery code once and asks for its last group back. Owns its
-/// text controller, so it lives exactly as long as the dialog (including its
-/// closing animation).
+/// Shows the recovery code, then hides it and asks for two of its groups,
+/// chosen at random, so confirming proves the code was written down.
+/// Owns its text controllers, so they live exactly as long as the dialog
+/// (including its closing animation).
 class _RecoveryCodeDialog extends StatefulWidget {
   final String code;
   const _RecoveryCodeDialog({required this.code});
@@ -434,88 +441,131 @@ class _RecoveryCodeDialog extends StatefulWidget {
 }
 
 class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
-  final TextEditingController _typed = TextEditingController();
+  late final List<String> _groups = widget.code.split(' ');
+  late final List<int> _asked = () {
+    final r = Random.secure();
+    final a = r.nextInt(_groups.length);
+    var b = r.nextInt(_groups.length - 1);
+    if (b >= a) b++;
+    return a < b ? [a, b] : [b, a];
+  }();
+  final List<TextEditingController> _typed = [TextEditingController(), TextEditingController()];
+  bool _checking = false;
 
   @override
   void dispose() {
-    _typed.dispose();
+    for (final c in _typed) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  bool get _matches => _typed.text.trim().toLowerCase() == widget.code.split(' ').last;
+  bool get _matches => [
+        for (var i = 0; i < 2; i++) _typed[i].text.trim().toLowerCase() == _groups[_asked[i]],
+      ].every((ok) => ok);
+
+  ButtonStyle get _primary => ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFFA78BFA),
+        foregroundColor: const Color(0xFF090D16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      );
+
+  Widget _field(int i) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: TextField(
+          key: Key('recovery-group-$i'),
+          controller: _typed[i],
+          autocorrect: false,
+          enableSuggestions: false,
+          enableIMEPersonalizedLearning: false,
+          onChanged: (_) => setState(() {}),
+          style: AppFonts.firaCode(color: Colors.white),
+          decoration: InputDecoration(
+            labelText: 'Group ${_asked[i] + 1} of ${_groups.length}',
+            labelStyle: AppFonts.outfit(color: Colors.white54),
+            filled: true,
+            fillColor: const Color(0xFF0D1117),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final showCode = !_checking;
     return AlertDialog(
       backgroundColor: const Color(0xFF161B22),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text('Write this down first', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+      title: Text(
+        showCode ? 'Write this down first' : 'Check what you wrote',
+        style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'This recovery code is the only way to get your backup onto a new phone, '
-              'or to cut off a phone that was taken. It is never stored on this phone. '
-              'Keep it on paper, away from the phone.',
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0D1117),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.4)),
-              ),
-              // Not selectable: the clipboard (and keyboard clipboard
-              // history) is the last place this code should end up.
-              child: Text(
-                widget.code,
-                key: const Key('recovery-code'),
-                style: AppFonts.firaCode(fontSize: 15, color: Colors.white, height: 1.7),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'To confirm you have it, type its last four characters:',
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('recovery-confirm'),
-              controller: _typed,
-              autocorrect: false,
-              enableSuggestions: false,
-              enableIMEPersonalizedLearning: false,
-              onChanged: (_) => setState(() {}),
-              style: AppFonts.firaCode(color: Colors.white),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: const Color(0xFF0D1117),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-              ),
-            ),
-          ],
+          children: showCode
+              ? [
+                  Text(
+                    'This recovery code is the only way to get your backup onto a new phone, '
+                    'or to cut off a phone that was taken. It is never stored on this phone. '
+                    'Write it on paper and keep it away from the phone.',
+                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D1117),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.4)),
+                    ),
+                    // Not selectable: the clipboard (and keyboard clipboard
+                    // history) is the last place this code should end up.
+                    child: Text(
+                      widget.code,
+                      key: const Key('recovery-code'),
+                      style: AppFonts.firaCode(fontSize: 15, color: Colors.white, height: 1.7),
+                    ),
+                  ),
+                ]
+              : [
+                  Text(
+                    'Type these two groups from your paper copy. The groups are counted from 1, left to right.',
+                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                  ),
+                  const SizedBox(height: 14),
+                  _field(0),
+                  _field(1),
+                ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text('Cancel', style: AppFonts.outfit(color: Colors.white54)),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFA78BFA),
-            foregroundColor: const Color(0xFF090D16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          onPressed: _matches ? () => Navigator.pop(context, true) : null,
-          child: Text('I wrote it down', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
-        ),
-      ],
+      actions: showCode
+          ? [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('Cancel', style: AppFonts.outfit(color: Colors.white54)),
+              ),
+              ElevatedButton(
+                key: const Key('recovery-written'),
+                style: _primary,
+                onPressed: () => setState(() => _checking = true),
+                child: Text('I wrote it down', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+              ),
+            ]
+          : [
+              TextButton(
+                onPressed: () => setState(() => _checking = false),
+                child: Text('Show the code again', style: AppFonts.outfit(color: Colors.white54)),
+              ),
+              ElevatedButton(
+                key: const Key('recovery-confirm'),
+                style: _primary,
+                onPressed: _matches ? () => Navigator.pop(context, true) : null,
+                child: Text('Confirm', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+              ),
+            ],
     );
   }
 }

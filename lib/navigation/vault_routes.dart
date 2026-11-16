@@ -44,8 +44,6 @@ class VaultRouteObserver extends NavigatorObserver {
     final nav = rootNavigatorKey.currentState;
     if (nav == null || index >= stack.length) return;
     for (final r in stack.sublist(index).reversed) {
-      // A route already popping (e.g. popUntil just ran) is no longer
-      // active; removing it still stops its exit animation.
       if (r.navigator != null) nav.removeRoute(r);
     }
   }

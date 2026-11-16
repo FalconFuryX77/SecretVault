@@ -224,6 +224,35 @@ class VaultSync {
 
       final entries = session.entries;
       var uploaded = 0, unchanged = 0, removed = 0, payload = 0, retries = 0;
+
+      // Items that were backed up before but are gone from the vault now.
+      // Done first: when the account is full, uploads fail, and a deletion
+      // should still get through.
+      final current = {for (final e in entries) e.item.id};
+      final j = await journal.load();
+      final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
+      for (final id in jobs.keys.toList()) {
+        if (current.contains(id)) continue;
+        final job = jobs[id] as Map;
+        // Committed: that version. Half-sent: the new version may have
+        // reached the server's log even though this phone never heard back,
+        // so delete it and the version it replaced (whichever is live).
+        final versions = job['state'] == 'committed'
+            ? [job['version'] as String]
+            : [
+                job['version'] as String?,
+                job['parent'] as String?,
+                ...((job['abandoned'] as List?) ?? const []).cast<String?>(),
+              ].whereType<String>().toSet().toList();
+        if (versions.isNotEmpty) {
+          await engine.deleteVersions(id, versions);
+          removed++;
+        }
+        final fresh = await journal.load();
+        ((fresh['jobs'] as Map?) ?? {}).remove(id);
+        await journal.save(fresh);
+      }
+
       for (var i = 0; i < entries.length; i++) {
         final entry = entries[i];
         final item = entry.item;
@@ -242,28 +271,6 @@ class VaultSync {
         uploaded++;
         payload += report.payloadBytes;
         retries += report.retries;
-      }
-
-      // Items that were backed up before but are gone from the vault now.
-      final current = {for (final e in entries) e.item.id};
-      final j = await journal.load();
-      final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
-      for (final id in jobs.keys.toList()) {
-        if (current.contains(id)) continue;
-        final job = jobs[id] as Map;
-        // Committed: that version. Half-sent: the new version may have
-        // reached the server's log even though this phone never heard back,
-        // so delete it and the version it replaced (whichever is live).
-        final versions = job['state'] == 'committed'
-            ? [job['version'] as String]
-            : [job['version'] as String?, job['parent'] as String?].whereType<String>().toList();
-        if (versions.isNotEmpty) {
-          await engine.deleteVersions(id, versions);
-          removed++;
-        }
-        final fresh = await journal.load();
-        ((fresh['jobs'] as Map?) ?? {}).remove(id);
-        await journal.save(fresh);
       }
 
       onProgress?.call(entries.length, entries.length, '');
