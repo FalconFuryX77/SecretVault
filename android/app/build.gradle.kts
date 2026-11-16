@@ -1,8 +1,28 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// The installed app's identity. A neutral name that matches the cover (a
+// video trimmer) and not the project, so the package doesn't lead to it.
+// An organisation can build with its own: -PappId=... (or the environment
+// variable ORG_GRADLE_PROJECT_appId).
+//
+// The old package, for an update that lets earlier installs move their
+// vault out (signed with the old development key; see docs/RELEASING.md):
+//   flutter build apk --release --split-per-abi -P appId=com.example.gesture_unlock -P legacySigning=true
+val appId = (project.findProperty("appId") as String?) ?: "com.videotrimmer.local"
+val legacySigning = (project.findProperty("legacySigning") as String?) == "true"
+
+// The permanent release key: android/key.properties (never committed; see
+// docs/RELEASING.md). Without it, release builds use the debug key.
+val keyProps = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -19,9 +39,19 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    signingConfigs {
+        if (keyProps.containsKey("storeFile")) {
+            create("release") {
+                storeFile = file(keyProps.getProperty("storeFile"))
+                storePassword = keyProps.getProperty("storePassword")
+                keyAlias = keyProps.getProperty("keyAlias")
+                keyPassword = keyProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.gesture_unlock"
+        applicationId = appId
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -32,13 +62,23 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (!legacySigning && keyProps.containsKey("storeFile")) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Backup previews: transcodes vault video and audio to small copies
+    // (PreviewMaker). Same Media3 version as the video player plugin's.
+    implementation("androidx.media3:media3-transformer:1.9.2")
+    implementation("androidx.media3:media3-effect:1.9.2")
+    implementation("androidx.media3:media3-muxer:1.9.2")
 }

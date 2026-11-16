@@ -17,7 +17,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import String, cast, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -89,9 +89,11 @@ LOG_HEADROOM_BYTES = 16 * 1024 * 1024
 STAGING_TTL_SECONDS = 24 * 3600
 
 
-def _clean_staging(folder: Path) -> None:
-    """Deletes partial uploads untouched for a day."""
-    cutoff = time.time() - STAGING_TTL_SECONDS
+def _clean_staging(folder: Path, remove_all: bool = False) -> None:
+    """Deletes partial uploads untouched for a day (or all of them)."""
+    if not folder.is_dir():
+        return
+    cutoff = float("inf") if remove_all else time.time() - STAGING_TTL_SECONDS
     for f in folder.iterdir():
         try:
             if f.stat().st_mtime < cutoff:
@@ -353,7 +355,12 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
             raise HTTPException(404, "unknown account")
         rows = db.scalars(select(Device).where(Device.account_id == account_id).order_by(Device.created_at)).all()
         return [
-            {"device_id": d.id, "created_at": d.created_at.isoformat(), "revoked": d.revoked_at is not None}
+            {
+                "device_id": d.id,
+                "created_at": d.created_at.isoformat(),
+                "revoked": d.revoked_at is not None,
+                "revoked_at": d.revoked_at.isoformat() if d.revoked_at else None,
+            }
             for d in rows
         ]
 
@@ -374,6 +381,61 @@ def create_app(settings: Settings | None = None, blobs: BlobStore | None = None)
         dev.revoked_at = utcnow()
         db.execute(delete(Token).where(Token.device_id == device_id))
         db.commit()
+        return Response(status_code=204)
+
+    # ── finding and closing accounts (recovery-key operations) ──
+
+    class Lookup(BaseModel):
+        public_key: str = Field(max_length=64)
+        ts: int
+        signature: str = Field(max_length=128)
+
+    @app.post("/v1/recovery/lookup")
+    def lookup_accounts(body: Lookup, db: DB):
+        """Which accounts list this recovery key. The request is signed with
+        the key itself (over a recent timestamp), so only someone holding the
+        recovery secret can ask; a new phone then needs only the server
+        address and the recovery code."""
+        if abs(int(time.time()) - body.ts) > 300:
+            raise HTTPException(401, "stale lookup")
+        try:
+            pub = b64d(body.public_key)
+            sig = b64d(body.signature)
+        except ValueError:
+            raise HTTPException(400, "invalid encoding")
+        pub_b64 = b64e(pub)
+        if not verify_signature(pub, sig, signed_message(f"lookup:{pub_b64}", "-", str(body.ts), b"")):
+            raise HTTPException(401, "bad signature")
+        rows = db.scalars(select(Account).where(cast(Account.recovery_keys, String).like(f"%{pub_b64}%"))).all()
+        return {"accounts": [a.id for a in rows if pub_b64 in a.recovery_keys]}
+
+    @app.delete("/v1/accounts/{account_id}", status_code=204)
+    async def delete_account(
+        account_id: str,
+        request: Request,
+        db: DB,
+        x_recovery_auth: Annotated[str | None, Header()] = None,
+    ):
+        """Deletes the account and everything stored in it. Recovery key only:
+        after a phone is seized, the owner starts a fresh account and closes
+        this one, which the seized phone's credentials belonged to."""
+        raw = await request.body()
+        acct = account_or_404(db, account_id)
+        require_recovery(db, acct, x_recovery_auth, "delete-account", raw)
+
+        def _delete() -> None:
+            for pid in db.scalars(select(Piece.id).where(Piece.account_id == account_id)).all():
+                blobs.delete(account_id, pid)
+            db.execute(delete(Piece).where(Piece.account_id == account_id))
+            db.execute(delete(LogRecord).where(LogRecord.account_id == account_id))
+            db.execute(delete(Token).where(Token.account_id == account_id))
+            db.execute(delete(Challenge).where(Challenge.account_id == account_id))
+            db.execute(delete(Device).where(Device.account_id == account_id))
+            db.delete(acct)
+            db.commit()
+            _clean_staging(staging_root / account_id, remove_all=True)
+
+        await run_in_threadpool(_delete)
         return Response(status_code=204)
 
     # ── escrow ──

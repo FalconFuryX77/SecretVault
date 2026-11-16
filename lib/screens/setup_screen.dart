@@ -3,11 +3,16 @@ import 'package:provider/provider.dart';
 import '../navigation/vault_routes.dart';
 import '../providers/unlock_provider.dart';
 import '../services/vault_service.dart';
+import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
-import 'normal_files_screen.dart';
+import '../vault/vault_container.dart';
+import 'move_in_screen.dart';
+import '../cover/trimmer_home_screen.dart';
 import 'vault_home_screen.dart';
 
-/// First-run setup: choose the PIN that encrypts the vault.
+/// First-run setup: choose the PIN that encrypts the vault, or restore a
+/// backed-up vault onto this phone (server address and recovery code; the
+/// files come straight into the new vault, never onto storage).
 ///
 /// The PIN is the key. It is never stored, so there is no reset. A decoy
 /// vault with its own PIN can be added later from Settings.
@@ -24,20 +29,50 @@ class _SetupScreenState extends State<SetupScreen> {
   final TextEditingController _pinController = TextEditingController();
   final TextEditingController _pinConfirmController = TextEditingController();
 
+  final TextEditingController _server = TextEditingController();
+  final TextEditingController _code = TextEditingController();
+
   String? _errorMessage;
   bool _busy = false;
   bool _showPin = false;
   double? _progress;
+  String _progressText = 'Preparing secure storage…';
+
+  /// Restoring from a backup instead of starting empty.
+  bool _restore = false;
+  bool _tor = false;
+
+  /// The vault created for a restore that didn't finish (no signal): trying
+  /// again carries on into it.
+  VaultSession? _restoreInto;
 
   @override
   void dispose() {
     _pinController.dispose();
     _pinConfirmController.dispose();
+    _server.dispose();
+    _code.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (_busy) return;
+    if (_restore) {
+      try {
+        VaultSync.normalizeServer(_server.text);
+      } on SyncSetupException catch (e) {
+        setState(() => _errorMessage = e.message);
+        return;
+      }
+      if (VaultSync.parseRecoverySecret(_code.text) == null) {
+        setState(() => _errorMessage = 'Enter the recovery code: 16 groups of 4 characters.');
+        return;
+      }
+      if (_restoreInto != null) {
+        _runRestore(_restoreInto!);
+        return;
+      }
+    }
     final pin = _pinController.text;
     if (pin.length < _minPinLen) {
       setState(() => _errorMessage = 'Use at least $_minPinLen characters. Longer is much stronger.');
@@ -71,16 +106,12 @@ class _SetupScreenState extends State<SetupScreen> {
 
       await unlock.onSetupComplete();
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const NormalFilesScreen()),
-        (_) => false,
-      );
-      rootNavigatorKey.currentState?.push(
-        MaterialPageRoute(
-          settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
-          builder: (_) => VaultHomeScreen(vaultType: session.type),
-        ),
-      );
+      if (_restore) {
+        _restoreInto = session;
+        await _runRestore(session);
+        return;
+      }
+      _open(session);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -90,6 +121,70 @@ class _SetupScreenState extends State<SetupScreen> {
         });
       }
     }
+  }
+
+  /// Brings the backed-up files into [session]. Can be repeated after a
+  /// failure; files already restored aren't fetched again.
+  Future<void> _runRestore(VaultSession session) async {
+    final vault = context.read<VaultService>();
+    final unlock = context.read<UnlockProvider>();
+    final sync = VaultSync();
+    final secret = VaultSync.parseRecoverySecret(_code.text)!;
+    setState(() {
+      _busy = true;
+      _errorMessage = null;
+      _progress = null;
+      _progressText = 'Finding your backup…';
+    });
+    void progress(int done, int total, String title) {
+      unlock.onUserActivity();
+      if (!mounted) return;
+      setState(() {
+        _progress = total == 0 ? 1 : done / total;
+        _progressText = done >= total ? 'Finishing…' : 'Restoring ${done + 1} of $total: $title';
+      });
+    }
+
+    try {
+      final RestoreSummary r = await vault.whileBusy(() => sync.status(session).isConnected
+          ? sync.restoreMissing(session, onProgress: progress)
+          : sync.recoverInto(session, server: _server.text, recoverySecret: secret, tor: _tor, onProgress: progress));
+      _code.clear();
+      if (!mounted) return;
+      if (r.failed.isNotEmpty) {
+        setState(() {
+          _busy = false;
+          _errorMessage = '${r.failed.length} files could not be restored. Try again, or open the vault and '
+              'restore them later from Backup.';
+        });
+        return;
+      }
+      _open(session);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = null;
+          _errorMessage = e is SyncSetupException ? e.message : 'The restore stopped: $e. Try again to carry on.';
+        });
+      }
+    }
+  }
+
+  void _open(VaultSession session) {
+    if (!mounted) return;
+    try {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const TrimmerHomeScreen()),
+        (_) => false,
+      );
+      rootNavigatorKey.currentState?.push(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
+          builder: (_) => const VaultHomeScreen(),
+        ),
+      );
+    } catch (_) {}
   }
 
   @override
@@ -122,21 +217,39 @@ class _SetupScreenState extends State<SetupScreen> {
           child: Column(
             children: [
               Text(
-                'Set Your Vault PIN',
+                _restore ? 'Restore From a Backup' : 'Set Your Vault PIN',
                 textAlign: TextAlign.center,
                 style: AppFonts.outfit(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
               ),
               const SizedBox(height: 8),
               Text(
-                'This PIN encrypts your files, so there is no reset if you forget it. '
-                'Use $_minPinLen or more characters. A passphrase is best.',
+                _restore
+                    ? 'Enter the backup server and your recovery code, then a PIN for the vault on this phone '
+                        '(it can differ from the old one).'
+                    : 'This PIN encrypts your files, so there is no reset if you forget it. '
+                        'Use $_minPinLen or more characters. A passphrase is best.',
                 textAlign: TextAlign.center,
                 style: AppFonts.outfit(fontSize: 14, color: Colors.white60),
               ),
               const SizedBox(height: 20),
+              if (_restore) ...[
+                _plainField(_server, 'Server address (https://…)', 'restore-server', TextInputType.url),
+                const SizedBox(height: 12),
+                _plainField(_code, 'Recovery code', 'restore-code', TextInputType.visiblePassword, lines: 2),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _tor,
+                  onChanged: _busy ? null : (v) => setState(() => _tor = v),
+                  activeThumbColor: const Color(0xFFA78BFA),
+                  title: Text('Connect through Tor (Orbot)', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+                ),
+                const SizedBox(height: 4),
+              ],
+              if (_restoreInto == null) ...[
               _pinField(_pinController, '$_minPinLen+ digits or a passphrase', TextInputAction.next),
               const SizedBox(height: 12),
               _pinField(_pinConfirmController, 'Confirm PIN', TextInputAction.done, onSubmitted: (_) => _submit()),
+              ],
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
@@ -157,7 +270,10 @@ class _SetupScreenState extends State<SetupScreen> {
                 LinearProgressIndicator(value: _progress, color: const Color(0xFFA78BFA)),
                 const SizedBox(height: 8),
                 Text(
-                  'Preparing secure storage…',
+                  _progressText,
+                  key: const Key('setup-progress'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: AppFonts.outfit(color: Colors.white54, fontSize: 12),
                 ),
               ],
@@ -197,12 +313,39 @@ class _SetupScreenState extends State<SetupScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   child: Text(
-                    'Create Vault',
+                    _restoreInto != null ? 'Try Again' : (_restore ? 'Restore Vault' : 'Create Vault'),
+                    key: const Key('setup-submit'),
                     style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
               const SizedBox(height: 12),
+              if (_restoreInto != null)
+                TextButton(
+                  onPressed: _busy ? null : () => _open(_restoreInto!),
+                  child: Text('Open the vault and restore later', style: AppFonts.outfit(color: Colors.white54, fontSize: 13)),
+                )
+              else
+                TextButton(
+                  key: const Key('setup-restore-toggle'),
+                  onPressed: _busy ? null : () => setState(() {
+                    _restore = !_restore;
+                    _errorMessage = null;
+                  }),
+                  child: Text(
+                    _restore ? 'Start an empty vault instead' : 'Restore from a backup instead',
+                    style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontSize: 13),
+                  ),
+                ),
+              if (_restoreInto == null && !_restore)
+                TextButton(
+                  key: const Key('setup-move-in'),
+                  onPressed: _busy
+                      ? null
+                      : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoveInScreen())),
+                  child: Text('Move a vault here from another phone or app',
+                      style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontSize: 13)),
+                ),
               Text(
                 'You can add a decoy vault with its own PIN later, in Settings.',
                 textAlign: TextAlign.center,
@@ -211,6 +354,28 @@ class _SetupScreenState extends State<SetupScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _plainField(TextEditingController c, String hint, String key, TextInputType type, {int lines = 1}) {
+    return TextField(
+      key: Key(key),
+      controller: c,
+      enabled: !_busy,
+      keyboardType: type,
+      autocorrect: false,
+      enableSuggestions: false,
+      enableIMEPersonalizedLearning: false,
+      minLines: lines,
+      maxLines: lines,
+      style: AppFonts.firaCode(fontSize: 14, color: Colors.white),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
+        filled: true,
+        fillColor: const Color(0xFF161B22),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
       ),
     );
   }

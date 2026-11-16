@@ -137,6 +137,29 @@ before upload. Rough targets, to be tuned by measurement:
 The preview is evidence that *arrives*. The original keeps full quality and
 metadata for verification, and follows later.
 
+**As built** ("Small previews first", on by default; Settings → Backup):
+
+- Only for photos of 1 MB or more (up to 64 MB), videos of 4 MB or more and
+  recordings of 2 MB or more that have never reached the backup. An edit
+  or a rename of something already backed up gets no preview.
+- Photo: decoded in the isolated renderer, at most 1600 px, JPEG quality 75.
+  Video: H.264 at 600 kbit/s with AAC at 64 kbit/s, scaled down (never up)
+  to a 480 px short side. Recording: AAC at 32 kbit/s. Video and audio go
+  through Media3 Transformer, reading the item from the vault's loopback
+  stream; its encoded samples go into a staging file sealed to a key pair
+  that lives only in memory for that one preview, and the MP4 is streamed
+  out of it. No plaintext is written. A preview not under 70% of the
+  original's size isn't sent.
+- A preview is a file of its own in the backup (`<item id>~p`, meta
+  `role: preview`, `previewOf`), sent before any original. Deleting the
+  item deletes both.
+- "Full size only on Wi-Fi" (off by default) holds back the originals of
+  those items while the network is metered; they go on the next backup on
+  Wi-Fi.
+- Restore brings a preview back (titled "… (preview)") only when its
+  original isn't in the backup; once the original arrives, a restore brings
+  that too.
+
 ## 6. The change log
 
 The server keeps an append-only log per account. Each record is sealed under
@@ -305,10 +328,19 @@ This mirrors the container's "4 records, can't tell how many are used":
 - **Conflicts:** photos, video and audio never change after capture, so only
   notes can conflict. Two versions with the same parent → keep both and show
   a "conflict copy". Delete vs. edit → the edit wins (never lose data silently).
-- **Pruning:** a device with SRK computes the live piece set from the log and
-  checkpoints, lists the server's pieces, and deletes unreferenced ones older
-  than the retention period. Only clients can do this; the server can't see
-  references.
+- **Pruning** ("Free up server space" in the app): a device with SRK
+  verifies the whole log, keeps every current version and every version
+  replaced or deleted less than the retention period ago (7, 30, 90 or 365
+  days; 30 by default), reads all their manifests, then deletes every piece
+  none of them references, and only if the server dated it before the
+  retention cut-off too, so another phone's upload still under way keeps its
+  pieces. If the log fails verification or a kept manifest can't be read,
+  nothing is deleted. Only clients can do this; the server can't see
+  references. The log itself is never pruned, so history still lists removed
+  versions (as no longer on the server).
+- **Version history** (in the app): every file the log has seen, with each
+  version current, replaced or deleted; any version still on the server can
+  be restored as a copy next to the current file.
 - **Append-only mode** (server setting, recommended for newsrooms): device
   tokens can upload but never delete. Pruning needs a recovery-key signature.
   A seized phone can't erase what has already reached the server.
@@ -352,17 +384,37 @@ re-import.
 
 No number goes in the README or a résumé until the harness has produced it.
 
+### Measured (2026-11-16)
+
+From `packages/sync_core/test/e2e_test.dart`: the real server (Python,
+SQLite, local disk) and the Dart client on one PC, through the flaky TCP
+proxy in `server/harness/`. Loopback, so these show the protocol's
+overhead and resilience, not radio speeds.
+
+| Scenario | Payload | On the wire | Notes |
+|---|---|---|---|
+| Link that cuts 30% of connections mid-stream | 3 MiB video | 1.05× | 10/10 pieces, 2 retries, restored byte for byte from the recovery code alone |
+| "Pockets": up 2 s, down 3 s, 512 kbit/s | 1 MiB | 1.36× | 81 retries, 66 s; restored byte for byte |
+| Same 2 MiB file again under another name | 2 MiB | 2.5 KB | 0/8 pieces sent (deduplication) |
+| 1 MB of note text | 1 MB | 4.6 KB | compressed before sealing |
+| A 7-byte file | 7 B | 1.9 KB | fixed cost: manifest plus a log record padded to 1 KiB |
+| Pruning a month later | — | — | 2 old versions dropped, their unshared pieces deleted, the current version still restores |
+
+Restore integrity across every run: 100% (every file's SHA-256 and
+end-to-end MAC matched). Not measured yet: time to first safe copy over a
+real phone network, and the previews' effect on it.
+
 ## 15. Milestones
 
 | # | Deliverable |
 |---|---|
-| M0 | Commit the container work; test it on a real phone (keystore, decoy). **Done: core and UI flow pass on a Galaxy M34 (Android 16). Gesture and fingerprint unlock were removed; unlock is PIN-only** |
-| M1 | Server skeleton (Compose: FastAPI, Postgres, MinIO), piece + log API, Toxiproxy harness, CLI client that backs up a folder. **Server + API + 21 tests done; Compose file written but not yet run; harness and CLI client pending** |
-| M2 | `sync_core`: keyed chunking, piece encoding, journal, scheduler logic; integrated into the app in mode A. **Engine done and tested end to end against the server through a failure-injecting proxy; manual backup is in the app (Settings → Backup, reading straight from the vault); the Android background scheduler is pending** |
-| M3 | Restore, recovery phrase, pairing, revocation, SRK rotation |
-| M4 | Previews (Media3 Transformer for video, image downscale, audio) |
-| M5 | Locked outbox (mode B) and offload |
-| M6 | Version history UI, pruning, append-only mode; measurements published |
+| M0 | Commit the container work; test it on a real phone (keystore, decoy). **Done** |
+| M1 | Server (Compose: FastAPI, Postgres, S3), piece + log API, failure harness, CLI client. **Done: 31 server tests; the Compose stack runs with Postgres and SeaweedFS (S3), and behind Caddy with HTTPS; a flaky-link proxy and a CLI client exist** |
+| M2 | `sync_core` and automatic backup in the app (mode A). **Done: on change, on unlock, when a network appears, with retries; over Tor through Orbot** |
+| M3 | Restore, recovery code, revocation, key rotation. **Done in the app (restore on a new phone, restore missing files "as of" a time, devices and revocation, "start over" on a new account). Pairing by QR code is not built** |
+| M4 | Previews. **Done (§5)** |
+| M5 | Locked outbox (mode B) and offload. **Not built: design under discussion (§9)** |
+| M6 | Version history UI, pruning, append-only mode; measurements published. **Done (§12, §14)** |
 
 ## 16. Open questions
 

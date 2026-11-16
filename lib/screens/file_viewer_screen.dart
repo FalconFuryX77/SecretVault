@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 
 import '../models/vault_item.dart';
 import '../providers/vault_provider.dart';
-import '../services/device_file_service.dart';
+import '../util/format.dart';
 import '../theme/app_fonts.dart';
 import '../vault/crypto_primitives.dart';
 import '../viewers/document_view.dart';
 import '../viewers/file_kind.dart';
+import '../viewers/image_view.dart';
+import '../viewers/office_view.dart';
 import '../viewers/media_player_view.dart';
 import '../viewers/pdf_view.dart';
 import '../viewers/text_file_view.dart';
@@ -78,7 +80,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       if (mounted) {
         setState(() {
           _errorMessage =
-              'This file is ${DeviceFileService.formatBytes(e.bytes)}, too large to open '
+              'This file is ${formatBytes(e.bytes)}, too large to open '
               'in memory on this phone.';
           _isLoading = false;
         });
@@ -284,6 +286,8 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         return PdfView(bytes: bytes);
       case ViewerKind.word:
         return DocumentView(bytes: bytes);
+      case ViewerKind.office:
+        return OfficeView(title: _currentItem.title, bytes: bytes);
       case ViewerKind.text:
       case ViewerKind.other:
         // Unknown types that turn out to be text open as text too.
@@ -303,31 +307,13 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   }
 
   // ─── Image Viewer (Pinch-to-zoom & Rotate) ──────────────────────
-  Widget _buildImageViewer(Uint8List bytes) {
-    return Center(
-      child: InteractiveViewer(
-        panEnabled: true,
-        minScale: 0.5,
-        maxScale: 4.0,
-        child: Image.memory(
-          bytes,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) => Center(
-            child: Text(
-              'Failed to render image format.',
-              style: AppFonts.outfit(color: Colors.white54),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildImageViewer(Uint8List bytes) => VaultImageView(bytes: bytes);
 
   Widget _noPreview(Uint8List bytes) {
     final ext = extensionOf(_currentItem.title);
     final why = switch (ext) {
-      'doc' => "Older Word (.doc) files can't be shown yet. Saved as .docx, they can.",
-      'xls' || 'xlsx' || 'ppt' || 'pptx' => "Spreadsheets and slides can't be shown yet.",
+      'xls' || 'ppt' => "Older Excel and PowerPoint files (.xls, .ppt) can't be shown yet. "
+          'Saved as .xlsx or .pptx, they can.',
       _ => 'There is no viewer for this kind of file yet.',
     };
     return Center(
@@ -345,7 +331,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              '${DeviceFileService.formatBytes(bytes.length)} · stored encrypted',
+              '${formatBytes(bytes.length)} · stored encrypted',
               style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
             ),
             const SizedBox(height: 16),

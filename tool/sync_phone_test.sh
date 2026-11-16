@@ -21,7 +21,7 @@ WORK="$(mktemp -d)"
 LOG="$WORK/phone.log"
 
 source "$(dirname "$0")/phone_guard.sh"
-phone_guard "$ADB" "$DEVICE" "com.example.gesture_unlock" || exit 1
+phone_guard "$ADB" "$DEVICE" "${PKG:-com.videotrimmer.local}" || exit 1
 
 if [ "$PHONE_URL" = "http://127.0.0.1:8080" ]; then
   "$ADB" -s "$DEVICE" reverse tcp:8080 tcp:8080 >/dev/null

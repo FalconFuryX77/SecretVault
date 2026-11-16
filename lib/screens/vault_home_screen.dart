@@ -3,16 +3,18 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../navigation/vault_routes.dart';
+import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
 import 'export_dialog.dart';
+import 'camera_screen.dart';
 import 'recorder_screen.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
-import '../services/device_file_service.dart';
+import '../util/format.dart';
 import 'file_viewer_screen.dart';
 import 'note_editor_screen.dart';
 import 'settings_screen.dart';
@@ -20,9 +22,7 @@ import 'settings_screen.dart';
 /// SecretVault Unlocked File Safe Dashboard Screen.
 /// Provides a native Android file safe experience (Documents, Media, Audio, Archives, Notes).
 class VaultHomeScreen extends StatefulWidget {
-  final VaultType vaultType;
-
-  const VaultHomeScreen({super.key, required this.vaultType});
+  const VaultHomeScreen({super.key});
 
   @override
   State<VaultHomeScreen> createState() => _VaultHomeScreenState();
@@ -37,8 +37,33 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<VaultProvider>().loadVault(widget.vaultType);
+      context.read<VaultProvider>().loadVault();
+      _warnIfRolledBack();
     });
+  }
+
+  /// The container is older than the last version this phone saved: an
+  /// earlier copy of it was put back (see RollbackGuard).
+  void _warnIfRolledBack() {
+    final session = context.read<VaultService>().session;
+    if (session == null || !session.rolledBack) return;
+    session.rolledBack = false;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: Text('This vault was rolled back',
+            style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'The vault file is older than the last version this phone saved. Someone may have put back '
+          'an earlier copy of it, which would undo recent changes (new files, deletions, a PIN change). '
+          'Check that nothing is missing, and that files you deleted are gone.',
+          key: const Key('rollback-warning'),
+          style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+      ),
+    );
   }
 
   @override
@@ -137,6 +162,22 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     FileType.any,
                     null,
                     VaultCategory.document,
+                  );
+                },
+              ),
+              _buildModalTile(
+                icon: Icons.photo_camera_rounded,
+                color: const Color(0xFF38BDF8),
+                title: 'Camera',
+                subtitle: 'Photos and video straight into the vault, never the gallery',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      settings: const RouteSettings(name: '${vaultRoutePrefix}camera'),
+                      builder: (_) => const CameraScreen(),
+                    ),
                   );
                 },
               ),
@@ -292,7 +333,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       0,
       (sum, item) => sum + item.fileSizeBytes,
     );
-    final sizeFormatted = DeviceFileService.formatBytes(totalBytes);
+    final sizeFormatted = formatBytes(totalBytes);
     final count = vault.allItems.length;
 
     return Scaffold(
@@ -702,7 +743,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 Text(
                   item.content != null
                       ? '${item.content!.length} chars'
-                      : DeviceFileService.formatBytes(item.fileSizeBytes),
+                      : formatBytes(item.fileSizeBytes),
                   style: AppFonts.outfit(
                     fontSize: 11,
                     color: Colors.white54,
@@ -748,7 +789,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         subtitle: Text(
           item.content != null
               ? (item.content!.split('\n').first)
-              : '${DeviceFileService.formatBytes(item.fileSizeBytes)} • Encrypted',
+              : '${formatBytes(item.fileSizeBytes)} • Encrypted',
           style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

@@ -10,4 +10,6 @@ RUN useradd --system --uid 10001 vaultsync && mkdir -p /data && chown vaultsync 
 USER vaultsync
 
 EXPOSE 8080
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+# No access log: which addresses connect, and when, is exactly what the
+# people using this need kept off a server's disk.
+CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--no-access-log"]

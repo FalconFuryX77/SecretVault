@@ -1,5 +1,5 @@
 /// Which in-vault viewer opens a file.
-enum ViewerKind { image, video, audio, pdf, word, text, other }
+enum ViewerKind { image, video, audio, pdf, word, office, text, other }
 
 const Map<String, String> _mimeByExt = {
   // images
@@ -16,6 +16,15 @@ const Map<String, String> _mimeByExt = {
   'pdf': 'application/pdf',
   'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'doc': 'application/msword',
+  'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'ppsx': 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
+  'odt': 'application/vnd.oasis.opendocument.text',
+  'ods': 'application/vnd.oasis.opendocument.spreadsheet',
+  'odp': 'application/vnd.oasis.opendocument.presentation',
+  'xls': 'application/vnd.ms-excel',
+  'ppt': 'application/vnd.ms-powerpoint',
   // text
   'txt': 'text/plain', 'md': 'text/markdown', 'csv': 'text/csv', 'json': 'application/json',
   'log': 'text/plain', 'xml': 'text/xml', 'yaml': 'text/yaml', 'yml': 'text/yaml',
@@ -25,6 +34,9 @@ const Map<String, String> _mimeByExt = {
 const Set<String> _textExt = {
   'txt', 'md', 'csv', 'json', 'log', 'xml', 'yaml', 'yml', 'ini', 'html', 'htm', 'tsv', 'srt', 'vtt',
 };
+
+/// Read by the in-vault office readers (office_text.dart).
+const Set<String> _officeExt = {'doc', 'odt', 'xlsx', 'xlsm', 'ods', 'pptx', 'ppsx', 'odp'};
 
 String extensionOf(String name) {
   final dot = name.lastIndexOf('.');
@@ -45,6 +57,7 @@ ViewerKind viewerKindFor(String name, String mime) {
   if (m.startsWith('audio/')) return ViewerKind.audio;
   if (m == 'application/pdf') return ViewerKind.pdf;
   if (ext == 'docx' || m == _mimeByExt['docx']) return ViewerKind.word;
+  if (_officeExt.contains(ext)) return ViewerKind.office;
   if (_textExt.contains(ext) || m.startsWith('text/') || m == 'application/json') return ViewerKind.text;
   return ViewerKind.other;
 }

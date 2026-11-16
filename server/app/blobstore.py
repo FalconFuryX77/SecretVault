@@ -55,7 +55,7 @@ class LocalBlobStore:
 
 
 class S3BlobStore:
-    """S3-compatible storage (MinIO in docker-compose)."""
+    """S3-compatible storage (SeaweedFS in docker-compose; any S3 works)."""
 
     def __init__(self, endpoint: str, bucket: str, access_key: str | None, secret_key: str | None):
         import boto3  # imported lazily: only needed when S3 is configured
@@ -67,10 +67,20 @@ class S3BlobStore:
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
         )
-        try:
-            self.s3.head_bucket(Bucket=bucket)
-        except Exception:
-            self.s3.create_bucket(Bucket=bucket)
+        # The store may still be starting (Compose starts both at once).
+        import time
+
+        for attempt in range(15):
+            try:
+                try:
+                    self.s3.head_bucket(Bucket=bucket)
+                except self.s3.exceptions.ClientError:
+                    self.s3.create_bucket(Bucket=bucket)
+                return
+            except Exception:
+                if attempt == 14:
+                    raise
+                time.sleep(2)
 
     def put(self, account: str, piece_id: str, data: bytes) -> None:
         self.s3.put_object(Bucket=self.bucket, Key=f"{account}/{piece_id}", Body=data)

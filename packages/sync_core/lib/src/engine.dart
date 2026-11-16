@@ -25,6 +25,11 @@ class Manifest {
   final String mac;
   final List<(String, int)> pieces;
 
+  /// For very large files: the piece list is stored in separate manifest
+  /// pieces (id, number of pieces in it) instead of [pieces], so no single
+  /// manifest goes over the server's piece size limit.
+  final List<(String, int)> parts;
+
   Manifest({
     required this.file,
     required this.version,
@@ -33,6 +38,7 @@ class Manifest {
     required this.size,
     required this.mac,
     required this.pieces,
+    this.parts = const [],
   });
 
   Uint8List encode() => Uint8List.fromList(utf8.encode(jsonEncode({
@@ -42,8 +48,12 @@ class Manifest {
         'meta': meta,
         'size': size,
         'mac': mac,
-        'pieces': [for (final (id, len) in pieces) [id, len]],
+        if (parts.isEmpty) 'pieces': [for (final (id, len) in pieces) [id, len]],
+        if (parts.isNotEmpty) 'parts': [for (final (id, n) in parts) [id, n]],
       })));
+
+  static List<(String, int)> _pairs(Object? list) =>
+      [for (final p in (list as List?) ?? const []) ((p as List)[0] as String, p[1] as int)];
 
   static Manifest decode(Uint8List b) {
     final j = jsonDecode(utf8.decode(b)) as Map<String, dynamic>;
@@ -54,9 +64,59 @@ class Manifest {
       meta: Map<String, dynamic>.from(j['meta'] as Map),
       size: j['size'] as int,
       mac: j['mac'] as String,
-      pieces: [for (final p in j['pieces'] as List) ((p as List)[0] as String, p[1] as int)],
+      pieces: _pairs(j['pieces']),
+      parts: _pairs(j['parts']),
     );
   }
+
+  Manifest withPieces(List<(String, int)> all) =>
+      Manifest(file: file, version: version, parent: parent, meta: meta, size: size, mac: mac, pieces: all);
+}
+
+/// A live file in the backup, as the log says.
+class RestoreEntry {
+  final String fileId;
+  final String version;
+  final String manifestId;
+
+  /// The device that wrote the version, and when it says it did.
+  final String device;
+  final DateTime time;
+  const RestoreEntry(this.fileId, this.version, this.manifestId, this.device, this.time);
+}
+
+/// One version of a file, as the log tells it.
+class BackupVersion {
+  final String fileId;
+  final String version;
+  final String manifestId;
+
+  /// The device that wrote it, and when it says it did.
+  final String device;
+  final DateTime time;
+
+  /// When it stopped being the file's current version (a newer one was
+  /// written, or it was deleted). Null while it's current.
+  DateTime? retired;
+
+  /// Retired by a delete rather than by a newer version.
+  bool deleted = false;
+
+  BackupVersion(this.fileId, this.version, this.manifestId, this.device, this.time);
+}
+
+/// What [SyncEngine.prune] did.
+class PruneReport {
+  /// Versions retired before the cut-off: their pieces could go, unless a
+  /// version still kept shares them.
+  final int versionsDropped;
+  final int piecesDeleted;
+  final int bytesFreed;
+  final int piecesKept;
+  const PruneReport(this.versionsDropped, this.piecesDeleted, this.bytesFreed, this.piecesKept);
+
+  @override
+  String toString() => 'PruneReport(dropped $versionsDropped versions, deleted $piecesDeleted pieces / $bytesFreed B, kept $piecesKept)';
 }
 
 /// Where the engine keeps its progress. In the app this lives inside the
@@ -376,13 +436,7 @@ class SyncEngine {
       mac: job['mac'] as String,
       pieces: [for (final p in plan) (p[2] as String, p[1] as int)],
     );
-    final mBytes = manifest.encode();
-    final manifestId = await codec.idFor(mBytes);
-    await _withRetry(() async {
-      if ((await api.missing([manifestId])).isNotEmpty) {
-        await _sendPiece(manifestId, await codec.seal(manifestId, mBytes, compress: true, manifest: true));
-      }
-    }, () => attempts++);
+    final manifestId = await _putManifest(manifest, () => attempts++);
 
     // Log record: only now does the file count as backed up.
     await _withRetry(() => _commit(fileId, job!, manifestId), () => attempts++);
@@ -390,6 +444,66 @@ class SyncEngine {
     // Three phases (pieces, manifest, log) each count one attempt when nothing fails.
     return BackupReport(fileId, job['size'] as int, api.bytesSent - sentBefore, plan.length, uploaded, attempts - 3, clock.elapsed);
   }
+
+  /// Pieces per manifest part: about 80 bytes each in JSON, so a part stays
+  /// well under the server's 2 MiB piece limit (files over ~2 GB).
+  int piecesPerPart = 8000;
+
+  Future<String> _putManifest(Manifest m, void Function() onAttempt) async {
+    Future<String> put(Uint8List bytes) async {
+      final id = await codec.idFor(bytes);
+      await _withRetry(() async {
+        if ((await api.missing([id])).isNotEmpty) {
+          await _sendPiece(id, await codec.seal(id, bytes, compress: true, manifest: true));
+        }
+      }, onAttempt);
+      return id;
+    }
+
+    if (m.pieces.length <= piecesPerPart) return put(m.encode());
+    final parts = <(String, int)>[];
+    for (var i = 0; i < m.pieces.length; i += piecesPerPart) {
+      final slice = m.pieces.sublist(i, min(m.pieces.length, i + piecesPerPart));
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode([for (final (id, len) in slice) [id, len]])));
+      parts.add((await put(bytes), slice.length));
+    }
+    return put(Manifest(
+      file: m.file,
+      version: m.version,
+      parent: m.parent,
+      meta: m.meta,
+      size: m.size,
+      mac: m.mac,
+      pieces: const [],
+      parts: parts,
+    ).encode());
+  }
+
+  /// Fetches and opens a manifest, with its parts if it has them.
+  Future<Manifest> manifestOf(String manifestId) async {
+    final m = Manifest.decode(await codec.open(manifestId, await _withRetry(() => api.getPiece(manifestId), () {}), manifest: true));
+    if (m.parts.isEmpty) return m;
+    final all = <(String, int)>[];
+    for (final (id, n) in m.parts) {
+      final list = jsonDecode(utf8.decode(await codec.open(id, await _withRetry(() => api.getPiece(id), () {}), manifest: true)));
+      final slice = Manifest._pairs(list);
+      if (slice.length != n) throw IntegrityException('manifest part $id has the wrong number of pieces');
+      all.addAll(slice);
+    }
+    return m.withPieces(all);
+  }
+
+  /// Remembers [state] as the latest known position of [device]'s chain.
+  static void _noteHead(Map<String, dynamic> j, String device, ChainState state) {
+    final heads = ((j['heads'] as Map?) ?? {}).cast<String, dynamic>();
+    heads[device] = state.toJson();
+    j['heads'] = heads;
+  }
+
+  static Map<String, ChainState> _knownHeads(Map<String, dynamic> j) => {
+        for (final e in ((j['heads'] as Map?) ?? const {}).entries)
+          e.key as String: ChainState.fromJson(Map<String, dynamic>.from(e.value as Map)),
+      };
 
   Future<void> _commit(String fileId, Map<String, dynamic> job, String manifestId) async {
     final j = await journal.load();
@@ -414,6 +528,7 @@ class SyncEngine {
       return;
     }
     j['chain'] = chain.toJson();
+    _noteHead(j, _device, chain);
     _markCommitted(j, fileId);
     await journal.save(j);
   }
@@ -440,6 +555,7 @@ class SyncEngine {
       state = ChainState(counter: r.counter, lastHash: hex(await sha256(r.record)));
     }
     j['chain'] = state.toJson();
+    _noteHead(j, _device, state);
     await journal.save(j);
     return found;
   }
@@ -469,10 +585,161 @@ class SyncEngine {
           continue;
         }
         j['chain'] = chain.toJson();
+        _noteHead(j, _device, chain);
         await journal.save(j);
         return;
       }
     }, () {});
+  }
+
+  /// The files that are live in the backup: the log replayed in the
+  /// server's order, every chain verified (and checked against the chain
+  /// positions this client saw before).
+  ///
+  /// [asOf] ignores everything written after that time (as the writing
+  /// device's clock says), to undo later changes. [excludeDevices] ignores
+  /// everything those devices wrote, e.g. a phone that was taken.
+  Future<List<RestoreEntry>> liveFiles({DateTime? asOf, Set<String> excludeDevices = const {}}) async {
+    final bodies = await _verifiedLog();
+    final live = <String, RestoreEntry>{};
+    for (final b in bodies) {
+      if (excludeDevices.contains(b.device)) continue;
+      if (asOf != null && b.time.isAfter(asOf)) continue;
+      for (final op in b.ops) {
+        if (op.type == 'put') {
+          live[op.file] = RestoreEntry(op.file, op.version, op.manifestId!, b.device, b.time);
+        } else if (op.type == 'del' && live[op.file]?.version == op.version) {
+          live.remove(op.file);
+        }
+      }
+    }
+    return live.values.toList();
+  }
+
+  /// The whole log, every chain verified and checked against the chain
+  /// positions this client saw before (which it then remembers).
+  Future<List<LogBody>> _verifiedLog() async {
+    final records = await _withRetry(() => api.readLog(), () {});
+    final j = await journal.load();
+    final heads = <String, ChainState>{};
+    final bodies = await verifyLog(sealer, records, knownHeads: _knownHeads(j), headsOut: heads);
+    j['heads'] = {for (final e in heads.entries) e.key: e.value.toJson()};
+    await journal.save(j);
+    return bodies;
+  }
+
+  /// Every file the log has seen, each with its versions oldest first:
+  /// current, replaced by a newer one, or deleted (see [BackupVersion]).
+  /// Versions that [prune] removed are still listed (the log keeps them);
+  /// their manifests are gone from the server.
+  Future<Map<String, List<BackupVersion>>> history() async {
+    final out = <String, List<BackupVersion>>{};
+    final current = <String, BackupVersion>{};
+    for (final b in await _verifiedLog()) {
+      for (final op in b.ops) {
+        if (op.type == 'put') {
+          final v = BackupVersion(op.file, op.version, op.manifestId!, b.device, b.time);
+          current[op.file]?.retired ??= b.time;
+          current[op.file] = v;
+          (out[op.file] ??= []).add(v);
+        } else if (op.type == 'del' && current[op.file]?.version == op.version) {
+          final v = current.remove(op.file)!;
+          v.retired = b.time;
+          v.deleted = true;
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Frees server space: deletes every piece no kept version needs. A
+  /// version is kept while it's current, and for [retention] after it was
+  /// replaced or deleted; older ones go, except for pieces they share with
+  /// a kept version. Pieces the log doesn't mention at all (an upload that
+  /// never finished) go too, once they're older than [retention].
+  ///
+  /// Nothing younger than [retention] (by the server's clock) is ever
+  /// deleted, so another phone's upload in progress keeps its pieces. The
+  /// log is verified first and every kept manifest read: if anything can't
+  /// be, nothing is deleted.
+  ///
+  /// Append-only accounts need [recovery] (the recovery key) to delete.
+  Future<PruneReport> prune({
+    required Duration retention,
+    SimpleKeyPair? recovery,
+    int keyIndex = 0,
+    DateTime? now,
+  }) async {
+    final cutoff = (now ?? DateTime.now()).toUtc().subtract(retention);
+    final keep = <String>{};
+    var dropped = 0;
+    for (final versions in (await history()).values) {
+      for (final v in versions) {
+        final retired = v.retired;
+        if (retired != null && retired.isBefore(cutoff)) {
+          dropped++;
+          continue;
+        }
+        keep.add(v.manifestId);
+        final top = Manifest.decode(
+          await codec.open(v.manifestId, await _withRetry(() => api.getPiece(v.manifestId), () {}), manifest: true),
+        );
+        keep.addAll(top.parts.map((p) => p.$1));
+        final m = top.parts.isEmpty ? top : await manifestOf(v.manifestId);
+        keep.addAll(m.pieces.map((p) => p.$1));
+      }
+    }
+    final doomed = <String>[];
+    var bytes = 0, kept = 0;
+    var after = '';
+    while (true) {
+      final page = await _withRetry(() => api.listPieces(after: after), () {});
+      for (final p in page.pieces) {
+        if (keep.contains(p.id) || !p.created.isBefore(cutoff)) {
+          kept++;
+        } else {
+          doomed.add(p.id);
+          bytes += p.size;
+        }
+      }
+      final next = page.next;
+      if (next == null) break;
+      after = next;
+    }
+    var deleted = 0;
+    for (var i = 0; i < doomed.length; i += 500) {
+      final batch = doomed.sublist(i, min(doomed.length, i + 500));
+      deleted += await _withRetry(() => api.deletePieces(batch, recovery: recovery, keyIndex: keyIndex), () {});
+    }
+    return PruneReport(dropped, deleted, bytes, kept);
+  }
+
+  /// A file's content, piece by piece, each verified (AEAD and name), and
+  /// the whole-file MAC checked *before* the last piece is handed out, so a
+  /// consumer that stops at the file's size never accepts a bad file.
+  Stream<Uint8List> contentOf(Manifest m) async* {
+    final macSink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
+    var total = 0;
+    for (var i = 0; i < m.pieces.length; i++) {
+      final (id, len) = m.pieces[i];
+      final plain = await codec.open(id, await _withRetry(() => api.getPiece(id), () {}));
+      if (plain.length != len) throw IntegrityException('piece $id has wrong length');
+      macSink.add(plain);
+      total += plain.length;
+      if (i == m.pieces.length - 1) {
+        macSink.close();
+        if (total != m.size || hex((await macSink.mac()).bytes) != m.mac) {
+          throw IntegrityException('file ${m.file} failed its end-to-end check');
+        }
+      }
+      yield plain;
+    }
+    if (m.pieces.isEmpty) {
+      macSink.close();
+      if (m.size != 0 || hex((await macSink.mac()).bytes) != m.mac) {
+        throw IntegrityException('file ${m.file} failed its end-to-end check');
+      }
+    }
   }
 
   /// Restores the latest version of every live file into [out]. Verifies the
@@ -482,27 +749,20 @@ class SyncEngine {
   /// failed check) is reported and skipped and the rest still come back;
   /// without it the first failure throws. Same-named files get " (2)" etc.
   /// A file that fails is never left half-written.
-  Future<List<File>> restoreAll(Directory out, {void Function(String fileId, Object error)? onError}) async {
-    final records = await _withRetry(() => api.readLog(), () {});
-    final bodies = await verifyLog(sealer, records);
-    final live = <String, LogOp>{};
-    for (final b in bodies) {
-      for (final op in b.ops) {
-        if (op.type == 'put') {
-          live[op.file] = op;
-        } else if (op.type == 'del' && live[op.file]?.version == op.version) {
-          live.remove(op.file);
-        }
-      }
-    }
+  Future<List<File>> restoreAll(
+    Directory out, {
+    void Function(String fileId, Object error)? onError,
+    DateTime? asOf,
+    Set<String> excludeDevices = const {},
+  }) async {
+    final live = await liveFiles(asOf: asOf, excludeDevices: excludeDevices);
     await out.create(recursive: true);
     final restored = <File>[];
     final used = <String>{};
-    for (final op in live.values) {
+    for (final op in live) {
       File? target;
       try {
-        final mSealed = await _withRetry(() => api.getPiece(op.manifestId!), () {});
-        final m = Manifest.decode(await codec.open(op.manifestId!, mSealed, manifest: true));
+        final m = await manifestOf(op.manifestId);
         final name = _uniqueName(_safeName((m.meta['title'] as String?) ?? m.file), used, out);
         final finalFile = File('${out.path}${Platform.pathSeparator}$name');
         // Written beside its final name and renamed when verified, so a
@@ -511,27 +771,19 @@ class SyncEngine {
         final t = File('${finalFile.path}.part');
         target = t;
         final sink = await t.open(mode: FileMode.write);
-        final macSink = await Hmac.sha256().newMacSink(secretKey: SecretKeyData(keys.id));
         try {
-          for (final (id, len) in m.pieces) {
-            final plain = await codec.open(id, await _withRetry(() => api.getPiece(id), () {}));
-            if (plain.length != len) throw IntegrityException('piece $id has wrong length');
+          await for (final plain in contentOf(m)) {
             sink.writeFromSync(plain);
-            macSink.add(plain);
           }
         } finally {
           await sink.close();
-        }
-        macSink.close();
-        if (hex((await macSink.mac()).bytes) != m.mac) {
-          throw IntegrityException('file ${m.file} failed its end-to-end check');
         }
         restored.add(await t.rename(finalFile.path));
       } catch (e) {
         final t = target;
         if (t != null && await t.exists()) await t.delete();
         if (onError == null) rethrow;
-        onError(op.file, e);
+        onError(op.fileId, e);
       }
     }
     return restored;
