@@ -32,13 +32,16 @@ can be) and committed on its own. Decisions taken: both hidden triggers
    - [x] Restore in the app from the recovery code; device list and
          revocation; start over on a new account; restore "as of" a time,
          skipping revoked devices.
-   - [ ] **One backup account per phone.** Waiting on the discussion of
-         item 5: how a shared account must work depends on how a locked
-         uploader holds its credential, and sharing needs per-vault scoping
-         on the server (otherwise one vault's recovery code could delete
-         every vault's backup).
-   - [ ] **Upload while locked** (outbox, decision D1 option B), with a
-         switch and a quiet emergency control. Design to be discussed first.
+   - [ ] **One backup account per phone.** Still open. Sharing an account
+         safely needs per-vault scoping on the server (otherwise one vault's
+         recovery code could delete every vault's backup), and pruning that
+         touches only a vault's own pieces. The locked-upload queue already
+         hides the vault count on the phone (one vault uses it at a time).
+   - [x] **Upload while locked** (outbox, decision D1 option B): on by
+         default, an off switch, and a quiet emergency stop ("Clear cache"
+         in the cover app, or a stop code on the lock screen) that wipes
+         the queue and its upload-only login and leaves it off until it's
+         turned on again in the vault.
    - [x] Previews first: small copies of new photos, videos and recordings
          go up before the originals; originals can wait for Wi-Fi.
    - [x] Version history and pruning ("Free up server space").
@@ -58,8 +61,7 @@ internet** (needs a domain and a host; the configuration and
 
 ## Next up
 
-- **Locked upload and one account per phone** (above), after the design
-  discussion.
+- **One account per phone** (above).
 - **Pairing a second phone** with a QR code (SYNC_DESIGN §10), as an
   alternative to the recovery code.
 - **Offload**: "delete from this phone once it's safely on the server"

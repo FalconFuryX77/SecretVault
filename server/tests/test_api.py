@@ -470,3 +470,65 @@ def test_deleting_an_account_needs_the_recovery_key_and_removes_everything(clien
     assert _lookup(client, account.recovery[0]).json()["accounts"] == []
     # Other accounts are untouched.
     assert _lookup(client, other.recovery[0]).json()["accounts"] == [other.id]
+
+
+def test_upload_token_can_add_but_never_read_or_delete(phone):
+    account, dev, auth = phone
+    r = account.client.post("/v1/auth/upload-token", headers=auth)
+    assert r.status_code == 200 and r.json()["expires_in"] >= 7 * 24 * 3600
+    up = {"Authorization": f"Bearer {r.json()['token']}"}
+    data = os.urandom(5000)
+    pid = piece_id(data)
+    # It can upload pieces and log records ...
+    assert account.client.post("/v1/pieces/missing", json={"ids": [pid]}, headers=up).json()["missing"] == [pid]
+    assert account.client.put(f"/v1/pieces/{pid}", content=data, headers={**up, **digest_header(data)}).status_code in (200, 201)
+    assert account.client.post("/v1/log", json={"counter": 1, "record": b64(b"sealed record")}, headers=up).status_code == 201
+    # ... and nothing else: no reading, listing, deleting, or minting more.
+    for method, path, kw in [
+        ("get", f"/v1/pieces/{pid}", {}),
+        ("get", "/v1/pieces", {}),
+        ("get", "/v1/log", {}),
+        ("post", "/v1/pieces/delete", {"json": {"ids": [pid]}}),
+        ("get", f"/v1/accounts/{account.id}/devices", {}),
+        ("post", "/v1/auth/upload-token", {}),
+        ("delete", "/v1/auth/upload-token", {}),
+    ]:
+        assert getattr(account.client, method)(path, headers=up, **kw).status_code == 403, path
+    # The full token still reads what the upload token sent.
+    assert account.client.get(f"/v1/pieces/{pid}", headers=auth).content == data
+
+
+def test_upload_tokens_can_be_revoked_and_die_with_their_device(phone):
+    account, dev, auth = phone
+    up1 = {"Authorization": f"Bearer {account.client.post('/v1/auth/upload-token', headers=auth).json()['token']}"}
+    assert account.client.post("/v1/pieces/missing", json={"ids": []}, headers=up1).status_code == 200
+    assert account.client.delete("/v1/auth/upload-token", headers=auth).status_code == 204
+    assert account.client.post("/v1/pieces/missing", json={"ids": []}, headers=up1).status_code == 401
+    # The full token is untouched by that.
+    assert account.client.get("/v1/log", headers=auth).status_code == 200
+    up2 = {"Authorization": f"Bearer {account.client.post('/v1/auth/upload-token', headers=auth).json()['token']}"}
+    r = account.client.delete(
+        f"/v1/accounts/{account.id}/devices/{dev}", headers=account.recovery_header(f"revoke-device:{dev}")
+    )
+    assert r.status_code == 204
+    assert account.client.post("/v1/pieces/missing", json={"ids": []}, headers=up2).status_code == 401
+
+
+def test_old_databases_gain_the_token_scope_column(tmp_path):
+    import sqlite3
+
+    from app.db import make_sessionmaker
+
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.execute(
+        "CREATE TABLE tokens (token_hash VARCHAR(64) PRIMARY KEY, account_id VARCHAR(32), "
+        "device_id VARCHAR(32), expires_at DATETIME)"
+    )
+    con.execute("INSERT INTO tokens VALUES ('h', 'a', 'd', '2030-01-01 00:00:00')")
+    con.commit()
+    con.close()
+    make_sessionmaker(f"sqlite:///{path.as_posix()}")
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT scope FROM tokens WHERE token_hash = 'h'").fetchone() == ("full",)
+    con.close()

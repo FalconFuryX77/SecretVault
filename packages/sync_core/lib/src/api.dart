@@ -129,6 +129,16 @@ class SyncApi {
   String? device;
   SimpleKeyPair? _deviceKey;
 
+  /// Sends with an upload-only token, as the phone does while its vault is
+  /// locked: only pieces and log records can go.
+  void useUploadToken(String account, String token) {
+    this.account = account;
+    device = null;
+    _deviceKey = null;
+    _token = token;
+    _tokenExpiry = DateTime.now().add(const Duration(days: 365));
+  }
+
   void useDevice(String account, String device, SimpleKeyPair key) {
     this.account = account;
     this.device = device;
@@ -151,6 +161,21 @@ class SyncApi {
       _tokenExpiry = DateTime.now().add(Duration(seconds: (r['expires_in'] as int) - 60));
     }
     return {'Authorization': 'Bearer $_token'};
+  }
+
+  /// A long-lived token that can only upload pieces and log records, for a
+  /// phone to keep while its vault is locked. Needs this device's login.
+  Future<({String token, DateTime expires})> uploadToken() async {
+    final r = await _json('POST', '/v1/auth/upload-token', headers: await _auth());
+    return (
+      token: r['token'] as String,
+      expires: DateTime.now().add(Duration(seconds: (r['expires_in'] as int) - 60)),
+    );
+  }
+
+  /// Every upload-only token of this device stops working.
+  Future<void> revokeUploadTokens() async {
+    await _json('DELETE', '/v1/auth/upload-token', headers: await _auth(), expect: 204);
   }
 
   /// The account's devices (device token).

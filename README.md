@@ -42,6 +42,7 @@ SHA-256 of the signing certificate:
 Settings → Backup sends the open vault to a server you run ([server/README.md](server/README.md), [deployment guide](docs/DEPLOY.md): Docker, with HTTPS through Caddy). The server only ever sees sealed pieces of random-looking data.
 
 * **Automatic** while the vault is open: on every change, at unlock, and as soon as a network appears, retrying through drops. Pieces resume where they stopped, so a few seconds of signal count.
+* **Keeps uploading while locked:** with no connection, what's left waits in a sealed queue that the phone sends when a network appears, even with the vault locked. The phone keeps only a login that can add to the backup, never read or delete it. In a tense moment, "Clear cache" in Video Trimmer's menu, or a stop code typed on the lock screen (it looks like a wrong PIN), wipes the queue and that login.
 * **Small previews first:** new photos, videos and recordings go up as a small copy, then in full; full-size originals can wait for Wi-Fi.
 * **Restore in the app** with the recovery code: set up a new phone, bring back deleted files, or go back to how the backup was on a given day.
 * **Version history:** every version of every file, kept until you free up space (which needs the recovery code, so a taken phone can't erase the backup).
@@ -51,7 +52,7 @@ Settings → Backup sends the open vault to a server you run ([server/README.md]
 ### Known limits
 * Nothing here stops someone who forces you to open the *real* vault. Use a decoy, or the duress PIN.
 * Someone with a decoy's PIN *and* forensic tools can see hints in its numbers that another vault may exist ([details](docs/CONTAINER_FORMAT.md#11-limits-and-open-items)). A casual look shows nothing.
-* Backup runs only while a vault is open. Uploading while locked is being designed.
+* Only one vault on a phone can use the locked-upload queue. With root, someone can see that the queue exists and how big it is, unless the emergency stop was used first.
 * If two vaults on one phone both back up, the server sees two accounts.
 * Unlock is PIN-only by design: a finger can be pressed to a sensor by force, and it can't tell the real vault from a decoy.
 * The hidden recorder shows up the way Android requires: the green microphone dot while recording, and the app listed as running while armed. If music or a video is playing, the volume keys control that instead. On Samsung phones, set the app's battery use to Unrestricted.

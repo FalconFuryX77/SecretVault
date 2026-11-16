@@ -10,6 +10,7 @@ import '../screens/lock_screen.dart';
 import '../screens/setup_screen.dart';
 import '../screens/vault_home_screen.dart';
 import '../services/security_channel_service.dart';
+import '../sync/outbox.dart';
 import '../theme/app_fonts.dart';
 import '../util/format.dart';
 import 'trim_editor_screen.dart';
@@ -75,6 +76,19 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
     } catch (_) {
       if (mounted) setState(() => _clips = const []);
     }
+  }
+
+  /// An ordinary "Clear cache": the thumbnails, decoded images, and (the
+  /// quiet part) the queue that uploads while the vault is locked, with
+  /// its login. Nothing in the vault or on the server is touched; locked
+  /// upload stays off until it's turned on again inside the vault.
+  Future<void> _clearCache() async {
+    setState(_thumbs.clear);
+    PaintingBinding.instance.imageCache.clear();
+    await const PlatformOutbox().stop();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cache cleared')));
+    unawaited(_load());
   }
 
   void _onTitleTap() {
@@ -160,6 +174,23 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
             ],
           ),
         ),
+        actions: [
+          PopupMenuButton<String>(
+            key: const Key('cover-menu'),
+            icon: const Icon(Icons.more_vert_rounded, color: Colors.white70),
+            color: const Color(0xFF161B22),
+            onSelected: (v) {
+              if (v == 'cache') _clearCache();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                key: const Key('cover-clear-cache'),
+                value: 'cache',
+                child: Text('Clear cache', style: AppFonts.outfit(color: Colors.white)),
+              ),
+            ],
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('cover-new'),

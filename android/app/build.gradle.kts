@@ -81,4 +81,6 @@ dependencies {
     implementation("androidx.media3:media3-transformer:1.9.2")
     implementation("androidx.media3:media3-effect:1.9.2")
     implementation("androidx.media3:media3-muxer:1.9.2")
+    // Uploading while the vault is locked (Outbox): runs when a network appears.
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 }
