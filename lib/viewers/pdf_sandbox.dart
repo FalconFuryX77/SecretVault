@@ -9,7 +9,7 @@ enum PdfProblem {
   /// Needs Android 11+ (an in-memory file), or isn't Android at all.
   unsupported,
 
-  /// Password-protected; not supported yet.
+  /// Password-protected, and no password (or the wrong one) was given.
   password,
 
   /// The renderer could not parse it.
@@ -38,9 +38,10 @@ class PdfSandbox {
 
   /// Sends [data] to the renderer and returns each page's size in points.
   /// The renderer gets its own copy; the caller should wipe [data].
-  static Future<List<ui.Size>> open(Uint8List data) async {
+  /// [password] opens a protected PDF (Android 15+).
+  static Future<List<ui.Size>> open(Uint8List data, {String? password}) async {
     if (!isAvailable) throw PdfSandboxException(PdfProblem.unsupported);
-    final flat = await _call<List<Object?>>('open', {'data': data});
+    final flat = await _call<List<Object?>>('open', {'data': data, 'password': ?password});
     final sizes = <ui.Size>[];
     for (var i = 0; i + 1 < flat.length; i += 2) {
       sizes.add(ui.Size((flat[i] as num).toDouble(), (flat[i + 1] as num).toDouble()));
@@ -56,6 +57,27 @@ class PdfSandbox {
     // The channel hands the pixels over read-only, so they can't be wiped
     // here; they are page images, not the document.
     return done.future;
+  }
+
+  /// Every match of [query] in the open document (Android 15+): the page
+  /// and its rectangles, in points.
+  static Future<List<PdfMatch>> search(String query) async {
+    final list = await _call<List<Object?>>('search', {'query': query});
+    return [
+      for (final m in list.cast<List<Object?>>())
+        PdfMatch(
+          (m[0] as num).toInt(),
+          [
+            for (var i = 1; i + 3 < m.length; i += 4)
+              ui.Rect.fromLTRB(
+                (m[i] as num).toDouble(),
+                (m[i + 1] as num).toDouble(),
+                (m[i + 2] as num).toDouble(),
+                (m[i + 3] as num).toDouble(),
+              ),
+          ],
+        ),
+    ];
   }
 
   static Future<void> close() async {
@@ -78,4 +100,11 @@ class PdfSandbox {
       throw PdfSandboxException(problem, e.message);
     }
   }
+}
+
+/// One search match: its page and where it is on it (points).
+class PdfMatch {
+  final int page;
+  final List<ui.Rect> rects;
+  const PdfMatch(this.page, this.rects);
 }

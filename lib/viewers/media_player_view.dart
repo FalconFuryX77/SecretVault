@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
@@ -160,6 +162,28 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  /// The same player, filling the screen: turned to landscape for a
+  /// landscape video, system bars hidden. Back (or the button) returns.
+  Future<void> _fullScreen(VideoPlayerController c) async {
+    final landscape = c.value.aspectRatio > 1.0;
+    await SystemChrome.setPreferredOrientations(landscape
+        ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+        : const [DeviceOrientation.portraitUp]);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        settings: const RouteSettings(name: 'vault/video-full'),
+        pageBuilder: (_, _, _) => _FullScreenVideo(controller: c, onToggle: _togglePlay),
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+      ),
+    );
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    await SystemChrome.setPreferredOrientations(const []);
+    if (mounted) setState(() {});
   }
 
   // ─── Layout ───────────────────────────────────────────────────────
@@ -361,8 +385,123 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
                     style: AppFonts.firaCode(color: _accent, fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                 ),
+                if (widget.isVideo)
+                  IconButton(
+                    key: const Key('media-fullscreen'),
+                    tooltip: 'Full screen',
+                    icon: const Icon(Icons.fullscreen_rounded, color: Colors.white70, size: 28),
+                    onPressed: () => _fullScreen(c),
+                  ),
               ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FullScreenVideo extends StatefulWidget {
+  final VideoPlayerController controller;
+  final VoidCallback onToggle;
+  const _FullScreenVideo({required this.controller, required this.onToggle});
+
+  @override
+  State<_FullScreenVideo> createState() => _FullScreenVideoState();
+}
+
+class _FullScreenVideoState extends State<_FullScreenVideo> {
+  bool _controls = true;
+  Timer? _hide;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_changed);
+    _scheduleHide();
+  }
+
+  @override
+  void dispose() {
+    _hide?.cancel();
+    widget.controller.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  void _scheduleHide() {
+    _hide?.cancel();
+    _hide = Timer(const Duration(seconds: 3), () {
+      if (mounted && widget.controller.value.isPlaying) setState(() => _controls = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller;
+    final v = c.value;
+    return Scaffold(
+      key: const Key('media-fullscreen-view'),
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          setState(() => _controls = !_controls);
+          if (_controls) _scheduleHide();
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio: v.aspectRatio <= 0 ? 16 / 9 : v.aspectRatio,
+                child: VideoPlayer(c),
+              ),
+            ),
+            if (_controls) ...[
+              Positioned(
+                top: 8,
+                left: 8,
+                child: SafeArea(
+                  child: IconButton(
+                    key: const Key('media-fullscreen-exit'),
+                    icon: const Icon(Icons.fullscreen_exit_rounded, color: Colors.white, size: 30),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+              Center(
+                child: InkWell(
+                  onTap: () {
+                    widget.onToggle();
+                    _scheduleHide();
+                  },
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                    padding: const EdgeInsets.all(14),
+                    child: Icon(v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 52, color: Colors.white),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 8,
+                child: SafeArea(
+                  top: false,
+                  child: VideoProgressIndicator(
+                    c,
+                    allowScrubbing: true,
+                    colors: const VideoProgressColors(playedColor: _accent, bufferedColor: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -11,6 +11,7 @@ import '../vault/crypto_primitives.dart';
 import '../viewers/document_view.dart';
 import '../viewers/file_kind.dart';
 import '../viewers/image_view.dart';
+import '../viewers/office_view.dart';
 import '../viewers/media_player_view.dart';
 import '../viewers/pdf_view.dart';
 import '../viewers/text_file_view.dart';
@@ -285,6 +286,8 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
         return PdfView(bytes: bytes);
       case ViewerKind.word:
         return DocumentView(bytes: bytes);
+      case ViewerKind.office:
+        return OfficeView(title: _currentItem.title, bytes: bytes);
       case ViewerKind.text:
       case ViewerKind.other:
         // Unknown types that turn out to be text open as text too.
@@ -309,8 +312,8 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   Widget _noPreview(Uint8List bytes) {
     final ext = extensionOf(_currentItem.title);
     final why = switch (ext) {
-      'doc' => "Older Word (.doc) files can't be shown yet. Saved as .docx, they can.",
-      'xls' || 'xlsx' || 'ppt' || 'pptx' => "Spreadsheets and slides can't be shown yet.",
+      'xls' || 'ppt' => "Older Excel and PowerPoint files (.xls, .ppt) can't be shown yet. "
+          'Saved as .xlsx or .pptx, they can.',
       _ => 'There is no viewer for this kind of file yet.',
     };
     return Center(
