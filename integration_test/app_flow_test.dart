@@ -78,7 +78,7 @@ void main() {
 
   /// The covert entrance: three quick taps on the cover app's title.
   Future<void> openLockScreen(WidgetTester t) async {
-    final title = find.text('Files').first;
+    final title = find.byKey(const Key('cover-title'));
     await waitFor(t, title);
     await settle(t, 700);
     for (var i = 0; i < 3; i++) {
@@ -98,7 +98,7 @@ void main() {
   Future<void> lock(WidgetTester t) async {
     await tapWhenReady(t, find.byTooltip('Lock Safe'));
     await waitFor(t, find.text('Add File'), gone: true);
-    await waitFor(t, find.text('Files'));
+    await waitFor(t, find.text('Video Trimmer'));
   }
 
   testWidgets('first run → vault → note → lock → covert reopen → decoy', (t) async {

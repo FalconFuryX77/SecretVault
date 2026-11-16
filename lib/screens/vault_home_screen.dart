@@ -14,7 +14,7 @@ import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
-import '../services/device_file_service.dart';
+import '../util/format.dart';
 import 'file_viewer_screen.dart';
 import 'note_editor_screen.dart';
 import 'settings_screen.dart';
@@ -335,7 +335,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       0,
       (sum, item) => sum + item.fileSizeBytes,
     );
-    final sizeFormatted = DeviceFileService.formatBytes(totalBytes);
+    final sizeFormatted = formatBytes(totalBytes);
     final count = vault.allItems.length;
 
     return Scaffold(
@@ -745,7 +745,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 Text(
                   item.content != null
                       ? '${item.content!.length} chars'
-                      : DeviceFileService.formatBytes(item.fileSizeBytes),
+                      : formatBytes(item.fileSizeBytes),
                   style: AppFonts.outfit(
                     fontSize: 11,
                     color: Colors.white54,
@@ -791,7 +791,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         subtitle: Text(
           item.content != null
               ? (item.content!.split('\n').first)
-              : '${DeviceFileService.formatBytes(item.fileSizeBytes)} • Encrypted',
+              : '${formatBytes(item.fileSizeBytes)} • Encrypted',
           style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,

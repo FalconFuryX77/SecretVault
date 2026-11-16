@@ -71,6 +71,6 @@ void main() {
       ..addFile(ArchiveFile('xl/workbook.xml', 60, '<workbook><sheets><sheet name="a"/></sheets></workbook>'.codeUnits))
       ..addFile(ArchiveFile('xl/worksheets/sheet1.xml', OfficeLimits.maxXmlBytes + 10,
           Uint8List(OfficeLimits.maxXmlBytes + 10)));
-    expect(() => XlsxReader.read(Uint8List.fromList(ZipEncoder().encode(bomb)!)), throwsA(isA<OfficeException>()));
+    expect(() => XlsxReader.read(Uint8List.fromList(ZipEncoder().encode(bomb))), throwsA(isA<OfficeException>()));
   });
 }

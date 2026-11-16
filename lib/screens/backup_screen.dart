@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/unlock_provider.dart';
-import '../services/device_file_service.dart';
+import '../util/format.dart';
 import '../services/vault_service.dart';
 import '../sync/auto_backup.dart';
 import '../sync/vault_sync.dart';
@@ -703,7 +703,7 @@ class _BackupScreenState extends State<BackupScreen> {
       ),
       child: Text(
         'Backup finished: ${parts.join(', ')}. '
-        '${DeviceFileService.formatBytes(s.wireBytes)} sent in ${s.elapsed.inSeconds} s.',
+        '${formatBytes(s.wireBytes)} sent in ${s.elapsed.inSeconds} s.',
         style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13),
       ),
     );
