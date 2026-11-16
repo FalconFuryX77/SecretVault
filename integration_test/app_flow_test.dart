@@ -12,7 +12,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'dart:convert';
 
 import 'package:gesture_unlock/main.dart' as app;
-import 'package:gesture_unlock/models/vault_state.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
 import 'package:gesture_unlock/providers/vault_provider.dart';
 import 'package:gesture_unlock/services/security_channel_service.dart';
@@ -31,6 +30,7 @@ void main() {
 
   const realPin = 'flow-real-pin';
   const decoyPin = 'flow-decoy-pin';
+  const duressPin = 'flow-duress-pin';
   const noteTitle = 'Checkpoint notes';
 
   Future<void> waitFor(
@@ -78,7 +78,7 @@ void main() {
 
   /// The covert entrance: three quick taps on the cover app's title.
   Future<void> openLockScreen(WidgetTester t) async {
-    final title = find.text('Files').first;
+    final title = find.byKey(const Key('cover-title'));
     await waitFor(t, title);
     await settle(t, 700);
     for (var i = 0; i < 3; i++) {
@@ -98,7 +98,7 @@ void main() {
   Future<void> lock(WidgetTester t) async {
     await tapWhenReady(t, find.byTooltip('Lock Safe'));
     await waitFor(t, find.text('Add File'), gone: true);
-    await waitFor(t, find.text('Files'));
+    await waitFor(t, find.text('Video Trimmer'));
   }
 
   testWidgets('first run → vault → note → lock → covert reopen → decoy', (t) async {
@@ -136,7 +136,7 @@ void main() {
     );
     await tapWhenReady(t, find.byIcon(Icons.check_rounded));
     await waitFor(t, find.text(noteTitle));
-    expect(find.text('1 protected item (41 B)'), findsOneWidget);
+    await waitFor(t, find.text('1 protected item (41 B)'), timeout: const Duration(seconds: 10));
 
     // ── Lock: back to the cover app, vault UI gone ──
     await lock(t);
@@ -211,10 +211,10 @@ void main() {
         updatedAt: DateTime.now(),
       ),
     );
-    await Provider.of<VaultProvider>(ctx, listen: false).loadVault(VaultType.primary);
+    await Provider.of<VaultProvider>(ctx, listen: false).loadVault();
     expect(SecurityChannelService.isSecure, isTrue, reason: 'vault open → protected');
     await tapWhenReady(t, find.text('evidence.png'));
-    await waitFor(t, find.byType(Image));
+    await waitFor(t, find.byKey(const Key('image-sandboxed')));
     expect(find.textContaining('integrity check'), findsNothing);
     expect(SecurityChannelService.isSecure, isTrue);
     await settle(t, 500);
@@ -258,6 +258,16 @@ void main() {
       await tapWhenReady(t, find.text('Back up now'));
       await waitFor(t, find.textContaining('Backup finished: 0 sent, 2 already up to date'),
           timeout: const Duration(seconds: 60));
+      // Automatic backup is on by default once connected.
+      expect(t.widget<SwitchListTile>(find.byKey(const Key('auto-backup'))).value, isTrue);
+      // Restoring finds nothing missing.
+      await tapWhenReady(t, find.byKey(const Key('restore-missing')));
+      await tapWhenReady(t, find.byKey(const Key('restore-latest')));
+      await waitFor(t, find.textContaining('Nothing to restore'), timeout: const Duration(seconds: 60));
+      // The account's phones: just this one.
+      await tapWhenReady(t, find.byKey(const Key('devices-load')));
+      await waitFor(t, find.text('This phone'));
+      expect(find.text('Another phone'), findsNothing);
       await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
       // Settings is still scrolled down to Backup, so look for its title.
       await waitFor(t, find.text('Security & Settings'));
@@ -265,6 +275,33 @@ void main() {
       await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
       await waitFor(t, find.text('Add File'));
     }
+
+    // ── A duress PIN, set from Settings: it opens the decoy and erases this
+    //    vault for good ──
+    await tapWhenReady(t, find.byTooltip('Settings'));
+    await tapWhenReady(t, find.text('Set Up Duress PIN'));
+    await tapWhenReady(t, find.byKey(const Key('duress-understood')));
+    await waitFor(t, find.text('Save'));
+    await t.enterText(find.widgetWithText(TextField, 'New PIN'), duressPin);
+    await t.enterText(find.widgetWithText(TextField, 'Confirm'), duressPin);
+    await tapWhenReady(t, find.text('Save'));
+    await waitFor(t, find.text('Change Duress PIN'), timeout: const Duration(seconds: 30));
+    await tapWhenReady(t, find.byIcon(Icons.arrow_back_ios_new_rounded));
+    await waitFor(t, find.text('Add File'));
+    await lock(t);
+    await openLockScreen(t);
+    await enterPin(t, duressPin);
+    await waitFor(t, find.text('Add File'), timeout: const Duration(seconds: 30));
+    expect(find.text(noteTitle), findsNothing);
+    expect(find.text('evidence.png'), findsNothing);
+    await lock(t);
+    await openLockScreen(t);
+    await enterPin(t, realPin);
+    await waitFor(t, find.text('Not recognised.'), timeout: const Duration(seconds: 20));
+    await settle(t, 1500);
+    await enterPin(t, decoyPin);
+    await waitFor(t, find.text('Add File'));
+    expect(find.text(noteTitle), findsNothing);
 
     await lock(t);
     // Back on the cover app: protection off once the lock screen is gone.

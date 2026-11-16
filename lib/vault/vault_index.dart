@@ -94,20 +94,36 @@ class LinkedVault {
 
 /// The encrypted catalogue of one vault. Stored inside the container in
 /// chunks only this vault's key can read.
+///
+/// Format 2 (since v3.0) has no notion of "real" or "decoy": every vault
+/// stores the same fields and follows the same rules, and a vault that
+/// hosts a decoy behaves differently only because it has one ([topDown]).
 class VaultIndex {
-  /// Real vaults allocate chunks from the top of the container downwards,
-  /// decoys from the bottom upwards, so they only meet when space runs out.
-  final bool topDown;
+  /// 2 now; 1 for indexes written before v3.0 (migrated when loaded).
+  int version;
 
-  /// For bottom-up vaults: chunks at or above this number may belong to a
-  /// vault this one can't see, so it must not allocate there (unless they
-  /// sit in a region it grew itself, see [grownFrom]). Maintained by the
-  /// parent vault whenever the parent is open.
+  /// Format 1 only: whether this was the real vault. Used once, to migrate.
+  final bool? legacyRealVault;
+
+  /// Whether this vault hosts a decoy. It then fills the container from the
+  /// top down, leaving the bottom to its decoy; a vault without one fills
+  /// from the bottom up, whether it was set up alone or as a decoy.
+  bool get topDown => links.isNotEmpty;
+
+  /// This vault allocates only below this chunk, or in space it grew itself
+  /// ([grownFrom]): anything above may belong to a vault it can't see. Kept
+  /// below that vault's data by the vault above, whenever it's open.
   int ceiling;
 
-  /// If this vault had to grow the container while its parent was locked,
-  /// everything from here up is space it created and may use freely.
+  /// If this vault had to grow the container, everything from here up is
+  /// space it created and may use freely.
   int? grownFrom;
+
+  /// Records (of the container's four) this vault may give a decoy of its
+  /// own: the first holds the decoy, the rest go down to it. A vault set up
+  /// alone gets all the free ones; a decoy, what's left. (How many a vault
+  /// has says how deep it is in a chain of decoys; see THREAT_MODEL §6.)
+  List<int> spares;
 
   final List<IndexEntry> entries;
   final List<LinkedVault> links;
@@ -117,23 +133,26 @@ class VaultIndex {
   final Map<String, dynamic> extras;
 
   VaultIndex({
-    required this.topDown,
     required this.ceiling,
     this.grownFrom,
+    List<int>? spares,
     List<IndexEntry>? entries,
     List<LinkedVault>? links,
     Map<String, dynamic>? extras,
-  }) : entries = entries ?? [],
+    this.version = 2,
+    this.legacyRealVault,
+  }) : spares = spares ?? [],
+       entries = entries ?? [],
        links = links ?? [],
        extras = extras ?? {};
 
   Uint8List encode() => Uint8List.fromList(
     utf8.encode(
       jsonEncode({
-        'v': 1,
-        't': topDown,
+        'v': 2,
         'c': ceiling,
         if (grownFrom != null) 'g': grownFrom,
+        's': spares,
         'e': entries.map((e) => e.toJson()).toList(),
         'l': links.map((l) => l.toJson()).toList(),
         if (extras.isNotEmpty) 'x': extras,
@@ -143,10 +162,13 @@ class VaultIndex {
 
   static VaultIndex decode(Uint8List bytes) {
     final j = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    final version = (j['v'] as int?) ?? 1;
     return VaultIndex(
-      topDown: j['t'] as bool,
+      version: version,
+      legacyRealVault: version == 1 ? j['t'] as bool? : null,
       ceiling: j['c'] as int,
       grownFrom: j['g'] as int?,
+      spares: ((j['s'] as List?) ?? const []).cast<int>().toList(),
       entries: (j['e'] as List)
           .map((e) => IndexEntry.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),

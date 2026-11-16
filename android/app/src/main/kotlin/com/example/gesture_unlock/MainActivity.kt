@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
         private const val KEYS_CHANNEL = "app.vault/keys"
         private const val PDF_CHANNEL = "app.vault/pdf"
         private const val RECORDER_CHANNEL = "app.vault/recorder"
+        private const val CAMERA_CHANNEL = "app.vault/camera"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
         // Neutral alias names: nothing in the keystore says "vault".
@@ -71,12 +72,40 @@ class MainActivity : FlutterActivity() {
     private class ChunkAuthException(val index: Int) : Exception()
 
     private val pdfSandbox by lazy { PdfSandbox(this) }
+    private val previews by lazy { PreviewMaker(applicationContext, pdfSandbox) }
+    private var camera: VaultCamera? = null
+    private val mover by lazy { FileMover(this) }
+    private val trimmer by lazy { VideoTrimmer(this) }
+
+    @Deprecated("Deprecated in Android")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (mover.onActivityResult(requestCode, resultCode, data)) return
+        if (trimmer.onActivityResult(requestCode, resultCode, data)) return
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    /** Whether vault text was copied since the clipboard was last cleared. */
+    private var copiedSensitive = false
+
+    /** Videos being streamed into the vault, by handle. */
+    private val exports = HashMap<Int, Mp4Exporter>()
+    private var nextExport = 1
+
+    override fun onDestroy() {
+        camera?.shutdown()
+        synchronized(exports) {
+            exports.values.forEach { it.close() }
+            exports.clear()
+        }
+        super.onDestroy()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
-        // FLAG_SECURE is applied only inside the vault; the cover Files app
+        // FLAG_SECURE is applied only inside the vault; the cover app
         // must behave normally (screenshots allowed).
         MethodChannel(messenger, SECURITY_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -101,6 +130,33 @@ class MainActivity : FlutterActivity() {
                         ),
                     ),
                 )
+                "copySensitive" -> {
+                    // Marked sensitive: keyboards keep it out of their
+                    // clipboard history, and Android hides its preview.
+                    val cm = getSystemService(android.content.ClipboardManager::class.java)
+                    val clip = android.content.ClipData.newPlainText("", call.argument<String>("text") ?: "")
+                    clip.description.extras = android.os.PersistableBundle().apply {
+                        putBoolean("android.content.extra.IS_SENSITIVE", true)
+                    }
+                    cm.setPrimaryClip(clip)
+                    copiedSensitive = true
+                    result.success(true)
+                }
+                "clearSensitive" -> {
+                    if (copiedSensitive) {
+                        val cm = getSystemService(android.content.ClipboardManager::class.java)
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                cm.clearPrimaryClip()
+                            } else {
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                            }
+                        } catch (_: Exception) {
+                        }
+                        copiedSensitive = false
+                    }
+                    result.success(true)
+                }
                 "setKeepScreenOn" -> {
                     if (call.argument<Boolean>("on") == true) {
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -134,8 +190,71 @@ class MainActivity : FlutterActivity() {
             pdfSandbox.handle(call, result)
         }
 
+        // Backup previews (see PreviewMaker), and whether the network costs
+        // money (originals can wait for Wi-Fi).
+        MethodChannel(messenger, "app.vault/preview").setMethodCallHandler { call, result ->
+            if (call.method == "unmetered") {
+                val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+                result.success(caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true)
+            } else {
+                previews.handle(call, result)
+            }
+        }
+
         MethodChannel(messenger, RECORDER_CHANNEL).setMethodCallHandler { call, result ->
             handleRecorder(call, result)
+        }
+
+        // Network availability, for automatic backup (a pocket of signal
+        // starts a backup at once).
+        io.flutter.plugin.common.EventChannel(messenger, "app.vault/network").setStreamHandler(
+            object : io.flutter.plugin.common.EventChannel.StreamHandler {
+                private var callback: android.net.ConnectivityManager.NetworkCallback? = null
+
+                override fun onListen(arguments: Any?, events: io.flutter.plugin.common.EventChannel.EventSink) {
+                    val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                    fun send() {
+                        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+                        val online = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                        val unmetered = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
+                        mainHandler.post { events.success(mapOf("online" to online, "unmetered" to unmetered)) }
+                    }
+                    val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+                        override fun onAvailable(network: android.net.Network) = send()
+                        override fun onLost(network: android.net.Network) = send()
+                        override fun onCapabilitiesChanged(network: android.net.Network, c: android.net.NetworkCapabilities) = send()
+                    }
+                    callback = cb
+                    try {
+                        cm.registerDefaultNetworkCallback(cb)
+                    } catch (_: Exception) {
+                    }
+                    send()
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    val cb = callback ?: return
+                    callback = null
+                    try {
+                        getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(cb)
+                    } catch (_: Exception) {
+                    }
+                }
+            },
+        )
+
+        MethodChannel(messenger, "app.vault/move").setMethodCallHandler { call, result ->
+            mover.handle(call, result)
+        }
+        MethodChannel(messenger, "app.trim/video").setMethodCallHandler { call, result ->
+            trimmer.handle(call, result)
+        }
+
+        val cam = VaultCamera(this, flutterEngine.renderer)
+        camera = cam
+        MethodChannel(messenger, CAMERA_CHANNEL).setMethodCallHandler { call, result ->
+            cam.handle(call, result)
         }
 
         worker.execute {
@@ -150,6 +269,9 @@ class MainActivity : FlutterActivity() {
             try {
                 when (call.method) {
                     "deviceHmac" -> result.success(deviceHmac(call.argument<ByteArray>("data")!!))
+                    "nfc" -> result.success(
+                        java.text.Normalizer.normalize(call.argument<String>("text")!!, java.text.Normalizer.Form.NFC),
+                    )
                     "gcmSealChunks" -> inBackground(result) {
                         gcmSealChunks(
                             call.argument<ByteArray>("key")!!,
@@ -216,10 +338,24 @@ class MainActivity : FlutterActivity() {
                         recorderIntent(RecorderService.ACTION_ARM)
                             .putExtra(RecorderService.EXTRA_KEY, call.argument<ByteArray>("key")!!)
                             .putExtra(RecorderService.EXTRA_VIBRATE, call.argument<Boolean>("vibrate") ?: true)
-                            .putExtra(RecorderService.EXTRA_ALWAYS_LISTEN, call.argument<Boolean>("alwaysListen") ?: false),
+                            .putExtra(RecorderService.EXTRA_ALWAYS_LISTEN, call.argument<Boolean>("alwaysListen") ?: false)
+                            .putExtra(RecorderService.EXTRA_BUTTON, call.argument<Int>("button") ?: -1)
+                            .putExtra(RecorderService.EXTRA_PRESSES, call.argument<Int>("presses") ?: 3)
+                            .putExtra(RecorderService.EXTRA_ASSIST, call.argument<Boolean>("assist") ?: false),
                     )
                     result.success(true)
                 }
+                "assistState" -> result.success(
+                    mapOf(
+                        "enabled" to AssistTriggerActivity.isEnabled(this),
+                        "holder" to AssistTriggerActivity.isAssistant(this),
+                    ),
+                )
+                "setAssistEnabled" -> {
+                    AssistTriggerActivity.setEnabled(this, call.argument<Boolean>("on") == true)
+                    result.success(true)
+                }
+                "openAssistSettings" -> result.success(AssistTriggerActivity.openSettings(this))
                 "disarm" -> {
                     if (RecorderService.running) startService(recorderIntent(RecorderService.ACTION_DISARM))
                     result.success(true)
@@ -231,7 +367,8 @@ class MainActivity : FlutterActivity() {
                             .putExtra(
                                 RecorderService.EXTRA_ROTATE_FRAMES,
                                 call.argument<Int>("rotateFrames") ?: RecorderThread.FRAMES_PER_FILE,
-                            ),
+                            )
+                            .putExtra(RecorderService.EXTRA_LEGACY_V1, call.argument<Boolean>("legacyV1") ?: false),
                     )
                     result.success(true)
                 }
@@ -244,9 +381,9 @@ class MainActivity : FlutterActivity() {
                     // way round, a rotation in between would offer the part
                     // that was just started.
                     val listed = RecorderService.stagingDir(this).listFiles()
-                    val active = RecorderService.activeFile
+                    val active = setOfNotNull(RecorderService.activeFile, VaultCamera.activeFile)
                     val files = listed
-                        ?.filter { it.isFile && it.name.endsWith(".bin") && it != active }
+                        ?.filter { it.isFile && it.name.endsWith(".bin") && it !in active }
                         ?.sortedBy { it.lastModified() }
                         ?: emptyList()
                     result.success(
@@ -256,14 +393,19 @@ class MainActivity : FlutterActivity() {
                 "open" -> inBackground(result) {
                     val file = stagedFile(call.argument<String>("id")!!)
                     val key = call.argument<ByteArray>("key")!!
+                    val pub = call.argument<ByteArray>("pub")
                     try {
                         // Never open a file that is still being written.
-                        val rec = if (file.exists() && file != RecorderService.activeFile) {
-                            RecordingReader.open(file, key)
+                        val usable = file.exists() && !isActive(file)
+                        val kind = if (usable) RecordingReader.probe(file, pub, key) else null
+                        val rec = if (kind == RecordingReader.Kind.AUDIO || kind == RecordingReader.Kind.EMPTY) {
+                            RecordingReader.open(file, pub, key)
                         } else {
                             null
                         }
-                        if (rec == null) {
+                        if (kind == RecordingReader.Kind.VIDEO) {
+                            mapOf("video" to true)
+                        } else if (rec == null) {
                             null
                         } else if (rec.frames.isEmpty() || rec.sampleRate == 0) {
                             mapOf("empty" to true)
@@ -284,14 +426,109 @@ class MainActivity : FlutterActivity() {
                 }
                 "discard" -> inBackground(result) {
                     val f = stagedFile(call.argument<String>("id")!!)
-                    if (f.exists() && f != RecorderService.activeFile) RecordingFormat.shred(f)
+                    if (f.exists() && !isActive(f)) RecordingFormat.shred(f)
                     true
+                }
+                "videoOpen" -> inBackground(result) {
+                    val file = stagedFile(call.argument<String>("id")!!)
+                    val key = call.argument<ByteArray>("key")!!
+                    val pub = call.argument<ByteArray>("pub")
+                    try {
+                        val ex = if (file.exists() && !isActive(file)) Mp4Exporter.open(file, pub, key) else null
+                        if (ex == null) {
+                            null
+                        } else if (ex.scan.count == 0) {
+                            ex.close()
+                            mapOf("empty" to true)
+                        } else {
+                            val handle = synchronized(exports) { (nextExport++).also { exports[it] = ex } }
+                            val v = ex.scan.tracks.firstOrNull { it.isVideo }
+                            mapOf(
+                                "handle" to handle,
+                                "length" to ex.length,
+                                "startedAt" to ex.scan.startedAtMs,
+                                "durationMs" to ex.scan.durationMs,
+                                "complete" to ex.scan.complete,
+                                "width" to (v?.a ?: 0),
+                                "height" to (v?.b ?: 0),
+                                "rotation" to (v?.rotation ?: 0),
+                            )
+                        }
+                    } finally {
+                        key.fill(0)
+                    }
+                }
+                "videoRead" -> inBackground(result) {
+                    val ex = synchronized(exports) { exports[call.argument<Int>("handle")!!] }
+                        ?: throw IllegalStateException("no such export")
+                    ex.read(call.argument<Int>("max") ?: (1 shl 20))
+                }
+                "videoClose" -> {
+                    val ex = synchronized(exports) { exports.remove(call.argument<Int>("handle")!!) }
+                    worker.execute { ex?.close() }
+                    result.success(true)
+                }
+                "probeMedia" -> inBackground(result) {
+                    // Debug builds only: what Android's own parser makes of an
+                    // MP4 (tests check the vault's MP4 writer with it).
+                    check(applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0)
+                    probeMedia(call.argument<ByteArray>("data")!!)
                 }
                 "stagingPath" -> result.success(RecorderService.stagingDir(this).absolutePath)
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
             result.error("recorder", e.message, null)
+        }
+    }
+
+    private fun isActive(f: File) = f == RecorderService.activeFile || f == VaultCamera.activeFile
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun probeMedia(data: ByteArray): Map<String, Any?> {
+        val fd = android.system.Os.memfd_create("probe", 0)
+        try {
+            var off = 0
+            while (off < data.size) off += android.system.Os.write(fd, data, off, data.size - off)
+            android.system.Os.lseek(fd, 0, android.system.OsConstants.SEEK_SET)
+            val ex = android.media.MediaExtractor()
+            ex.setDataSource(fd)
+            val tracks = (0 until ex.trackCount).map { i ->
+                val f = ex.getTrackFormat(i)
+                mapOf(
+                    "mime" to f.getString(android.media.MediaFormat.KEY_MIME),
+                    "durationUs" to (if (f.containsKey(android.media.MediaFormat.KEY_DURATION)) f.getLong(android.media.MediaFormat.KEY_DURATION) else -1L),
+                    "width" to (if (f.containsKey(android.media.MediaFormat.KEY_WIDTH)) f.getInteger(android.media.MediaFormat.KEY_WIDTH) else 0),
+                    "height" to (if (f.containsKey(android.media.MediaFormat.KEY_HEIGHT)) f.getInteger(android.media.MediaFormat.KEY_HEIGHT) else 0),
+                )
+            }
+            var samples = 0
+            var syncs = 0
+            for (i in 0 until ex.trackCount) ex.selectTrack(i)
+            while (ex.sampleTime >= 0) {
+                samples++
+                if (ex.sampleFlags and android.media.MediaExtractor.SAMPLE_FLAG_SYNC != 0) syncs++
+                ex.advance()
+            }
+            ex.release()
+            val r = android.media.MediaMetadataRetriever()
+            r.setDataSource(fd)
+            val rotation = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            val duration = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val frame = r.getFrameAtTime(500_000)
+            val frameSize = frame?.let { listOf(it.width, it.height) }
+            frame?.recycle()
+            r.release()
+            return mapOf(
+                "tracks" to tracks,
+                "samples" to samples,
+                "syncs" to syncs,
+                "rotation" to rotation,
+                "durationMs" to duration,
+                "frame" to frameSize,
+            )
+        } finally {
+            android.system.Os.close(fd)
         }
     }
 

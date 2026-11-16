@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
-import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
@@ -27,9 +26,6 @@ class VaultProvider extends ChangeNotifier {
 
   /// Files above this are exported rather than decrypted into RAM.
   static const int maxPreviewBytes = 64 * 1024 * 1024;
-
-  VaultType _activeVaultType = VaultType.primary;
-  VaultType get activeVaultType => _activeVaultType;
 
   List<VaultItem> _allItems = [];
   List<VaultItem> get allItems => _allItems;
@@ -97,8 +93,7 @@ class VaultProvider extends ChangeNotifier {
 
   // ─── Session ────────────────────────────────────────────
 
-  Future<void> loadVault(VaultType vaultType) async {
-    _activeVaultType = vaultType;
+  Future<void> loadVault() async {
     _refreshFromSession();
     // Recordings made while the vault was locked move in now.
     unawaited(importRecordings().catchError((Object _) => 0));
@@ -128,8 +123,8 @@ class VaultProvider extends ChangeNotifier {
 
   Future<int> _importRecordings(VaultSession? session) async {
     if (session == null || !VaultRecorder.isAvailable) return 0;
-    final privateKey = RecordingKeys.privateKey(session);
-    if (privateKey == null) return 0; // this vault has never recorded
+    final keys = RecordingKeys.all(session);
+    if (keys.isEmpty) return 0; // this vault has never recorded
     var moved = 0;
     try {
       for (final p in await VaultRecorder.pending()) {
@@ -143,8 +138,17 @@ class VaultProvider extends ChangeNotifier {
             await VaultRecorder.discard(p.id);
             continue;
           }
-          final r = await VaultRecorder.open(p.id, Uint8List.fromList(privateKey));
-          if (r == null) continue; // another vault's
+          OpenedRecording? found;
+          for (final k in keys) {
+            found = await VaultRecorder.open(p.id, k);
+            if (found != null) break;
+          }
+          if (found == null) continue; // another vault's
+          final r = found;
+          if (r.video) {
+            if (await _importVideo(session, p.id, keys, tag)) moved++;
+            continue;
+          }
           if (r.empty) {
             await VaultRecorder.discard(p.id);
             continue;
@@ -172,10 +176,92 @@ class VaultProvider extends ChangeNotifier {
         }
       }
     } finally {
-      privateKey.fillRange(0, privateKey.length, 0);
+      for (final k in keys) {
+        k.wipe();
+      }
     }
     if (moved > 0 && identical(_vault.session, session)) _refreshFromSession();
+    if (session.isOpen) {
+      try {
+        await RecordingKeys.rotateIfDue(
+          session,
+          status: await VaultRecorder.status(),
+          rearm: (pub) => VaultRecorder.arm(
+            pub,
+            vibrate: RecordingKeys.vibrate(session),
+            trigger: TriggerSettings.of(session),
+          ),
+        );
+      } catch (e) {
+        debugPrint('recording key not rotated: $e');
+      }
+    }
     return moved;
+  }
+
+  /// Progress of a video moving into the vault (0..1), null when none is.
+  final ValueNotifier<double?> videoProgress = ValueNotifier(null);
+
+  /// Streams one staged camera video into the vault as an MP4: decrypted
+  /// and packed on the fly, never whole in memory or on disk.
+  Future<bool> _importVideo(VaultSession session, String id, List<RecordingKeyPair> keys, String tag) async {
+    StagedVideo? v;
+    for (final k in keys) {
+      v = await VaultRecorder.openVideo(id, k);
+      if (v != null) break;
+    }
+    final video = v;
+    if (video == null) return false;
+    if (video.isEmpty) {
+      await VaultRecorder.discard(id);
+      return false;
+    }
+    try {
+      final title = 'Video ${_stamp(video.startedAt)}${video.complete ? '' : ' (cut short)'}.mp4';
+      videoProgress.value = 0;
+      await _vault.whileBusy(
+        () => session.importStream(
+          video.length,
+          VaultItem(
+            id: _uuid.v4(),
+            title: title,
+            category: VaultCategory.video,
+            mimeType: 'video/mp4',
+            fileSizeBytes: video.length,
+            createdAt: video.startedAt,
+            updatedAt: DateTime.now(),
+            tags: ['camera', tag],
+          ),
+          video.read,
+          onProgress: (f) => videoProgress.value = f,
+        ),
+      );
+    } finally {
+      videoProgress.value = null;
+      await video.close();
+    }
+    await VaultRecorder.discard(id);
+    return true;
+  }
+
+  /// Stores a photo from the in-vault camera (already stripped of metadata).
+  Future<VaultItem?> importPhoto(Uint8List jpeg) async {
+    final session = _vault.session;
+    if (session == null) return null;
+    final now = DateTime.now();
+    final item = VaultItem(
+      id: _uuid.v4(),
+      title: 'Photo ${_stamp(now)}.jpg',
+      category: VaultCategory.image,
+      mimeType: 'image/jpeg',
+      fileSizeBytes: jpeg.length,
+      createdAt: now,
+      updatedAt: now,
+      tags: const ['camera'],
+    );
+    await _vault.whileBusy(() => session.importBytes(jpeg, item));
+    if (identical(_vault.session, session)) _refreshFromSession();
+    return item;
   }
 
   static String _stamp(DateTime t) {

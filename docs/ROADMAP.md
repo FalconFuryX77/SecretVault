@@ -1,95 +1,73 @@
 # Roadmap
 
 What we've agreed to build, what's still open, and ideas we parked (and why).
-Collected from the project discussions; last updated 2026-11-16, at v2.0.0.
+Last updated 2026-11-16, at v3.0.0 (Undertow).
+
+## Build plan (started 2026-11-16)
+
+Built in this order, each part tested on the emulator (and on the PC where it
+can be) and committed on its own. Decisions taken: both hidden triggers
+(volume and assistant button), a video-trimmer cover app, the name
+**Undertow**, and the "keep it safe" decoy design.
+
+1. **Capture**
+   - [x] Trigger options: volume-down or volume-up, 2–6 presses, and an
+         opt-in assistant-button trigger.
+   - [x] Recording keys rotate daily; staged recordings look like random data.
+   - [x] Camera: photos straight into the vault (metadata stripped).
+   - [x] Camera: video into the vault, encrypted while it's recorded.
+2. **Vault hardening**
+   - [x] The real vault opens even if its decoy's index is damaged.
+   - [x] Passphrases are Unicode-normalised (the old form still opens).
+   - [x] Images are decoded in the isolated process, like PDFs.
+   - [x] Text copied out of the vault is marked sensitive and cleared on lock.
+   - [x] Rollback of the container file is detected.
+   - [x] A decoy whose index doesn't say "decoy", and that can host a real
+         decoy of its own (index format 2, migrated on unlock).
+   - [x] Duress PIN (opt-in).
+3. **Backup**
+   - [x] Padded log records, chain-head checks, manifests for very large files.
+   - [x] Automatic backup while unlocked: on change, on unlock, when a network
+         appears, with retries.
+   - [x] Restore in the app from the recovery code; device list and
+         revocation; start over on a new account; restore "as of" a time,
+         skipping revoked devices.
+   - [ ] **One backup account per phone.** Waiting on the discussion of
+         item 5: how a shared account must work depends on how a locked
+         uploader holds its credential, and sharing needs per-vault scoping
+         on the server (otherwise one vault's recovery code could delete
+         every vault's backup).
+   - [ ] **Upload while locked** (outbox, decision D1 option B), with a
+         switch and a quiet emergency control. Design to be discussed first.
+   - [x] Previews first: small copies of new photos, videos and recordings
+         go up before the originals; originals can wait for Wi-Fi.
+   - [x] Version history and pruning ("Free up server space").
+   - [x] Server: HTTPS through Caddy, S3 storage tested (SeaweedFS; the
+         MinIO images couldn't be pulled), Tor through Orbot, and a
+         deployment guide.
+4. **Viewers:** [x] landscape video; [x] spreadsheets, slides and `.doc`;
+   [x] password-protected PDFs and search (Android 15+).
+5. **Disguise:** [x] a "move vault" tool, [x] the video-trimmer cover,
+   [x] the rename to Undertow (new package and permanent signing key).
+6. **Docs, landing page and release.**
+
+Two items can't be finished from here: the **independent security review**
+(an audit brief is ready for reviewers) and **putting a server on the
+internet** (needs a domain and a host; the configuration and
+[guide](DEPLOY.md) are ready).
 
 ## Next up
 
-- [x] **Audio recorder inside the vault** (v2.1.0).
-- [x] **Screen-off recording trigger**: volume-down ×3 (v2.1.0). Replaces the
-      original "draw MIC on a dark screen" idea, which Android doesn't let
-      apps detect. Still to confirm by hand on more phone makers.
-- [x] **Record while the vault is locked** (v2.1.0).
-- [ ] **Camera capture into the vault.** Photos (and later video) taken
-      straight into encrypted storage, never touching the gallery.
-
-## Backup and sync
-
-The user's top priority after the vault itself: "connect to a server and
-automatically keep syncing there."
-
-- [ ] **Automatic background backup** (M2 scheduler): start uploading the
-      moment any network appears, retry on bad links. Today backup is a button.
-- [ ] **Put the server on the internet with HTTPS.** Tested so far only from
-      the phone over a USB tunnel to Docker on the PC. Needs a TLS proxy and a
-      domain; the reference Docker stack doesn't include one.
-- [ ] **Restore inside the app** (M3), plus setting up a new phone from the
-      recovery phrase, revoking a lost phone, key rotation. Restore works from
-      the command-line client only.
-- [ ] **Previews first on a bad connection** (M4): send a small copy of a video
-      first, the original later on Wi-Fi.
-- [ ] **Upload while the vault is locked** (M5, decision D1 in
-      [SYNC_DESIGN.md](SYNC_DESIGN.md)), with a setting to turn it off.
-- [ ] **Version history screen and pruning** (M6); publish measured results.
-- [ ] Test S3/MinIO storage in Docker (the MinIO image wouldn't pull; local
-      disk storage is what's tested).
-- [ ] Refresh the milestone table in SYNC_DESIGN.md (M1 is further along than
-      it says: Docker stack, failure proxy and CLI client exist).
-
-## Disguise
-
-- [ ] **Decide the cover app.** Still the "Files" manager. Recommended: a
-      simple video trimmer/compressor, because it explains camera, microphone
-      and gallery access and gigabytes of "project cache". Runner-up: a
-      podcast player. Offline maps was dropped (looks like spying in a
-      conflict zone).
-- [ ] **Remove identifying names before anyone else installs it.** The package
-      is still `com.example.gesture_unlock`. Changing it later makes it a
-      different app, so updating would erase people's vaults.
-- [ ] **Pick the product name.** "SecretVault" is a placeholder. Candidates:
-      Undertow (recommended), Seep, Palimpsest. DropSync is taken (an existing
-      Dropbox sync app). A public repo that says "secret vault" also weakens
-      the cover against someone who looks the app up.
-- [ ] **Permanent release signing key**, created once and kept safe. v2.0.0 is
-      signed with a development key; switching later means uninstalling.
-
-## Security hardening
-
-Found by the independent review (2026-11-16) and not fixed yet; details in
-[THREAT_MODEL.md](THREAT_MODEL.md) §6:
-
-- [ ] **Decoy can host a real decoy of its own.** Today a decoy's "Set up a
-      decoy" only pretends (the PIN opens nothing). Needs a container format
-      change: the decoy must be able to reserve a record and space the real
-      vault knows about.
-- [ ] **Decoy index looks like any lone vault's** (forensic tell with the
-      decoy PIN).
-- [ ] **Rotate the recording key pair**; consider making staged recordings
-      indistinguishable from random.
-- [ ] **One backup account per phone**, shared by its vaults (SYNC_DESIGN §11).
-- [ ] **Pad backup log records**; check device chains against known heads.
-- [ ] **Restore "as of" a time** and ignoring a revoked device's records.
-- [ ] Open the real vault even if its decoy's index is damaged (today a
-      corrupted decoy index stops the real vault opening).
-
-- [ ] **Duress PIN** (opt-in, with a clear warning): opens the decoy and
-      silently destroys the real vault's key.
-- [ ] **Sandbox image decoding** like PDFs (images are decoded in the app
-      process today).
-- [ ] Detect rollback of the container file.
-- [ ] Normalise passphrases (Unicode NFC) so different keyboards give the same key.
-- [ ] **Independent security review.** In this category the real moat is
-      trust: an audit, open code, never losing data, and newsrooms or NGOs
-      relying on it.
-- [ ] Routing backups over Tor (idea, not designed yet).
-
-## In-vault viewers
-
-- [ ] Spreadsheets, slides and old `.doc` files.
-- [ ] Password-protected PDFs; search in PDFs.
-- [ ] Full-screen landscape video.
-- [ ] "Choose your own shortcut" list, once the volume trigger has proven
-      reliable on real phones.
+- **Locked upload and one account per phone** (above), after the design
+  discussion.
+- **Pairing a second phone** with a QR code (SYNC_DESIGN §10), as an
+  alternative to the recovery code.
+- **Offload**: "delete from this phone once it's safely on the server"
+  (SYNC_DESIGN §8.2).
+- **Previews first on restore too**: download small copies before the
+  originals on a slow link.
+- **Recovery-code wordlists** beyond English (SYNC_DESIGN §16).
+- Confirm the screen-off triggers by hand on more phone makers.
 
 ## Parked ideas (decided against, with the reason)
 
@@ -104,10 +82,15 @@ Found by the independent review (2026-11-16) and not fixed yet; details in
   stress; a finger can be forced onto a sensor and can't pick the decoy.
 - **Compression for backups:** not worth it; photos and video are already
   compressed.
+- **Hiding the decoy's layout numbers** (its ceiling and spare-record count):
+  doing so would mean dropping the rules that keep vaults from overwriting
+  each other. We chose safety; see the threat model.
 
 ## Done (for reference)
 
-v2.0.0: encrypted container with a decoy, PIN-only unlock, real cover-app
-figures, in-vault viewers (video, audio, PDF in an isolated process, Word,
-text editing), manual backup to a self-hosted server, landing page on GitHub
-Pages. See the [release notes](https://github.com/FalconFuryX77/SecretVault/releases/tag/v2.0.0).
+- v2.0.0: encrypted container with a decoy, PIN-only unlock, in-vault
+  viewers (video, audio, PDF in an isolated process, Word, text editing),
+  manual backup to a self-hosted server, landing page.
+- v2.1.0: audio recorder in the vault, screen-off volume trigger, recording
+  while locked.
+- v3.0.0 (Undertow): everything checked above.

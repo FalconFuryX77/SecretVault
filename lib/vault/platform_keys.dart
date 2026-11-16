@@ -66,5 +66,15 @@ class FixedDeviceBinding implements DeviceBinding {
       CryptoPrimitives.hmacSha256(secret, input);
 }
 
+/// Unicode NFC normalisation, so a passphrase typed with accents gives the
+/// same key whichever keyboard composed the characters. Android's own
+/// normaliser; elsewhere the text is used as typed.
+Future<String> platformNormalize(String text) async {
+  if (!Platform.isAndroid) return text;
+  // Plain ASCII is always already normalised: skip the round trip.
+  if (text.codeUnits.every((c) => c < 0x80)) return text;
+  return await _channel.invokeMethod<String>('nfc', {'text': text}) ?? text;
+}
+
 DeviceBinding defaultDeviceBinding() =>
     Platform.isAndroid ? AndroidDeviceBinding() : SoftwareDeviceBinding();

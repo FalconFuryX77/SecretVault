@@ -66,6 +66,12 @@ void main() {
     // ignore: avoid_print
   });
 
+  testWidgets('passphrases are NFC-normalised by the platform', (tester) async {
+    expect(await platformNormalize('café née'), 'café née');
+    expect(await platformNormalize('plain-123'), 'plain-123');
+    expect(await platformNormalize('क्ष'), 'क्ष', reason: 'already NFC');
+  });
+
   testWidgets('native batch crypto is byte-compatible with the Dart implementation', (tester) async {
     const native = AndroidBulkCrypto();
     const dart = DartBulkCrypto();
@@ -110,7 +116,7 @@ void main() {
     expect(await timed('wrong PIN attempt', () => svc2.unlockWithPin('nope-nope')), isNull);
     final s = await timed('right PIN unlock', () => svc2.unlockWithPin(pin));
     expect(s, isNotNull);
-    expect(s!.type.name, 'primary');
+    expect(s, isNotNull);
     await svc2.lock();
   });
 
@@ -167,7 +173,7 @@ void main() {
     await svc.lock();
 
     final d = (await newService().unlockWithPin('decoy-pin-22'))!;
-    expect(d.type.name, 'decoy');
+    expect(d.hasDecoy, isFalse);
     expect(d.entries, isEmpty);
     // Fill the decoy past its ceiling so it must grow the container on its own.
     final dSrc = File('${dir.path}/d.bin')..writeAsBytesSync(List.generate(65508 * 20, (i) => i % 251));

@@ -19,13 +19,14 @@ class UnlockProvider extends ChangeNotifier {
   final VaultService _vault;
 
   UnlockState state = UnlockState.locked;
-  VaultType activeVaultType = VaultType.primary;
 
   bool _isSetupComplete = false;
   bool get isSetupComplete => _isSetupComplete;
 
-  final _unlockEventController = StreamController<VaultType>.broadcast();
-  Stream<VaultType> get onVaultUnlocked => _unlockEventController.stream;
+  /// A vault was unlocked from the lock screen. Which one is never said:
+  /// every vault looks and behaves the same.
+  final _unlockEventController = StreamController<void>.broadcast();
+  Stream<void> get onVaultUnlocked => _unlockEventController.stream;
 
   StreamSubscription? _shakeSub;
   StreamSubscription? _lockedSub;
@@ -119,7 +120,7 @@ class UnlockProvider extends ChangeNotifier {
 
   void onAppResumed() {
     // The app never prompts on resume: an unprompted dialog would give away
-    // that this is not a regular Files app.
+    // that this is not a regular app.
     _backgrounded = false;
     _suppressedPauseTimer?.cancel();
     if (state == UnlockState.unlocked) _resetInactivityTimer();
@@ -178,7 +179,7 @@ class UnlockProvider extends ChangeNotifier {
           notifyListeners();
           return false;
         }
-        await _onSuccessfulUnlock(session.type);
+        await _onSuccessfulUnlock();
         return true;
       }
     } catch (_) {}
@@ -195,19 +196,15 @@ class UnlockProvider extends ChangeNotifier {
 
   // ─── Unlock Success / Failure ────────────────────────────
 
-  Future<void> _onSuccessfulUnlock(
-    VaultType vaultType, {
-    bool announce = true,
-  }) async {
+  Future<void> _onSuccessfulUnlock({bool announce = true}) async {
     await _authService.recordSuccess();
-    activeVaultType = vaultType;
     state = UnlockState.unlocked;
     _vibrateSuccess();
     _resetInactivityTimer();
     _startShakeWatch();
     notifyListeners();
     if (announce && !_unlockEventController.isClosed) {
-      _unlockEventController.add(vaultType);
+      _unlockEventController.add(null);
     }
   }
 
@@ -362,7 +359,7 @@ class UnlockProvider extends ChangeNotifier {
   Future<void> onSetupComplete() async {
     _isSetupComplete = true;
     if (_vault.isUnlocked) {
-      await _onSuccessfulUnlock(_vault.session!.type, announce: false);
+      await _onSuccessfulUnlock(announce: false);
     } else {
       notifyListeners();
     }

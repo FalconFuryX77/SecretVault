@@ -9,7 +9,7 @@ import '../theme/app_fonts.dart';
 ///
 /// The same field takes either PIN. The real one opens the real vault, the
 /// decoy one opens the decoy, and nothing on screen says which happened.
-/// Navigation into the vault is handled by NormalFilesScreen, which listens
+/// Navigation into the vault is handled by TrimmerHomeScreen, which listens
 /// for unlock events.
 class LockScreen extends StatefulWidget {
   const LockScreen({super.key});

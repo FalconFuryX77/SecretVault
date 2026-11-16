@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import 'bulk_crypto.dart';
 import 'crypto_primitives.dart';
@@ -45,7 +44,12 @@ class ContainerLayout {
   static const int pinSlotLen = CryptoPrimitives.keyLen + sealOverhead; // 60
 
   // Bytes 64–219 of each record held a gesture/biometric slot in an earlier
-  // format. They are unused now and stay random filler.
+  // format. Bytes 64–123 now hold the duress slot; the rest stay filler.
+
+  /// The duress slot: this vault's own key sealed under the duress PIN's
+  /// key. Random bytes unless a duress PIN is set.
+  static const int duressSlotOffset = 64;
+  static const int duressSlotLen = pinSlotLen;
 
   static const int superPlainLen = 2048;
   static const int superSlotLen = superPlainLen + sealOverhead; // 2076
@@ -53,6 +57,13 @@ class ContainerLayout {
 
   static int recordOffset(int r) => recordsOffset + r * recordSize;
   static int chunkOffset(int c) => c * chunkSize;
+
+  /// Where a copy made to move the container to another install carries its
+  /// transfer slot: inside header chunk 0's random tail, so the copy looks
+  /// like any container. Never written in the container itself.
+  static const int transferSlotOffset = 0x9000;
+  static const int transferSlotPlain = 2048;
+  static const int transferSlotLen = transferSlotPlain + sealOverhead;
 
   /// Default pre-allocation: 256 MiB, and grow in 256 MiB steps.
   static const int defaultInitialChunks = 4096;
@@ -82,14 +93,26 @@ class VaultCrypto {
   /// Batched chunk sealing/opening and random fill (native on Android).
   final BulkCrypto bulk;
 
+  /// Unicode NFC normalisation of PINs and passphrases (identity if null).
+  final Future<String> Function(String)? normalize;
+
   VaultCrypto({
     required this.binding,
     BulkCrypto? bulk,
     this.pinParams = KdfParams.pin,
     this.growChunks = ContainerLayout.defaultGrowChunks,
+    this.normalize,
   }) : bulk = bulk ?? defaultBulkCrypto();
 
-  Future<Uint8List> pinKek(String pin, Uint8List salt) =>
+  Future<String> normalizePin(String pin) async => normalize == null ? pin : await normalize!(pin);
+
+  /// The key-encryption key for [pin], NFC-normalised first, so the same
+  /// passphrase typed on different keyboards gives the same key.
+  Future<Uint8List> pinKek(String pin, Uint8List salt) async =>
+      _kek(utf8.encode('p:${await normalizePin(pin)}'), salt, pinParams, 'sv/pin-kek');
+
+  /// The key for [pin] exactly as typed: how PINs were used before v2.2.
+  Future<Uint8List> legacyPinKek(String pin, Uint8List salt) =>
       _kek(utf8.encode('p:$pin'), salt, pinParams, 'sv/pin-kek');
 
   Future<Uint8List> _kek(
@@ -107,7 +130,14 @@ class VaultCrypto {
   }
 }
 
+/// Every record but [record], in random order.
+List<int> _otherRecords(int record) => [
+      for (var r = 0; r < ContainerLayout.recordCount; r++)
+        if (r != record) r,
+    ]..shuffle(Random.secure());
+
 List<int> _aadPin(int r) => [1, r];
+List<int> _aadDuress(int r) => [2, r];
 List<int> _aadSuper(int r, int slot) => [3, r, slot];
 List<int> _aadIndex(int gen, int seq, bool last) {
   final b = ByteData(14)
@@ -133,6 +163,105 @@ class VaultContainer {
   VaultContainer(this.file, this.crypto);
 
   Future<bool> exists() => file.exists();
+
+  // ─── Moving to another install ──────────────────────────────────
+
+  static const String _transferInfo = 'sv/transfer';
+
+  static Future<Uint8List> _transferKey(Uint8List code, Uint8List salt) =>
+      CryptoPrimitives.hkdf(code, salt: salt, info: _transferInfo);
+
+  /// Reads the vaults (record, key) from the transfer slot of a copy made
+  /// by [VaultSession.exportForTransfer]. Throws if [code] doesn't fit.
+  static Future<List<(int, Uint8List)>> _readTransfer(RandomAccessFile raf, Uint8List code) async {
+    final salt = _readAt(raf, 0, ContainerLayout.saltLen);
+    final key = await _transferKey(code, salt);
+    try {
+      final sealed = _readAt(raf, ContainerLayout.transferSlotOffset, ContainerLayout.transferSlotLen);
+      final plain = await CryptoPrimitives.tryOpen(key, sealed, utf8.encode(_transferInfo));
+      if (plain == null) throw const FormatException('that transfer code does not open this file');
+      final len = (plain[0] << 8) | plain[1];
+      final j = jsonDecode(utf8.decode(plain.sublist(2, 2 + len))) as Map<String, dynamic>;
+      CryptoPrimitives.wipe(plain);
+      return [
+        for (final v in (j['vaults'] as List).cast<Map<String, dynamic>>())
+          (v['r'] as int, Uint8List.fromList(base64Decode(v['k'] as String))),
+      ];
+    } finally {
+      CryptoPrimitives.wipe(key);
+    }
+  }
+
+  /// How many vaults a moved copy holds (the first is the one it was moved
+  /// from, the rest its decoy), or throws if [code] doesn't fit.
+  static Future<int> transferVaultCount(File copy, Uint8List code) async {
+    final raf = await copy.open();
+    try {
+      final vaults = await _readTransfer(raf, code);
+      for (final (_, vk) in vaults) {
+        CryptoPrimitives.wipe(vk);
+      }
+      return vaults.length;
+    } finally {
+      await raf.close();
+    }
+  }
+
+  /// Finishes moving a copy onto this install: each vault's PIN slot is
+  /// written again under [pins] (in the order [transferVaultCount] counts
+  /// them) and this phone's hardware binding, the transfer slot is erased,
+  /// and the copy becomes [destination]. The contents are untouched.
+  static Future<void> completeTransfer(
+    File copy,
+    File destination,
+    VaultCrypto crypto,
+    Uint8List code,
+    List<String> pins,
+  ) async {
+    final session = await VaultContainer(copy, crypto)._openSession();
+    try {
+      final vaults = await _readTransfer(session._raf, code);
+      if (pins.length != vaults.length) throw ArgumentError('one PIN per vault');
+      if (pins.toSet().length != pins.length) throw CredentialInUseException();
+      for (var i = 0; i < vaults.length; i++) {
+        final (record, vk) = vaults[i];
+        // The keys must really open their vaults before anything is written.
+        await session._loadVault(record, vk, depth: 0);
+      }
+      for (var i = 0; i < vaults.length; i++) {
+        final (record, vk) = vaults[i];
+        final kek = await crypto.pinKek(pins[i], session._salt);
+        await session._writePinSlot(record, kek, vk);
+        CryptoPrimitives.wipe(kek);
+        CryptoPrimitives.wipe(vk);
+      }
+      await session._fillRandom(ContainerLayout.transferSlotOffset, ContainerLayout.transferSlotLen);
+      await session._raf.flush();
+      // A duress PIN was bound to the old phone like the PINs: it can't work
+      // here, so it goes (and can be set again).
+      final kek = await crypto.pinKek(pins.first, session._salt);
+      final hit = await session._findPinRecord(kek);
+      CryptoPrimitives.wipe(kek);
+      if (hit != null) {
+        await session._loadRoot(hit.$1, hit.$2);
+        await session._locked(() async {
+          for (final v in session._live.selfAndDescendants.toList()) {
+            if (v.index.extras[VaultSession.duressKey] != true) continue;
+            await session._clearDuressSlot(v);
+            if (identical(v, session._root)) {
+              await session._commit(v);
+            } else {
+              await session._writeIndex(v);
+            }
+          }
+        });
+      }
+    } finally {
+      await session.close();
+    }
+    await destination.parent.create(recursive: true);
+    await copy.rename(destination.path);
+  }
 
   /// Creates a fresh container with a single (real) vault protected by [pin].
   /// Every byte is random until something is written.
@@ -172,10 +301,11 @@ class VaultContainer {
       final kek = await crypto.pinKek(pin, building._salt);
       await building._writePinSlot(record, kek, vk);
       CryptoPrimitives.wipe(kek);
+      // Set up alone: every other record is its own to give to decoys.
       final root = await _OpenVault.fresh(
         record,
         Uint8List.fromList(vk),
-        VaultIndex(topDown: true, ceiling: initialChunks),
+        VaultIndex(ceiling: initialChunks, spares: _otherRecords(record)),
       );
       building._root = root;
       await building._writeIndex(root);
@@ -207,12 +337,30 @@ class VaultContainer {
     final session = await _openSession();
     try {
       final kek = await crypto.pinKek(pin, session._salt);
-      final hit = await session._findPinRecord(kek);
-      CryptoPrimitives.wipe(kek);
-      if (hit == null) {
-        await session.close();
-        return null;
+      var hit = await session._findPinRecord(kek);
+      if (hit == null && await crypto.normalizePin(pin) != pin) {
+        // Set up before PINs were normalised, with characters that
+        // normalise differently: open it with the PIN as typed, then store
+        // it under the normalised form, which every keyboard now gives.
+        final legacy = await crypto.legacyPinKek(pin, session._salt);
+        try {
+          hit = await session._findPinRecord(legacy);
+          if (hit != null) await session._writePinSlot(hit.$1, kek, hit.$2);
+        } finally {
+          CryptoPrimitives.wipe(legacy);
+        }
       }
+      if (hit == null) {
+        // A duress PIN: destroys the vault that set it, opens its decoy.
+        final duress = await session._findDuressSlot(kek);
+        CryptoPrimitives.wipe(kek);
+        if (duress == null || !await session._executeDuress(duress.$1, duress.$2)) {
+          await session.close();
+          return null;
+        }
+        return session;
+      }
+      CryptoPrimitives.wipe(kek);
       await session._loadRoot(hit.$1, hit.$2);
       return session;
     } catch (_) {
@@ -238,6 +386,19 @@ class _OpenVault {
   List<Extent> indexExtents = const [];
   VaultIndex index;
   final List<_OpenVault> children = [];
+
+  /// Links to vaults that couldn't be loaded (damaged index or superblocks).
+  /// Their chunks are unknown, so while there are any, this vault writes
+  /// only into [safe] chunks or space beyond [safeFrom].
+  final List<LinkedVault> damaged = [];
+
+  /// Chunks this vault owned at load or allocated since; null when every
+  /// linked vault loaded (no restriction).
+  Set<int>? safe;
+  int safeFrom = 0;
+
+  /// Loaded from a format 1 index: rewritten in format 2 at the next commit.
+  bool migrated = false;
 
   _OpenVault._(this.record, this.vk, this.superKey, this.indexKey, this.index);
 
@@ -330,16 +491,40 @@ class VaultSession {
 
   bool get isOpen => !_closed && _root != null;
 
-  /// The real vault allocates top-down; a decoy bottom-up. Callers must not
-  /// show this anywhere in the UI.
-  VaultType get type => _r.index.topDown ? VaultType.primary : VaultType.decoy;
+  /// Called with the new commit number after each commit of this vault
+  /// (the rollback guard records it).
+  void Function(int generation)? onCommitted;
+
+  /// Set at unlock when the container is older than the last commit this
+  /// phone recorded for this vault (see RollbackGuard).
+  bool rolledBack = false;
+
+  /// This vault's commit number. Internal: not for display.
+  int get generation => _r.gen;
+
+  /// Which of the four records this vault is. Internal: not for display.
+  int get recordIndex => _r.record;
+
+  /// A key for the rollback guard's slot, derived from this vault's key.
+  Future<Uint8List> rollbackKey() =>
+      CryptoPrimitives.hkdf(_r.vk, salt: utf8.encode('sv/vault'), info: 'rollback');
 
   List<IndexEntry> get entries => List.unmodifiable(_r.index.entries);
 
-  bool get hasDecoy => _r.children.isNotEmpty;
+  bool get hasDecoy => _r.children.isNotEmpty || _r.damaged.isNotEmpty;
 
-  /// Only a real vault can own a decoy (a decoy can't safely host one).
-  bool get canManageDecoy => _r.index.topDown;
+  /// The decoy exists but couldn't be read (its index is damaged). The real
+  /// vault works normally; the decoy can only be removed and set up again.
+  bool get decoyDamaged => _r.damaged.isNotEmpty;
+
+  /// Whether this vault can host a decoy: it has records to give one (a
+  /// vault set up alone always has; a decoy has, unless it's three deep).
+  bool get canManageDecoy => _r.index.spares.isNotEmpty || hasDecoy;
+
+  /// Whether a duress PIN is set (it opens this vault's decoy and destroys
+  /// this vault).
+  bool get hasDuressPin => _r.index.extras[duressKey] == true;
+  static const String duressKey = 'duress';
 
   Future<int> get capacityBytes async => await _raf.length();
 
@@ -391,6 +576,38 @@ class VaultSession {
       } finally {
         await src.close();
       }
+    });
+  }
+
+  /// Streams [length] bytes produced by [read] into the vault (a video
+  /// decrypted and packed on the fly). [read] is asked for at most the
+  /// number of bytes given and returns at least one, in order. Nothing is
+  /// written outside the container; a lock stops it like [importFile].
+  Future<IndexEntry> importStream(
+    int length,
+    VaultItem meta,
+    Future<Uint8List> Function(int max) read, {
+    void Function(double)? onProgress,
+  }) {
+    return _locked(() async {
+      final buf = BytesBuilder(copy: false);
+      var produced = 0;
+      Future<Uint8List> next(int seq) async {
+        final want = min(ContainerLayout.chunkPayload, length - seq * ContainerLayout.chunkPayload);
+        while (buf.length < want) {
+          final got = await read(max(want - buf.length, 1 << 20));
+          if (got.isEmpty) break; // short: _writeChunks refuses it
+          produced += got.length;
+          if (produced > length) throw StateError('the stream is longer than announced');
+          buf.add(got);
+        }
+        final all = buf.takeBytes();
+        if (all.length > want) buf.add(Uint8List.sublistView(all, want));
+        return all.length > want ? Uint8List.sublistView(all, 0, want) : all;
+      }
+
+      final (chunks, fileKey) = await _writeChunks(meta.id, length, next, onProgress, abortOnLock: true);
+      return _addEntry(meta, chunks, fileKey, length);
     });
   }
 
@@ -448,7 +665,7 @@ class VaultSession {
   Future<(List<int>, Uint8List)> _writeChunks(
     String id,
     int length,
-    Uint8List Function(int seq) next,
+    FutureOr<Uint8List> Function(int seq) next,
     void Function(double)? onProgress, {
     bool abortOnLock = false,
   }) async {
@@ -468,7 +685,7 @@ class VaultSession {
       final plains = <Uint8List>[];
       final aads = <List<int>>[];
       for (var seq = start; seq < end; seq++) {
-        final plain = next(seq);
+        final plain = await next(seq);
         // Every chunk but the last is full, and the total is [length]. A
         // source that shrank or grew mid-import would otherwise be stored as
         // an entry that can never be read back.
@@ -600,24 +817,33 @@ class VaultSession {
       jsonDecode(jsonEncode(_r.index.extras)) as Map<String, dynamic>;
 
   /// Sets one settings entry (or removes it with null) and saves the index.
-  Future<void> putExtra(String key, Object? value) {
+  Future<void> putExtra(String key, Object? value) => putExtras({key: value});
+
+  /// Sets several settings entries (null removes one) in a single commit:
+  /// either all of them are saved or none.
+  Future<void> putExtras(Map<String, Object?> values) {
     return _locked(() async {
       final root = _r;
-      final had = root.index.extras.containsKey(key);
-      final previous = root.index.extras[key];
-      if (value == null) {
-        root.index.extras.remove(key);
-      } else {
-        root.index.extras[key] = jsonDecode(jsonEncode(value));
-      }
+      final before = <String, (bool, Object?)>{
+        for (final k in values.keys) k: (root.index.extras.containsKey(k), root.index.extras[k]),
+      };
+      values.forEach((key, value) {
+        if (value == null) {
+          root.index.extras.remove(key);
+        } else {
+          root.index.extras[key] = jsonDecode(jsonEncode(value));
+        }
+      });
       try {
         await _commit(root);
       } catch (_) {
-        if (had) {
-          root.index.extras[key] = previous;
-        } else {
-          root.index.extras.remove(key);
-        }
+        before.forEach((key, was) {
+          if (was.$1) {
+            root.index.extras[key] = was.$2;
+          } else {
+            root.index.extras.remove(key);
+          }
+        });
         rethrow;
       }
     });
@@ -697,35 +923,32 @@ class VaultSession {
 
   // ─── Decoy vault ────────────────────────────────────────────────
 
-  /// Creates a decoy vault in a free record, opened with [pin]. The real
-  /// vault keeps the decoy's key so it never overwrites the decoy's data;
-  /// the decoy knows nothing about the real one.
-  Future<void> createDecoy({required String pin}) {
+  /// Creates a decoy vault, opened with [pin], in a record this vault has
+  /// to give (see [VaultIndex.spares]); the decoy gets the rest, so it can
+  /// host one of its own. Any vault can host a decoy, a decoy too. The host
+  /// keeps the decoy's key so it never overwrites the decoy's data; the
+  /// decoy knows nothing about its host.
+  ///
+  /// The host's files move to the top of its space first, leaving the
+  /// bottom to the decoy ([onProgress] follows that move).
+  Future<void> createDecoy({required String pin, void Function(double)? onProgress}) {
     return _locked(() async {
       final root = _r;
-      if (!root.index.topDown) {
-        throw StateError('only the real vault can own a decoy');
-      }
-      if (root.children.isNotEmpty) throw StateError('decoy already exists');
+      if (root.children.isNotEmpty || root.damaged.isNotEmpty) throw StateError('decoy already exists');
+      if (root.index.spares.isEmpty) throw NoFreeRecordException();
       final kek = await _crypto.pinKek(pin, _salt);
       try {
-        final hit = await _findPinRecord(kek);
-        if (hit != null) {
-          CryptoPrimitives.wipe(hit.$2);
-          throw CredentialInUseException();
-        }
-        final taken = root.selfAndDescendants.map((v) => v.record).toSet();
-        final free = [
-          for (var r = 0; r < ContainerLayout.recordCount; r++)
-            if (!taken.contains(r)) r,
-        ];
-        if (free.isEmpty) throw NoFreeRecordException();
-        final record = free[Random.secure().nextInt(free.length)];
+        if (await _pinInUse(kek)) throw CredentialInUseException();
+        final record = root.index.spares.first;
         final vk = CryptoPrimitives.randomBytes(CryptoPrimitives.keyLen);
+        final moved = await _moveToTop(root, onProgress);
         final decoy = await _OpenVault.fresh(
           record,
           vk,
-          VaultIndex(topDown: false, ceiling: await _lowestChunkOf(root)),
+          VaultIndex(
+            ceiling: _childCeiling(root, await _lowestChunkOf(root)),
+            spares: root.index.spares.sublist(1),
+          ),
         );
         // Order matters for crash safety: the decoy's index, then the real
         // vault's link to it (so the real vault protects the decoy's space
@@ -741,8 +964,11 @@ class VaultSession {
         } catch (_) {
           root.children.remove(decoy);
           root.index.links.remove(link);
+          moved.undo();
           rethrow;
         }
+        // The old copies of the moved files are free now: overwrite them.
+        await _shredAfterCommit(extentsFromChunks(moved.from));
         await _writePinSlot(record, kek, vk);
       } finally {
         CryptoPrimitives.wipe(kek);
@@ -761,7 +987,7 @@ class VaultSession {
   Future<void> standInDecoySetup(String pin, {required bool shown}) {
     return _locked(() async {
       final root = _r;
-      if (root.index.topDown) throw StateError('only a decoy uses the stand-in');
+      if (hasDecoy) throw StateError('this vault has a real decoy');
       if (shown) {
         final kek = await _crypto.pinKek(pin, _salt);
         try {
@@ -773,57 +999,326 @@ class VaultSession {
         }
       }
       root.index.extras[standInDecoyKey] = shown;
-      if (!shown) root.index.extras.remove(standInDecoyKey);
+      if (!shown) {
+        root.index.extras.remove(standInDecoyKey);
+        root.index.extras.remove(duressKey);
+      }
       await _commit(root);
     });
   }
 
   static const String standInDecoyKey = 'decoy.shown';
 
-  /// Whether this vault shows a decoy in Settings: a real decoy for the
-  /// real vault, the stand-in one for a decoy.
-  bool get showsDecoy =>
-      _r.index.topDown ? _r.children.isNotEmpty : _r.index.extras[standInDecoyKey] == true;
+  /// Whether this vault shows a decoy in Settings: a real one it hosts, or
+  /// the stand-in of a vault with no record left to give one.
+  bool get showsDecoy => hasDecoy || _r.index.extras[standInDecoyKey] == true;
 
   Future<void> changeDecoyPin(String pin) =>
       _locked(() => _setPin(_decoy, pin));
 
   /// Deletes the decoy vault and shreds everything it stored.
+  /// Removes this vault's decoy, with any decoy inside it.
   Future<void> removeDecoy() {
     return _locked(() async {
       final root = _r;
+      if (root.children.isEmpty && root.damaged.isNotEmpty) return _removeDamagedDecoy(root);
       final decoy = _decoy;
       final chunks =
           decoy.selfAndDescendants.expand((v) => v.usedChunks).toList()..sort();
-      // First make the decoy PIN stop working, so a crash at any later
-      // point can't leave an openable decoy the real vault no longer
-      // protects. Its superblocks stay until the unlink is committed (the
-      // real vault still needs them to load it until then).
-      await _fillRandom(
-        ContainerLayout.recordOffset(decoy.record) + ContainerLayout.pinSlotOffset,
-        ContainerLayout.pinSlotLen,
-      );
-      await _raf.flush();
+      // The duress PIN opens this decoy: it goes with it.
+      if (hasDuressPin) await _clearDuressSlot(root);
+      // First make every PIN below this vault stop working, so a crash at
+      // any later point can't leave an openable vault this one no longer
+      // protects. Superblocks stay until the unlink is committed (this vault
+      // still needs them to load the decoy until then).
+      await _disableSpareRecords(root);
       root.children.remove(decoy);
       root.index.links.removeWhere((l) => l.record == decoy.record);
       _holdUntilShredded(extentsFromChunks(chunks));
       await _commit(root);
-      try {
-        await _fillRandom(
-          ContainerLayout.recordOffset(decoy.record),
-          ContainerLayout.recordSize,
-        );
-      } catch (_) {}
+      await _wipeSpareRecords(root);
       await _shredAfterCommit(extentsFromChunks(chunks));
       decoy.wipe();
     });
   }
 
+  /// Every record this vault gave away (to its decoy and the decoy's own):
+  /// the PIN and duress slots, so none of them opens any more.
+  Future<void> _disableSpareRecords(_OpenVault v) async {
+    for (final r in v.index.spares) {
+      await _fillRandom(ContainerLayout.recordOffset(r) + ContainerLayout.pinSlotOffset, ContainerLayout.pinSlotLen);
+      await _fillRandom(ContainerLayout.recordOffset(r) + ContainerLayout.duressSlotOffset, ContainerLayout.duressSlotLen);
+    }
+    await _raf.flush();
+  }
+
+  /// ... and then the whole records, once nothing needs their superblocks.
+  Future<void> _wipeSpareRecords(_OpenVault v) async {
+    for (final r in v.index.spares) {
+      try {
+        await _fillRandom(ContainerLayout.recordOffset(r), ContainerLayout.recordSize);
+      } catch (_) {}
+    }
+  }
+
+  // ─── Duress PIN ─────────────────────────────────────────────────
+
+  /// Sets (or replaces) the duress PIN. Entered on the lock screen it opens
+  /// this vault's decoy, and this vault is destroyed first: its PIN slot,
+  /// superblocks and index (with every file key) are overwritten, so
+  /// nothing in it can be opened again, with any PIN or code. The decoy
+  /// then takes over this vault's space. Needs a decoy.
+  Future<void> setDuressPin(String pin) {
+    return _locked(() async {
+      final root = _r;
+      // A vault showing the stand-in decoy shows a duress PIN too (so the
+      // two can't be told apart), but its slot stays random: there's no
+      // decoy for it to open.
+      final standIn = !hasDecoy && root.index.extras[standInDecoyKey] == true;
+      if (!standIn) _decoy; // throws if there's none
+      final kek = await _crypto.pinKek(pin, _salt);
+      try {
+        if (await _pinInUse(kek, ownDuress: root.record)) throw CredentialInUseException();
+        if (!standIn) {
+          final sealed = await CryptoPrimitives.seal(kek, root.vk, _aadDuress(root.record));
+          _writeAt(ContainerLayout.recordOffset(root.record) + ContainerLayout.duressSlotOffset, sealed);
+          await _raf.flush();
+        }
+      } finally {
+        CryptoPrimitives.wipe(kek);
+      }
+      root.index.extras[duressKey] = true;
+      await _commit(root);
+    });
+  }
+
+  Future<void> removeDuressPin() {
+    return _locked(() async {
+      await _clearDuressSlot(_r);
+      await _commit(_r);
+    });
+  }
+
+  Future<void> _clearDuressSlot(_OpenVault v) async {
+    await _fillRandom(ContainerLayout.recordOffset(v.record) + ContainerLayout.duressSlotOffset, ContainerLayout.duressSlotLen);
+    await _raf.flush();
+    v.index.extras.remove(duressKey);
+  }
+
+  /// The record whose duress slot opens with [kek], and that vault's key.
+  /// Tries every record, like [_findPinRecord].
+  Future<(int, Uint8List)?> _findDuressSlot(Uint8List kek) async {
+    (int, Uint8List)? hit;
+    for (var r = 0; r < ContainerLayout.recordCount; r++) {
+      final raw = _readAt(
+        _raf,
+        ContainerLayout.recordOffset(r) + ContainerLayout.duressSlotOffset,
+        ContainerLayout.duressSlotLen,
+      );
+      final vk = await CryptoPrimitives.tryOpen(kek, raw, _aadDuress(r));
+      if (vk != null && hit == null) hit = (r, vk);
+    }
+    return hit;
+  }
+
+  /// The duress PIN of [victim] was entered: destroy it and open its decoy
+  /// in its place, with all of its space. False (nothing changed) if it has
+  /// no decoy that loads.
+  Future<bool> _executeDuress(int victim, Uint8List vk) {
+    return _locked(() async {
+      final h = await _loadVault(victim, vk, depth: 0);
+      CryptoPrimitives.wipe(vk);
+      if (h.children.isEmpty) {
+        h.wipe();
+        return false;
+      }
+      final d = h.children.first;
+      final total = await _raf.length() ~/ ContainerLayout.chunkSize;
+      // The space the victim could use: below its ceiling, or the whole
+      // file if it grew the file right from its ceiling.
+      final g = h.index.grownFrom;
+      final region = g != null && g <= h.index.ceiling ? total : h.index.ceiling;
+      // Destroy first: the record (PIN, duress, superblocks), then the index
+      // (every file key). The files' chunks are now noise, free for reuse.
+      await _fillRandom(ContainerLayout.recordOffset(victim), ContainerLayout.recordSize);
+      await _raf.flush();
+      await _shredAfterCommit(h.indexExtents);
+      h.children.clear();
+      h.wipe();
+      _root = d;
+      d.index.ceiling = max(d.index.ceiling, region);
+      d.index.grownFrom = null;
+      // The victim's record is free now too.
+      d.index.spares = [...d.index.spares, victim]..shuffle(Random.secure());
+      await _commit(d);
+      return true;
+    });
+  }
+
+  /// Whether [kek] opens a PIN slot, or a duress slot other than
+  /// [ownDuress]'s (a new PIN must open nothing else).
+  Future<bool> _pinInUse(Uint8List kek, {int? ownDuress}) async {
+    final hit = await _findPinRecord(kek);
+    if (hit != null) {
+      CryptoPrimitives.wipe(hit.$2);
+      return true;
+    }
+    final d = await _findDuressSlot(kek);
+    if (d != null) {
+      CryptoPrimitives.wipe(d.$2);
+      if (d.$1 != ownDuress) return true;
+    }
+    return false;
+  }
+
+  /// Moves [v]'s files to the highest chunks of its space (free ones, or
+  /// its own already there), so the decoy it's about to host gets the
+  /// bottom. Writes only free chunks, and keeps the old copies reserved:
+  /// until [v]'s next commit its index on disk still points at them, so a
+  /// crash loses nothing. [undo] restores the in-memory index if that
+  /// commit fails.
+  Future<({List<int> from, void Function() undo})> _moveToTop(_OpenVault v, void Function(double)? onProgress) async {
+    final own = <int>[
+      for (final e in v.index.entries)
+        for (final x in e.extents) ...x.chunks,
+    ];
+    if (own.isEmpty) return (from: const <int>[], undo: () {});
+    final ownSet = own.toSet();
+    while (true) {
+      final total = await _raf.length() ~/ ContainerLayout.chunkSize;
+      final busy = <int>{0, ..._reserved};
+      for (final w in v.selfAndDescendants.skip(1)) {
+        busy.addAll(w.usedChunks);
+      }
+      for (final x in v.indexExtents) {
+        busy.addAll(x.chunks);
+      }
+      final ceiling = v.index.ceiling;
+      final g = v.index.grownFrom;
+      final safe = v.safe;
+      bool mayUse(int c) =>
+          !busy.contains(c) &&
+          (c < ceiling || (g != null && c >= g)) &&
+          (safe == null || c >= v.safeFrom || safe.contains(c));
+      final desired = <int>[];
+      for (var c = total - 1; c >= 1 && desired.length < own.length; c--) {
+        if (mayUse(c)) desired.add(c);
+      }
+      if (desired.length < own.length) {
+        final step = _crypto.growChunks;
+        final grow = max(1, ((own.length - desired.length) + step - 1) ~/ step) * step;
+        await _fillRandom(total * ContainerLayout.chunkSize, grow * ContainerLayout.chunkSize);
+        await _raf.flush();
+        v.index.grownFrom ??= total;
+        continue;
+      }
+      final desiredSet = desired.toSet();
+      final targets = desired.where((c) => !ownSet.contains(c)).toList()..sort();
+      final movers = own.where((c) => !desiredSet.contains(c)).toList()..sort();
+      final map = <int, int>{
+        for (var i = 0; i < movers.length; i++) movers[i]: targets[i],
+      };
+      for (var i = 0; i < movers.length; i++) {
+        final bytes = _readAt(_raf, ContainerLayout.chunkOffset(movers[i]), ContainerLayout.chunkSize);
+        _writeAt(ContainerLayout.chunkOffset(map[movers[i]]!), bytes);
+        if (i % 64 == 63) {
+          await _raf.flush();
+          onProgress?.call(i / movers.length);
+        }
+      }
+      await _raf.flush();
+      onProgress?.call(1);
+      _reserved.addAll(targets);
+      _rootReserved.addAll(targets);
+      _holdUntilShredded(extentsFromChunks(movers));
+      final before = List.of(v.index.entries);
+      for (var k = 0; k < v.index.entries.length; k++) {
+        final e = v.index.entries[k];
+        if (e.extents.isEmpty) continue;
+        final chunks = [for (final x in e.extents) ...x.chunks].map((c) => map[c] ?? c).toList();
+        v.index.entries[k] = IndexEntry(
+          item: e.item,
+          fileKey: e.fileKey,
+          extents: extentsFromChunks(chunks),
+          byteLength: e.byteLength,
+        );
+      }
+      return (
+        from: movers,
+        undo: () => v.index.entries
+          ..clear()
+          ..addAll(before),
+      );
+    }
+  }
+
+  /// A decoy whose index can't be read: its PIN stops working and the link
+  /// goes. Its chunks can't be told apart, so they aren't shredded; they're
+  /// encrypted under a key that's forgotten, and get reused over time.
+  Future<void> _removeDamagedDecoy(_OpenVault root) async {
+    final link = root.damaged.first;
+    if (hasDuressPin) await _clearDuressSlot(root);
+    // Any decoy inside it can't be seen either: all the records this vault
+    // gave away go.
+    if (!root.index.spares.contains(link.record)) root.index.spares.add(link.record);
+    await _disableSpareRecords(root);
+    root.index.links.removeWhere((l) => l.record == link.record);
+    root.damaged.remove(link);
+    await _commit(root);
+    await _wipeSpareRecords(root);
+    CryptoPrimitives.wipe(link.vaultKey);
+  }
+
   _OpenVault get _decoy {
     final root = _live;
-    if (root.children.isEmpty) throw StateError('no decoy');
+    if (root.children.isEmpty) {
+      if (root.damaged.isNotEmpty) throw VaultCorruptedException('the decoy is damaged; remove it and set it up again');
+      throw StateError('no decoy');
+    }
     return root.children.first;
   }
+
+  /// Writes a copy of the whole container for moving it to another phone or
+  /// app: [writeCopy] copies the container file, putting [slot] at
+  /// [slotOffset] in the copy. The slot holds this vault's key and its
+  /// decoy's, sealed under the returned transfer code; another install can't
+  /// use the PIN slots (they're bound to this phone's hardware), so it opens
+  /// them with the code instead and sets PINs of its own. Nothing in this
+  /// container changes, and no other write happens during the copy.
+  ///
+  /// Anyone with the copy and the code can open these vaults without a PIN:
+  /// the code is shown once and never stored.
+  Future<Uint8List> exportForTransfer(Future<void> Function(int slotOffset, Uint8List slot) writeCopy) {
+    return _locked(() async {
+      final root = _r;
+      final code = CryptoPrimitives.randomBytes(16);
+      final vaults = [
+        {'r': root.record, 'k': base64Encode(root.vk)},
+        for (final c in root.selfAndDescendants.skip(1)) {'r': c.record, 'k': base64Encode(c.vk)},
+      ];
+      final json = utf8.encode(jsonEncode({'v': 1, 'vaults': vaults}));
+      final plain = Uint8List(ContainerLayout.transferSlotPlain);
+      plain[0] = json.length >> 8;
+      plain[1] = json.length & 0xff;
+      plain.setRange(2, 2 + json.length, json);
+      final key = await VaultContainer._transferKey(code, _salt);
+      final sealed = await CryptoPrimitives.seal(key, plain, utf8.encode(VaultContainer._transferInfo));
+      CryptoPrimitives.wipe(key);
+      CryptoPrimitives.wipe(plain);
+      await _raf.flush();
+      await writeCopy(ContainerLayout.transferSlotOffset, sealed);
+      return code;
+    });
+  }
+
+  /// Tests: each loaded vault's record, index chunks and all chunks.
+  Map<int, ({List<int> index, List<int> all})> get debugChunks => {
+        for (final v in _r.selfAndDescendants)
+          v.record: (index: v.indexExtents.expand((e) => e.chunks).toList(), all: v.usedChunks.toList()),
+      };
+
+  /// Tests: the vault's allocation restriction while a decoy is damaged.
+  ({Set<int>? safe, int safeFrom}) get debugSafeArea => (safe: _r.safe, safeFrom: _r.safeFrom);
 
   /// Locks the vault: wipes keys from memory and closes the file.
   Future<void> close() async {
@@ -875,6 +1370,11 @@ class VaultSession {
       final hit = await _findPinRecord(kek);
       if (hit != null) CryptoPrimitives.wipe(hit.$2);
       if (hit != null && hit.$1 != v.record) throw CredentialInUseException();
+      final duress = await _findDuressSlot(kek);
+      if (duress != null) {
+        CryptoPrimitives.wipe(duress.$2);
+        throw CredentialInUseException();
+      }
       await _writePinSlot(v.record, kek, v.vk);
     } finally {
       CryptoPrimitives.wipe(kek);
@@ -886,11 +1386,16 @@ class VaultSession {
   Future<void> _loadRoot(int record, Uint8List vk) async {
     final root = await _loadVault(record, vk, depth: 0);
     _root = root;
-    // Keep the decoy's ceiling in step with the real vault (e.g. after the
-    // real vault freed space, or the decoy grew the container on its own).
-    if (root.index.topDown) {
-      await _locked(() => _syncChildCeilings(root));
-    }
+    // Keep the decoys' ceilings in step (e.g. after this vault freed space,
+    // or a decoy grew the container on its own), and rewrite indexes still
+    // in format 1.
+    await _locked(() async {
+      if (_takeOverGrownSpace(root) || root.migrated) {
+        await _commit(root);
+      } else {
+        await _syncDescendants(root);
+      }
+    });
   }
 
   Future<_OpenVault> _loadVault(
@@ -904,7 +1409,7 @@ class VaultSession {
     final v = await _OpenVault.fresh(
       record,
       vk,
-      VaultIndex(topDown: true, ceiling: 0),
+      VaultIndex(ceiling: 0),
     );
     int? bestGen;
     Map<String, dynamic>? best;
@@ -967,14 +1472,35 @@ class VaultSession {
       out.add(part);
     }
     v.index = VaultIndex.decode(out.takeBytes());
+    if (v.index.version == 1) {
+      // Format 1 marked the real vault ("t"). It was set up alone and used
+      // the whole file: it keeps all of it, and every other record is its
+      // own to give. A format 1 decoy keeps its ceiling and has none.
+      if (v.index.legacyRealVault == true) {
+        v.index.ceiling = await _raf.length() ~/ ContainerLayout.chunkSize;
+        v.index.grownFrom = null;
+        v.index.spares = _otherRecords(record);
+      }
+      v.index.version = 2;
+      v.migrated = true;
+    }
     for (final link in v.index.links) {
-      v.children.add(
-        await _loadVault(
-          link.record,
-          Uint8List.fromList(link.vaultKey),
-          depth: depth + 1,
-        ),
-      );
+      try {
+        v.children.add(
+          await _loadVault(
+            link.record,
+            Uint8List.fromList(link.vaultKey),
+            depth: depth + 1,
+          ),
+        );
+      } catch (_) {
+        // A damaged decoy must not lock its owner out of its own data.
+        v.damaged.add(link);
+      }
+    }
+    if (v.damaged.isNotEmpty) {
+      v.safe = v.usedChunks.toSet();
+      v.safeFrom = await _raf.length() ~/ ContainerLayout.chunkSize;
     }
     return v;
   }
@@ -988,26 +1514,64 @@ class VaultSession {
   /// that didn't reach the disk.
   Future<void> _commit(_OpenVault v) async {
     await _writeIndex(v);
-    if (v.index.topDown) {
+    if (identical(v, _root)) {
       try {
-        await _syncChildCeilings(v);
+        onCommitted?.call(v.gen);
+      } catch (_) {}
+    }
+    v.migrated = false;
+    if (identical(v, _root)) {
+      try {
+        await _syncDescendants(v);
       } catch (_) {
-        // Only ever raises the decoy's ceiling (lowering happens before any
-        // real data is written, in _allocate); leaving it lower is safe.
+        // Lowering a ceiling happens before any data is written (in
+        // _allocate); here they only go up, so leaving them is safe.
       }
     }
   }
 
-  Future<void> _syncChildCeilings(_OpenVault v) async {
-    final ceiling = await _lowestChunkOf(v);
-    for (final child in v.children) {
-      if (child.index.topDown) continue;
-      if (child.index.ceiling != ceiling || child.index.grownFrom != null) {
-        child.index.ceiling = ceiling;
+  /// The ceiling for [v]'s decoy: below [v]'s lowest chunk [low], and inside
+  /// [v]'s own space, which may have a gap belonging to vaults above [v].
+  int _childCeiling(_OpenVault v, int low) {
+    final g = v.index.grownFrom;
+    if (g != null && g <= v.index.ceiling) return low; // no gap
+    return min(low, v.index.ceiling);
+  }
+
+  /// Down the chain of decoys below [root]: each one's ceiling becomes the
+  /// lowest chunk of any vault above it (inside their space), and the space
+  /// it grew on its own is no longer its alone.
+  Future<void> _syncDescendants(_OpenVault root) async {
+    var limit = _childCeiling(root, await _lowestChunkOf(root));
+    var parent = root;
+    while (parent.children.isNotEmpty) {
+      final child = parent.children.first;
+      if (child.index.ceiling != limit || child.index.grownFrom != null || child.migrated) {
+        child.index.ceiling = limit;
         child.index.grownFrom = null;
         await _writeIndex(child);
+        child.migrated = false;
       }
+      limit = min(limit, await _lowestChunkOf(child));
+      parent = child;
     }
+  }
+
+  /// A decoy below [root] grew the file on its own: from there to the end
+  /// there are only its chunks (known here) and free ones, since any vault
+  /// above it that used some would have taken that space back first (see
+  /// [_allocate]). So [root] may use that space too. True if [root]'s index
+  /// changed.
+  bool _takeOverGrownSpace(_OpenVault root) {
+    int? grown;
+    for (final v in root.selfAndDescendants.skip(1)) {
+      final g = v.index.grownFrom;
+      if (g != null && (grown == null || g < grown)) grown = g;
+    }
+    final mine = root.index.grownFrom;
+    if (grown == null || (mine != null && mine <= grown)) return false;
+    root.index.grownFrom = grown;
+    return true;
   }
 
   /// The lowest chunk [v] uses (or the container end if it uses none),
@@ -1100,9 +1664,8 @@ class VaultSession {
   /// Returned in ascending order; data is written in that order.
   Future<List<int>> _allocate(_OpenVault target, int n) async {
     final root = _live;
-    // A decoy opened on its own can't see the real vault, so it stays below
-    // its ceiling (or in space it grew itself).
-    final constrained = !root.index.topDown;
+    // Every vault keeps to its own space: below its ceiling, or in space it
+    // grew itself. Any vault may be another's decoy without knowing it.
     while (true) {
       final total = await _raf.length() ~/ ContainerLayout.chunkSize;
       final used = Uint8List(total);
@@ -1116,9 +1679,12 @@ class VaultSession {
         if (c < total) used[c] = 1;
       }
 
+      final safe = root.safe;
       bool allowed(int c) {
         if (used[c] == 1) return false;
-        if (!constrained) return true;
+        // A linked vault that couldn't be read may own any chunk this vault
+        // didn't own already: only those, or fresh space, are safe.
+        if (safe != null && c < root.safeFrom && !safe.contains(c)) return false;
         final ceiling = root.index.ceiling;
         final grown = root.index.grownFrom;
         return c < ceiling || (grown != null && c >= grown);
@@ -1137,31 +1703,29 @@ class VaultSession {
 
       if (picked.length == n) {
         picked.sort();
+        safe?.addAll(picked);
         _reserved.addAll(picked);
         if (identical(target, root)) _rootReserved.addAll(picked);
-        // The real vault is about to write below its decoy's ceiling: lower
-        // the ceiling *first*, so a crash can never leave the decoy free to
-        // overwrite real data.
-        if (target == root && root.index.topDown) {
-          for (final child in root.children) {
-            if (child.index.topDown) continue;
-            final low = picked.first;
-            final grown = child.index.grownFrom;
-            if (low < child.index.ceiling ||
-                (grown != null && picked.last >= grown)) {
-              final oldCeiling = child.index.ceiling;
-              child.index.ceiling = min(oldCeiling, low);
-              child.index.grownFrom = null;
-              try {
-                await _writeIndex(child);
-              } catch (_) {
-                // Not lowered on disk, so not in memory either: otherwise a
-                // retry would write real data below the decoy's stored
-                // ceiling with nothing on disk protecting it.
-                child.index.ceiling = oldCeiling;
-                child.index.grownFrom = grown;
-                rethrow;
-              }
+        // About to write inside the space of a decoy below [target]: lower
+        // its ceiling *first*, so a crash can never leave the decoy free to
+        // overwrite these chunks.
+        for (final child in target.selfAndDescendants.skip(1).toList()) {
+          final low = picked.first;
+          final grown = child.index.grownFrom;
+          if (low < child.index.ceiling ||
+              (grown != null && picked.last >= grown)) {
+            final oldCeiling = child.index.ceiling;
+            child.index.ceiling = min(oldCeiling, low);
+            child.index.grownFrom = null;
+            try {
+              await _writeIndex(child);
+            } catch (_) {
+              // Not lowered on disk, so not in memory either: otherwise a
+              // retry would write real data below the decoy's stored
+              // ceiling with nothing on disk protecting it.
+              child.index.ceiling = oldCeiling;
+              child.index.grownFrom = grown;
+              rethrow;
             }
           }
         }
@@ -1177,9 +1741,8 @@ class VaultSession {
         grow * ContainerLayout.chunkSize,
       );
       await _raf.flush();
-      if (constrained && root.index.grownFrom == null) {
-        root.index.grownFrom = total;
-      }
+      // The new space is this vault's own (see VaultIndex.grownFrom).
+      root.index.grownFrom ??= total;
     }
   }
 

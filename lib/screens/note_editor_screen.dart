@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../services/vault_clipboard.dart';
 import '../theme/app_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
@@ -154,6 +155,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
             children: [
               TextField(
                 enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
+                contextMenuBuilder: vaultContextMenu,
                 controller: _titleController,
                 onChanged: (_) => _onChanged(),
                 style: AppFonts.outfit(
@@ -177,6 +179,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
               Expanded(
                 child: TextField(
                   enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
+                  contextMenuBuilder: vaultContextMenu,
                   controller: _contentController,
                   onChanged: (_) => _onChanged(),
                   maxLines: null,

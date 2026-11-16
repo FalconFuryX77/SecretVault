@@ -3,12 +3,13 @@ import 'dart:async';
 import 'navigation/vault_routes.dart';
 import 'theme/app_fonts.dart';
 import 'package:provider/provider.dart';
-import 'providers/device_files_provider.dart';
 import 'providers/unlock_provider.dart';
 import 'providers/vault_provider.dart';
 import 'models/vault_state.dart';
+import 'services/vault_clipboard.dart';
+import 'sync/auto_backup.dart';
 import 'services/vault_service.dart';
-import 'screens/normal_files_screen.dart';
+import 'cover/trimmer_home_screen.dart';
 import 'screens/setup_screen.dart';
 
 
@@ -36,20 +37,20 @@ class SecretVaultApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<VaultService>.value(value: vaultService),
+        Provider<AutoBackup>(create: (_) => AutoBackup(vaults: vaultService), dispose: (_, a) => a.dispose(), lazy: false),
         ChangeNotifierProvider(
           create: (_) => UnlockProvider(vaultService: vaultService),
         ),
         ChangeNotifierProvider(
           create: (_) => VaultProvider(vaultService: vaultService),
         ),
-        ChangeNotifierProvider(create: (_) => DeviceFilesProvider()),
       ],
       child: Builder(
         builder: (context) {
           return MaterialApp(
             navigatorKey: rootNavigatorKey,
             navigatorObservers: [vaultRoutes],
-            title: 'Files',
+            title: coverName,
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
               brightness: Brightness.dark,
@@ -72,7 +73,7 @@ class SecretVaultApp extends StatelessWidget {
               );
             },
             home: isSetupComplete
-                ? const NormalFilesScreen()
+                ? const TrimmerHomeScreen()
                 : const SetupScreen(),
           );
         },
@@ -106,6 +107,7 @@ class _AppLifecycleScopeState extends State<AppLifecycleScope>
       vaultRoutes.removeAllAboveFirst();
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();
+      unawaited(VaultClipboard.clear());
     });
   }
 
@@ -127,8 +129,8 @@ class _AppLifecycleScopeState extends State<AppLifecycleScope>
         state == AppLifecycleState.hidden) {
       unlock.onAppPaused();
       // A lock screen left open would greet whoever wakes the phone with
-      // "enter your PIN" inside the Files app. The cover app's own screens
-      // stay, as a real file manager's would.
+      // "enter your PIN" inside the cover app. The cover app's own screens
+      // stay, as a real app's would.
       if (unlock.state != UnlockState.unlocked) vaultRoutes.removeVaultScreens();
     } else if (state == AppLifecycleState.resumed) {
       unlock.onAppResumed();

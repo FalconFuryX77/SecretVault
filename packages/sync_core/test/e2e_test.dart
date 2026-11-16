@@ -267,6 +267,174 @@ void main() {
       throwsA(isA<IntegrityException>()),
     );
   });
+
+  test('restore as of a time, or ignoring a device, undoes what came later or from it', () async {
+    final (id, rs) = await newAccount();
+    final a = await engineFor(id, direct);
+    final v1 = Uint8List.fromList(utf8.encode('first version'));
+    await a.backupSource(MemorySyncSource(v1), fileId: 'f1', meta: {'title': 'f1.txt'});
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    final cut = DateTime.now();
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    // A second device (say, a phone that was taken) edits f1 and adds f2.
+    final api2 = SyncApi(direct);
+    final id2 = await recoverAccess(api2, id.account, rs);
+    final b = await engineFor(id2, direct);
+    await b.backupSource(MemorySyncSource(Uint8List.fromList(utf8.encode('changed by the other device'))),
+        fileId: 'f1', meta: {'title': 'f1.txt'});
+    await b.backupSource(MemorySyncSource(Uint8List.fromList(utf8.encode('planted'))), fileId: 'f2', meta: {'title': 'f2.txt'});
+
+    Future<Map<String, String>> restoreWith({DateTime? asOf, Set<String> exclude = const {}}) async {
+      final out = Directory('${tmp.path}/asof_${asOf?.millisecondsSinceEpoch}_${exclude.length}');
+      final files = await (await engineFor(id, direct)).restoreAll(out, asOf: asOf, excludeDevices: exclude);
+      return {for (final f in files) f.uri.pathSegments.last: await f.readAsString()};
+    }
+
+    expect(await restoreWith(), {'f1.txt': 'changed by the other device', 'f2.txt': 'planted'});
+    expect(await restoreWith(asOf: cut), {'f1.txt': 'first version'});
+    expect(await restoreWith(exclude: {id2.device}), {'f1.txt': 'first version'});
+    api2.close();
+  });
+
+  test('a file whose piece list is split over several manifests restores', () async {
+    final (id, _) = await newAccount();
+    final engine = await engineFor(id, direct);
+    engine.piecesPerPart = 3;
+    final data = noise(3 * 1024 * 1024, 9);
+    final r = await engine.backupFile(await writeFile('big.bin', data), fileId: 'big', meta: {'title': 'big.bin'});
+    expect(r.piecesTotal, greaterThan(6), reason: 'enough pieces for several parts');
+    final live = await (await engineFor(id, direct)).liveFiles();
+    final m = await engine.manifestOf(live.single.manifestId);
+    expect(m.pieces.length, r.piecesTotal);
+    final restored = await (await engineFor(id, direct)).restoreAll(Directory('${tmp.path}/split'));
+    expect(await restored.single.readAsBytes(), data);
+  });
+
+  test('records the server already showed this client cannot be dropped from the end unnoticed', () async {
+    final (id, _) = await newAccount();
+    final journal = MemoryJournalStore();
+    final engine = await engineFor(id, direct, journal: journal);
+    for (var i = 0; i < 3; i++) {
+      await engine.backupSource(MemorySyncSource(noise(400, i)), fileId: 't$i', meta: {'title': 't$i'});
+    }
+    expect(await engine.liveFiles(), hasLength(3));
+    // The server quietly drops the newest record (a rollback). The chain
+    // alone still looks fine; the remembered head doesn't.
+    final py = await Process.run('python', [
+      '-c',
+      'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); '
+          'c.execute("delete from log where account_id=? and counter=3",(sys.argv[2],)); c.commit()',
+      '${tmp.path}/sync.db',
+      id.account,
+    ]);
+    expect(py.exitCode, 0, reason: '${py.stderr}');
+    expect(await (await engineFor(id, direct)).liveFiles(), hasLength(2), reason: 'a client without memory is fooled');
+    await expectLater((await engineFor(id, direct, journal: journal)).liveFiles(), throwsA(isA<IntegrityException>()));
+  });
+
+  test('log records are padded: their size does not give away what they hold', () async {
+    final keys = await SyncKeys.derive(randomBytes(32));
+    final sealer = LogSealer(keys);
+    final small = await sealer.next('dev', ChainState(), [const LogOp.del(file: 'a', version: 'b')]);
+    // A new file, an edit (with its parent), and deletions of three versions.
+    final put = await sealer.next('dev', ChainState(), [LogOp.put(file: 'f' * 36, version: 'v' * 32, manifestId: 'm' * 64)]);
+    final edit = await sealer.next('dev', ChainState(),
+        [LogOp.put(file: 'f' * 36, version: 'v' * 32, manifestId: 'm' * 64, parent: 'p' * 32)]);
+    final dels = await sealer.next('dev', ChainState(), [
+      for (var i = 0; i < 3; i++) LogOp.del(file: 'f' * 36, version: '$i' * 32),
+    ]);
+    expect({small.$2.length, put.$2.length, edit.$2.length, dels.$2.length}, hasLength(1),
+        reason: 'all in the smallest bucket');
+    final opened = await sealer.open('dev', 1, small.$2);
+    expect(opened.ops.single.type, 'del');
+  });
+
+  test('devices: list, revoke a lost one, find the account from the recovery code, close it', () async {
+    final (id, rs) = await newAccount();
+    final api = SyncApi(direct);
+    expect(await findAccounts(api, rs), [id.account]);
+    final id2 = await recoverAccess(api, id.account, rs);
+    final a = SyncApi(direct);
+    await useIdentity(a, id);
+    final listed = await a.devices();
+    expect(listed.map((d) => d.id).toSet(), {id.device, id2.device});
+    await revokeDevices(api, id.account, rs, [id2.device]);
+    final after = {for (final d in await a.devices()) d.id: d.revoked};
+    expect(after[id.device], isNull);
+    expect(after[id2.device], isNotNull);
+    await closeAccount(api, id.account, rs);
+    expect(await findAccounts(api, rs), isEmpty);
+    await expectLater(a.devices(), throwsA(isA<ApiException>()));
+    api.close();
+    a.close();
+  });
+
+  test('version history: current, replaced and deleted versions, oldest first; old ones still restore', () async {
+    final (id, _) = await newAccount();
+    final engine = await engineFor(id, direct);
+    final v1 = Uint8List.fromList(utf8.encode('draft one ' * 100));
+    final v2 = Uint8List.fromList(utf8.encode('draft two ' * 100));
+    await engine.backupSource(MemorySyncSource(v1), fileId: 'n', meta: {'title': 'n', 'v': 1});
+    await engine.backupSource(MemorySyncSource(v2), fileId: 'n', meta: {'title': 'n', 'v': 2});
+    await engine.backupSource(MemorySyncSource(noise(5000, 2)), fileId: 'x', meta: {'title': 'x'});
+    await engine.deleteFile('x', (await engine.history())['x']!.single.version);
+
+    final h = await engine.history();
+    expect(h.keys.toSet(), {'n', 'x'});
+    expect([for (final v in h['n']!) v.retired == null], [false, true]);
+    expect(h['n']!.first.deleted, isFalse);
+    expect(h['x']!.single.deleted, isTrue);
+    final old = await engine.manifestOf(h['n']!.first.manifestId);
+    expect(old.meta['v'], 1);
+    expect(await engine.contentOf(old).expand((p) => p).toList(), v1);
+  });
+
+  test('pruning frees what only old versions used, keeps what is current or shared, and needs the recovery key', () async {
+    final (id, rs) = await newAccount();
+    final engine = await engineFor(id, direct);
+    final shared = noise(300 * 1024, 21);
+    final a1 = Uint8List.fromList([...shared, ...noise(200 * 1024, 22)]);
+    final a2 = Uint8List.fromList([...shared, ...noise(200 * 1024, 23)]);
+    await engine.backupSource(MemorySyncSource(a1), fileId: 'a', meta: {'title': 'a', 'v': 1});
+    await engine.backupSource(MemorySyncSource(a2), fileId: 'a', meta: {'title': 'a', 'v': 2});
+    await engine.backupSource(MemorySyncSource(noise(400 * 1024, 24)), fileId: 'g', meta: {'title': 'g'});
+    await engine.deleteFile('g', (await engine.history())['g']!.single.version);
+    final api = SyncApi(direct);
+    await useIdentity(api, id);
+    // A piece no log record mentions: an upload still under way elsewhere.
+    final orphan = hex(randomBytes(32));
+    await api.putPiece(orphan, noise(1000, 25));
+    Future<int> count() async => (await api.listPieces()).pieces.length;
+    final before = await count();
+    final rk = await RecoveryKeys.fromSecret(rs);
+    final slot = await recoverySlot(api, id.account, rk);
+
+    // Within the retention period nothing goes, not even the orphan.
+    final early = await engine.prune(retention: const Duration(days: 30), recovery: rk.signing, keyIndex: slot);
+    print('[measure] prune, nothing old yet: $early');
+    expect(early.piecesDeleted, 0);
+    expect(await count(), before);
+
+    // A month later. Append-only: without the recovery key the server refuses.
+    final later = DateTime.now().add(const Duration(days: 31));
+    await expectLater(engine.prune(retention: const Duration(days: 30), now: later), throwsA(isA<ApiException>()));
+    final r = await engine.prune(retention: const Duration(days: 30), recovery: rk.signing, keyIndex: slot, now: later);
+    print('[measure] prune a month later: $r');
+    expect(r.versionsDropped, 2);
+    expect(r.piecesDeleted, greaterThan(1));
+    expect(await count(), before - r.piecesDeleted);
+    expect(await api.missing([orphan]), [orphan]);
+    final h = await engine.history();
+    expect(await api.missing([h['a']!.first.manifestId, h['g']!.single.manifestId]), hasLength(2));
+    // The current version still restores byte for byte: the pieces it
+    // shares with the dropped one were kept.
+    final out = await (await engineFor(id, direct)).restoreAll(Directory('${tmp.path}/pruned'));
+    expect(out, hasLength(1));
+    expect(await out.single.readAsBytes(), a2);
+    // Nothing more to do the second time.
+    expect((await engine.prune(retention: const Duration(days: 30), recovery: rk.signing, keyIndex: slot, now: later)).piecesDeleted, 0);
+    api.close();
+  });
 }
 
 /// Remembers every state the engine saved, so a test can roll the journal

@@ -37,6 +37,10 @@ class SyncApi {
   int bytesSent = 0;
   int requests = 0;
 
+  /// The server writes UTC times without a zone; read them as UTC.
+  static DateTime parseServerTime(String s) =>
+      DateTime.parse(RegExp(r'(Z|[+-]\d\d:?\d\d)$').hasMatch(s) ? s : '${s}Z');
+
   SyncApi(this.base, {http.Client? client, this.timeout = const Duration(seconds: 30)})
       : _http = client ?? http.Client();
 
@@ -91,6 +95,28 @@ class SyncApi {
     return r['device_id'] as String;
   }
 
+  /// Accounts on this server that list [recovery]'s public key. Signed with
+  /// the key over the current time, so only its holder can ask.
+  Future<List<String>> lookupAccounts(SimpleKeyPair recovery) async {
+    final pub = base64Encode((await recovery.extractPublicKey()).bytes);
+    final ts = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final sig = await Ed25519().sign(await _signedMessage('lookup:$pub', '-', '$ts', const []), keyPair: recovery);
+    final r = await _json('POST', '/v1/recovery/lookup',
+        body: {'public_key': pub, 'ts': ts, 'signature': base64Encode(sig.bytes)});
+    return (r['accounts'] as List).cast<String>();
+  }
+
+  Future<void> revokeDevice(String account, SimpleKeyPair recovery, String deviceId, {int keyIndex = 0}) async {
+    final hdr = await recoveryHeader(account, recovery, 'revoke-device:$deviceId', const [], keyIndex: keyIndex);
+    await _json('DELETE', '/v1/accounts/$account/devices/$deviceId', headers: hdr, expect: 204);
+  }
+
+  /// Deletes the account and everything in it (recovery key only).
+  Future<void> deleteAccount(String account, SimpleKeyPair recovery, {int keyIndex = 0}) async {
+    final hdr = await recoveryHeader(account, recovery, 'delete-account', const [], keyIndex: keyIndex);
+    await _json('DELETE', '/v1/accounts/$account', headers: hdr, expect: 204);
+  }
+
   Future<List<Uint8List>> escrowWithRecovery(String account, SimpleKeyPair recovery, {int keyIndex = 0}) async {
     final hdr = await recoveryHeader(account, recovery, 'get-escrow', const [], keyIndex: keyIndex);
     final r = await _json('GET', '/v1/accounts/$account/escrow', headers: hdr);
@@ -125,6 +151,52 @@ class SyncApi {
       _tokenExpiry = DateTime.now().add(Duration(seconds: (r['expires_in'] as int) - 60));
     }
     return {'Authorization': 'Bearer $_token'};
+  }
+
+  /// The account's devices (device token).
+  Future<List<({String id, DateTime created, DateTime? revoked})>> devices() async {
+    final req = http.Request('GET', _u('/v1/accounts/$account/devices'))..headers.addAll(await _auth());
+    final r = await _send(req);
+    if (r.statusCode != 200) throw ApiException(r.statusCode, r.body);
+    return [
+      for (final d in (jsonDecode(r.body) as List).cast<Map<String, dynamic>>())
+        (
+          id: d['device_id'] as String,
+          created: DateTime.parse(d['created_at'] as String),
+          revoked: d['revoked_at'] == null ? null : DateTime.parse(d['revoked_at'] as String),
+        ),
+    ];
+  }
+
+  /// One page of the account's pieces, in id order (device token). The
+  /// server's clock dates them.
+  Future<({List<({String id, int size, DateTime created})> pieces, String? next})> listPieces({
+    String after = '',
+    int limit = 1000,
+  }) async {
+    final req = http.Request('GET', _u('/v1/pieces', {'after': after, 'limit': '$limit'}))..headers.addAll(await _auth());
+    final r = await _send(req);
+    if (r.statusCode != 200) throw ApiException(r.statusCode, r.body);
+    final j = jsonDecode(r.body) as Map<String, dynamic>;
+    return (
+      pieces: [
+        for (final p in (j['pieces'] as List).cast<Map<String, dynamic>>())
+          (id: p['id'] as String, size: p['size'] as int, created: parseServerTime(p['created_at'] as String)),
+      ],
+      next: j['next'] as String?,
+    );
+  }
+
+  /// Deletes pieces. On an append-only account the server also wants the
+  /// recovery key's signature ([recovery]); sent anyway, it's ignored.
+  Future<int> deletePieces(List<String> ids, {SimpleKeyPair? recovery, int keyIndex = 0}) async {
+    final raw = utf8.encode(jsonEncode({'ids': ids}));
+    final headers = await _auth();
+    if (recovery != null) {
+      headers.addAll(await recoveryHeader(account!, recovery, 'delete-pieces', raw, keyIndex: keyIndex));
+    }
+    final r = await _json('POST', '/v1/pieces/delete', raw: raw, headers: headers);
+    return r['deleted'] as int;
   }
 
   Future<List<String>> missing(List<String> ids) async {

@@ -27,6 +27,17 @@ class _PdfViewState extends State<PdfView> {
 
   List<ui.Size>? _pages;
   String? _error;
+
+  /// Asking for the PDF's password (kept only while it's open).
+  bool _needPassword = false;
+  bool _wrongPassword = false;
+  final TextEditingController _password = TextEditingController();
+
+  bool _searching = false;
+  final TextEditingController _query = TextEditingController();
+  List<PdfMatch> _matches = const [];
+  int _match = -1;
+  String? _searchNote;
   final Map<int, ui.Image> _rendered = {};
   final Set<int> _pending = {};
   final ScrollController _scroll = ScrollController();
@@ -43,18 +54,70 @@ class _PdfViewState extends State<PdfView> {
     _open();
   }
 
-  Future<void> _open() async {
+  Future<void> _open({String? password}) async {
     try {
-      final pages = await PdfSandbox.open(widget.bytes);
+      final pages = await PdfSandbox.open(widget.bytes, password: password);
       if (_disposed) return;
       if (pages.isEmpty) {
         setState(() => _error = 'This PDF has no pages.');
         return;
       }
-      setState(() => _pages = pages);
+      _password.clear();
+      setState(() {
+        _pages = pages;
+        _needPassword = false;
+      });
     } on PdfSandboxException catch (e) {
       if (_disposed) return;
+      if (e.problem == PdfProblem.password) {
+        setState(() {
+          _wrongPassword = password != null;
+          _needPassword = true;
+        });
+        return;
+      }
+      if (e.problem == PdfProblem.unsupported && password != null) {
+        setState(() => _error = 'Opening password-protected PDFs needs Android 15 or newer.');
+        return;
+      }
       setState(() => _error = _describe(e.problem));
+    }
+  }
+
+  Future<void> _search() async {
+    final q = _query.text.trim();
+    if (q.isEmpty) return;
+    try {
+      final found = await PdfSandbox.search(q);
+      if (_disposed) return;
+      setState(() {
+        _matches = found;
+        _match = found.isEmpty ? -1 : 0;
+        _searchNote = found.isEmpty ? 'No matches' : null;
+      });
+      if (found.isNotEmpty) _goTo(0);
+    } on PdfSandboxException catch (e) {
+      if (_disposed) return;
+      setState(() {
+        _matches = const [];
+        _match = -1;
+        _searchNote = e.problem == PdfProblem.unsupported ? 'Search needs Android 15 or newer.' : "Search didn't work.";
+      });
+    }
+  }
+
+  void _goTo(int index) {
+    if (_matches.isEmpty) return;
+    final i = index % _matches.length;
+    setState(() => _match = i < 0 ? i + _matches.length : i);
+    final page = _matches[_match].page;
+    var y = _gap;
+    for (var k = 0; k < page; k++) {
+      y += _heightOf(k) + _gap;
+    }
+    if (_scroll.hasClients) {
+      _scroll.animateTo(min(y, _scroll.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
     }
   }
 
@@ -62,7 +125,7 @@ class _PdfViewState extends State<PdfView> {
         PdfProblem.unsupported => Platform.isAndroid
             ? 'PDF viewing needs Android 11 or newer.'
             : 'PDF viewing is available on Android.',
-        PdfProblem.password => "This PDF is password-protected. Protected PDFs can't be opened yet.",
+        PdfProblem.password => 'This PDF is password-protected.',
         PdfProblem.broken => 'This PDF could not be read. It may be damaged.',
         PdfProblem.crashed => 'This PDF crashed the isolated renderer. It may be damaged or deliberately '
             'malformed. It was kept away from your vault.',
@@ -73,6 +136,8 @@ class _PdfViewState extends State<PdfView> {
   void dispose() {
     _disposed = true;
     _scroll.dispose();
+    _password.dispose();
+    _query.dispose();
     for (final img in _rendered.values) {
       img.dispose();
     }
@@ -183,6 +248,7 @@ class _PdfViewState extends State<PdfView> {
         ),
       );
     }
+    if (_needPassword) return _passwordPrompt();
     final pages = _pages;
     if (pages == null) return const Center(child: CircularProgressIndicator(color: _accent));
     final dpr = MediaQuery.of(context).devicePixelRatio;
@@ -202,10 +268,64 @@ class _PdfViewState extends State<PdfView> {
                 style: AppFonts.outfit(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
-              Text('Double-tap to zoom', style: AppFonts.outfit(fontSize: 11, color: Colors.white38)),
+              if (!_searching)
+                Text('Double-tap to zoom', style: AppFonts.outfit(fontSize: 11, color: Colors.white38)),
+              IconButton(
+                key: const Key('pdf-search-toggle'),
+                visualDensity: VisualDensity.compact,
+                icon: Icon(_searching ? Icons.close_rounded : Icons.search_rounded, color: Colors.white70, size: 20),
+                onPressed: () => setState(() {
+                  _searching = !_searching;
+                  if (!_searching) {
+                    _matches = const [];
+                    _match = -1;
+                    _searchNote = null;
+                  }
+                }),
+              ),
             ],
           ),
         ),
+        if (_searching)
+          Container(
+            color: const Color(0xFF161B22),
+            padding: const EdgeInsets.fromLTRB(12, 0, 4, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('pdf-search-field'),
+                    controller: _query,
+                    autofocus: true,
+                    enableIMEPersonalizedLearning: false,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _search(),
+                    style: AppFonts.outfit(fontSize: 14, color: Colors.white),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Find in document',
+                      hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white38),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ),
+                Text(
+                  _searchNote ?? (_matches.isEmpty ? '' : '${_match + 1} of ${_matches.length}'),
+                  key: const Key('pdf-search-count'),
+                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.keyboard_arrow_up_rounded, color: Colors.white70),
+                  onPressed: _matches.isEmpty ? null : () => _goTo(_match - 1),
+                ),
+                IconButton(
+                  key: const Key('pdf-search-next'),
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70),
+                  onPressed: _matches.isEmpty ? null : () => _goTo(_match + 1),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: LayoutBuilder(
             builder: (context, box) {
@@ -244,10 +364,76 @@ class _PdfViewState extends State<PdfView> {
                 height: 22,
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black26),
               )
-            : RawImage(key: Key('pdf-image-$i'), image: image, fit: BoxFit.fill, width: _pageWidth, height: _heightOf(i)),
+            : Stack(
+                children: [
+                  RawImage(key: Key('pdf-image-$i'), image: image, fit: BoxFit.fill, width: _pageWidth, height: _heightOf(i)),
+                  ..._highlights(i),
+                ],
+              ),
       ),
     );
   }
+
+  /// Search matches on page [i], scaled from points to the page as drawn.
+  List<Widget> _highlights(int i) {
+    final size = _pages![i];
+    final sx = _pageWidth / max(1.0, size.width);
+    final sy = _heightOf(i) / max(1.0, size.height);
+    return [
+      for (var m = 0; m < _matches.length; m++)
+        if (_matches[m].page == i)
+          for (final r in _matches[m].rects)
+            Positioned(
+              key: m == _match ? const Key('pdf-match') : null,
+              left: r.left * sx,
+              top: r.top * sy,
+              width: max(2.0, r.width * sx),
+              height: max(2.0, r.height * sy),
+              child: Container(
+                color: (m == _match ? const Color(0xFFF59E0B) : const Color(0xFFFDE047)).withValues(alpha: 0.45),
+              ),
+            ),
+    ];
+  }
+
+  Widget _passwordPrompt() => Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_rounded, color: _accent, size: 40),
+              const SizedBox(height: 12),
+              Text('This PDF is password-protected.',
+                  textAlign: TextAlign.center, style: AppFonts.outfit(fontSize: 15, color: Colors.white)),
+              const SizedBox(height: 16),
+              TextField(
+                key: const Key('pdf-password'),
+                controller: _password,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                enableIMEPersonalizedLearning: false,
+                onSubmitted: (_) => _open(password: _password.text),
+                style: AppFonts.outfit(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Password',
+                  errorText: _wrongPassword ? 'That password is not right.' : null,
+                  filled: true,
+                  fillColor: const Color(0xFF161B22),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                key: const Key('pdf-password-open'),
+                onPressed: () => _open(password: _password.text),
+                child: const Text('Open'),
+              ),
+            ],
+          ),
+        ),
+      );
 
   void _zoom(int i) {
     final s = _pages![i];

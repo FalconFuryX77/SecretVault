@@ -1,0 +1,24 @@
+# HTTPS in front of the sync API (docker-compose.public.yml). Caddy gets
+# and renews a Let's Encrypt certificate for SYNC_DOMAIN by itself.
+{
+	# No admin endpoint.
+	admin off
+	# Caddy's own messages (certificates, start-up) stay; request errors,
+	# which carry the client's address and the path, don't.
+	log default {
+		exclude http.log.error
+	}
+}
+
+{$SYNC_DOMAIN} {
+	reverse_proxy api:8080
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+	# No access log: who connects, and when, stays off this server's disk.
+	log {
+		output discard
+	}
+}
