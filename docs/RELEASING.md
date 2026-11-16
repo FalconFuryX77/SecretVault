@@ -75,13 +75,18 @@ vault moves across with the move tool instead. For that, one last update of
 the old app is built from the same code, with the old identity and key:
 
 ```bash
-ORG_GRADLE_PROJECT_appId=com.example.gesture_unlock \
-ORG_GRADLE_PROJECT_legacySigning=true \
-flutter build apk --release
+flutter build apk --release --split-per-abi -P appId=com.example.gesture_unlock -P legacySigning=true
 ```
 
-It must be built on the machine whose debug key signed the old releases.
-Publish it as `Undertow-vX.Y.Z-move-from-old-app.apk`.
+Pass the properties with `-P`: environment variables such as
+`ORG_GRADLE_PROJECT_appId` can be missed by a Gradle daemon that's already
+running, which then silently builds the new app instead. It must be built
+on the machine whose debug key signed the old releases, and per processor
+type: the old releases' per-ABI version codes (2004, 1004) are higher than
+a universal build's. Check that the certificate is the old one
+(`05e16563e0ac03b9835b8d4c2a0fcbac22fc14f6cdc0e482161479f37f41629c`) and the
+package `com.example.gesture_unlock`, then publish them as
+`Undertow-vX.Y.Z-move-from-old-app-<abi>.apk`.
 
 What people do:
 
