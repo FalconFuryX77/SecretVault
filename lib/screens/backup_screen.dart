@@ -852,11 +852,12 @@ class _BackupScreenState extends State<BackupScreen> {
 
   /// Locked upload: the switch, what the queue holds, and the stop code.
   Widget _lockedCard(VaultSession s) {
-    final on = VaultSync.lockedUpload(s);
-    final stopped = VaultSync.lockedUploadStopped(s);
     return FutureBuilder<OutboxStatus?>(
-      future: _sync.queueStatus(s),
+      // A stop while the vault was locked is noted first, even offline.
+      future: _sync.noticeStop(s).then((_) => _sync.queueStatus(s)),
       builder: (context, snap) {
+        final on = VaultSync.lockedUpload(s);
+        final stopped = VaultSync.lockedUploadStopped(s);
         final q = snap.data;
         final String line;
         if (stopped) {
