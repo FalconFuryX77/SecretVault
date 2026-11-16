@@ -384,10 +384,12 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 24px; }
 .foot nav { display: flex; flex-wrap: wrap; gap: 18px; }
 .foot nav a { color: var(--ink); }
-.made { display: flex; align-items: center; gap: 12px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
+.foot-left { display: grid; gap: 12px; align-content: start; }
+.made { display: flex; align-items: center; gap: 8px; }
 .made b { font-weight: 600; color: var(--ink); }
-.made .social { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); color: var(--ink); }
-.made .social:hover { border-color: var(--ink); }
+.made .social { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--ink); }
+.made .social:first-of-type { margin-left: 4px; }
+.made .social:hover { background: var(--paper-2); }
 .made .social svg { width: 16px; height: 16px; fill: currentColor; }
 
 @media (max-width: 900px) {
@@ -665,7 +667,18 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
 <footer>
   <div class="wrap foot">
-    <div>Undertow v3.2.1 · Android beta · Built in the open</div>
+    <div class="foot-left">
+      <div>Undertow v3.2.1 · Android beta · Built in the open</div>
+      <div class="made">
+        <span>Made by <b>FalconFuryX77</b></span>
+        <a class="social" href="https://github.com/FalconFuryX77" aria-label="FalconFuryX77 on GitHub" title="GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <a class="social" href="https://x.com/PraneelPaliwal" aria-label="@PraneelPaliwal on X" title="X">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        </a>
+      </div>
+    </div>
     <nav aria-label="Documents">
       <a href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download</a>
       <a href="https://github.com/FalconFuryX77/Undertow">Source</a>
@@ -673,15 +686,6 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/SYNC_DESIGN.md">Sync design</a>
       <a href="https://github.com/FalconFuryX77/Undertow/blob/master/LICENSE">MIT license</a>
     </nav>
-  </div>
-  <div class="wrap made">
-    <span>Made by <b>FalconFuryX77</b></span>
-    <a class="social" href="https://github.com/FalconFuryX77" aria-label="FalconFuryX77 on GitHub" title="GitHub">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    </a>
-    <a class="social" href="https://x.com/PraneelPaliwal" aria-label="@PraneelPaliwal on X" title="X">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-    </a>
   </div>
 </footer>
 
