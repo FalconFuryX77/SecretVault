@@ -26,7 +26,7 @@ class VaultService {
   VaultService({VaultCrypto? crypto, Future<Directory> Function()? storageDir})
     : crypto =
           crypto ??
-          VaultCrypto(binding: defaultDeviceBinding()),
+          VaultCrypto(binding: defaultDeviceBinding(), normalize: platformNormalize),
       _dirProvider = storageDir ?? getApplicationSupportDirectory;
 
   VaultSession? get session => (_session?.isOpen ?? false) ? _session : null;

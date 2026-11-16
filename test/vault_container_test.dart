@@ -97,6 +97,39 @@ void main() {
       );
     });
 
+    test('passphrases are NFC-normalised; older un-normalised ones still open and get re-stored', () async {
+      // A stand-in for Android's normaliser: composes e + combining acute.
+      Future<String> nfc(String s) async => s.replaceAll('é', 'é');
+      final normalising = VaultCrypto(
+        binding: FixedDeviceBinding(),
+        pinParams: KdfParams.testing,
+        growChunks: 8,
+        normalize: nfc,
+      );
+      const decomposed = 'café secret';
+      const composed = 'café secret';
+      // Set up by an older version: the PIN used exactly as typed.
+      final old = await VaultContainer.create(containerFile, crypto, pin: decomposed, initialChunks: 16);
+      await old.close();
+      expect(await VaultContainer(containerFile, normalising).unlockWithPin(composed), isNull,
+          reason: 'not yet re-stored under the normalised form');
+      final s = (await VaultContainer(containerFile, normalising).unlockWithPin(decomposed))!;
+      await s.close();
+      // Now either keyboard's form opens it.
+      for (final pin in [composed, decomposed]) {
+        final again = await VaultContainer(containerFile, normalising).unlockWithPin(pin);
+        expect(again, isNotNull, reason: pin);
+        await again!.close();
+      }
+      // A vault set up now opens with both forms from the start.
+      await containerFile.delete();
+      final fresh = await VaultContainer.create(containerFile, normalising, pin: composed, initialChunks: 16);
+      await fresh.close();
+      final viaOther = await VaultContainer(containerFile, normalising).unlockWithPin(decomposed);
+      expect(viaOther, isNotNull);
+      await viaOther!.close();
+    });
+
     test('changing the PIN retires the old one', () async {
       final s = await createVault();
       await s.changePin('99887766');
@@ -552,6 +585,71 @@ void main() {
         isNull,
       );
     });
+
+    for (final damage in ['superblocks', 'index']) {
+      test('a damaged decoy ($damage) never locks the real vault out, nor gets overwritten', () async {
+        final s = await createVault(chunks: 32);
+        await s.importBytes(Uint8List(5000), _meta('r1', 'real'));
+        await s.createDecoy(pin: '111222');
+        await s.close();
+        final d = (await VaultContainer(containerFile, crypto).unlockWithPin('111222'))!;
+        await d.importBytes(Uint8List.fromList(List.generate(200000, (i) => i % 251)), _meta('d1', 'decoy file'));
+        final decoyRecord = d.debugChunks.keys.single;
+        final decoyIndex = d.debugChunks[decoyRecord]!.index;
+        await d.close();
+
+        // Damage the decoy.
+        final raf = await containerFile.open(mode: FileMode.append);
+        final junk = Uint8List.fromList(List.generate(ContainerLayout.superSlotLen, (i) => (i * 7) & 0xff));
+        if (damage == 'superblocks') {
+          for (final off in ContainerLayout.superOffsets) {
+            await raf.setPosition(ContainerLayout.recordOffset(decoyRecord) + off);
+            await raf.writeFrom(junk);
+          }
+        } else {
+          for (final c in decoyIndex) {
+            await raf.setPosition(ContainerLayout.chunkOffset(c) + 100);
+            await raf.writeFrom(junk.sublist(0, 64));
+          }
+        }
+        await raf.close();
+        final before = await containerFile.readAsBytes();
+
+        final s2 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+        expect(s2.hasDecoy, isTrue);
+        expect(s2.decoyDamaged, isTrue);
+        expect((await s2.readAll(s2.entryById('r1')!)).length, 5000);
+        // Plenty of writes: they must stay in the real vault's own chunks or
+        // in new space, whatever the decoy owned.
+        for (var i = 0; i < 6; i++) {
+          await s2.importBytes(Uint8List(150000), _meta('w$i', 'more $i'));
+        }
+        await s2.delete('w0');
+        final area = s2.debugSafeArea;
+        expect(area.safe, isNotNull);
+        final after = await containerFile.readAsBytes();
+        for (var c = 1; c < area.safeFrom; c++) {
+          if (area.safe!.contains(c)) continue;
+          final o = ContainerLayout.chunkOffset(c);
+          expect(after.sublist(o, o + ContainerLayout.chunkSize), before.sublist(o, o + ContainerLayout.chunkSize),
+              reason: 'chunk $c may be the decoy\'s and must be untouched');
+        }
+        await expectLater(s2.changeDecoyPin('333444'), throwsA(isA<VaultCorruptedException>()));
+        // It can be removed and set up again.
+        await s2.removeDecoy();
+        expect(s2.hasDecoy, isFalse);
+        await s2.createDecoy(pin: '555666');
+        await s2.close();
+        expect(await VaultContainer(containerFile, crypto).unlockWithPin('111222'), isNull);
+        final d2 = (await VaultContainer(containerFile, crypto).unlockWithPin('555666'))!;
+        expect(d2.entries, isEmpty);
+        await d2.close();
+        final s3 = (await VaultContainer(containerFile, crypto).unlockWithPin('482913'))!;
+        expect(s3.decoyDamaged, isFalse);
+        expect(s3.entries, hasLength(6));
+        await s3.close();
+      });
+    }
 
     test('with or without a decoy, the file has the same shape', () async {
       final s = await createVault();

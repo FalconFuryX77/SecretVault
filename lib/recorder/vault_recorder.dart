@@ -29,6 +29,30 @@ class RecorderStatus {
   });
 }
 
+/// A staged camera video, opened for streaming as an MP4 of [length] bytes.
+class StagedVideo {
+  final int handle;
+  final int length;
+  final DateTime startedAt;
+  final Duration duration;
+  final bool complete;
+  const StagedVideo(this.handle, this.length, this.startedAt, this.duration, this.complete);
+
+  /// This vault's, but nothing was recorded: discard it.
+  static final StagedVideo empty = StagedVideo(-1, 0, DateTime.fromMillisecondsSinceEpoch(0), Duration.zero, false);
+  bool get isEmpty => handle < 0;
+
+  static const MethodChannel _channel = MethodChannel('app.vault/recorder');
+
+  /// The next bytes of the MP4 (at most [max]); empty at the end.
+  Future<Uint8List> read(int max) async =>
+      (await _channel.invokeMethod<Uint8List>('videoRead', {'handle': handle, 'max': max})) ?? Uint8List(0);
+
+  Future<void> close() async {
+    if (!isEmpty) await _channel.invokeMethod('videoClose', {'handle': handle});
+  }
+}
+
 class PendingRecording {
   final String id;
   final int size;
@@ -165,6 +189,25 @@ class VaultRecorder {
       m['complete'] == true,
     );
   }
+
+  /// Opens a staged camera video for streaming into the vault as an MP4.
+  /// Null if it isn't encrypted to [keys].
+  static Future<StagedVideo?> openVideo(String id, RecordingKeyPair keys) async {
+    final m = await _channel.invokeMapMethod<String, Object?>('videoOpen', {'id': id, 'key': keys.priv, 'pub': keys.pub});
+    if (m == null) return null;
+    if (m['empty'] == true) return StagedVideo.empty;
+    return StagedVideo(
+      (m['handle'] as num).toInt(),
+      (m['length'] as num).toInt(),
+      DateTime.fromMillisecondsSinceEpoch((m['startedAt'] as num).toInt()),
+      Duration(milliseconds: (m['durationMs'] as num).toInt()),
+      m['complete'] == true,
+    );
+  }
+
+  /// Debug builds: Android's own reading of an MP4 (tests).
+  static Future<Map<String, Object?>> probeMedia(Uint8List mp4) async =>
+      (await _channel.invokeMapMethod<String, Object?>('probeMedia', {'data': mp4}))!;
 
   /// Overwrites a pending recording and deletes it.
   static Future<void> discard(String id) => _channel.invokeMethod('discard', {'id': id});

@@ -150,7 +150,10 @@ class VaultProvider extends ChangeNotifier {
           }
           if (found == null) continue; // another vault's
           final r = found;
-          if (r.video) continue; // moves in through the camera's import
+          if (r.video) {
+            if (await _importVideo(session, p.id, keys, tag)) moved++;
+            continue;
+          }
           if (r.empty) {
             await VaultRecorder.discard(p.id);
             continue;
@@ -199,6 +202,71 @@ class VaultProvider extends ChangeNotifier {
       }
     }
     return moved;
+  }
+
+  /// Progress of a video moving into the vault (0..1), null when none is.
+  final ValueNotifier<double?> videoProgress = ValueNotifier(null);
+
+  /// Streams one staged camera video into the vault as an MP4: decrypted
+  /// and packed on the fly, never whole in memory or on disk.
+  Future<bool> _importVideo(VaultSession session, String id, List<RecordingKeyPair> keys, String tag) async {
+    StagedVideo? v;
+    for (final k in keys) {
+      v = await VaultRecorder.openVideo(id, k);
+      if (v != null) break;
+    }
+    final video = v;
+    if (video == null) return false;
+    if (video.isEmpty) {
+      await VaultRecorder.discard(id);
+      return false;
+    }
+    try {
+      final title = 'Video ${_stamp(video.startedAt)}${video.complete ? '' : ' (cut short)'}.mp4';
+      videoProgress.value = 0;
+      await _vault.whileBusy(
+        () => session.importStream(
+          video.length,
+          VaultItem(
+            id: _uuid.v4(),
+            title: title,
+            category: VaultCategory.video,
+            mimeType: 'video/mp4',
+            fileSizeBytes: video.length,
+            createdAt: video.startedAt,
+            updatedAt: DateTime.now(),
+            tags: ['camera', tag],
+          ),
+          video.read,
+          onProgress: (f) => videoProgress.value = f,
+        ),
+      );
+    } finally {
+      videoProgress.value = null;
+      await video.close();
+    }
+    await VaultRecorder.discard(id);
+    return true;
+  }
+
+  /// Stores a photo from the in-vault camera (already stripped of metadata).
+  Future<VaultItem?> importPhoto(Uint8List jpeg) async {
+    final session = _vault.session;
+    if (session == null) return null;
+    final now = DateTime.now();
+    final item = VaultItem(
+      id: _uuid.v4(),
+      title: 'Photo ${_stamp(now)}.jpg',
+      category: VaultCategory.image,
+      mimeType: 'image/jpeg',
+      fileSizeBytes: jpeg.length,
+      createdAt: now,
+      updatedAt: now,
+      tags: const ['camera'],
+    );
+    await _vault.whileBusy(() => session.importBytes(jpeg, item));
+    if (identical(_vault.session, session)) _refreshFromSession();
+    return item;
   }
 
   static String _stamp(DateTime t) {

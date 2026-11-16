@@ -6,6 +6,7 @@ import '../navigation/vault_routes.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
 import 'export_dialog.dart';
+import 'camera_screen.dart';
 import 'recorder_screen.dart';
 import 'package:provider/provider.dart';
 import '../models/vault_state.dart';
@@ -137,6 +138,22 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     FileType.any,
                     null,
                     VaultCategory.document,
+                  );
+                },
+              ),
+              _buildModalTile(
+                icon: Icons.photo_camera_rounded,
+                color: const Color(0xFF38BDF8),
+                title: 'Camera',
+                subtitle: 'Photos and video straight into the vault, never the gallery',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      settings: const RouteSettings(name: '${vaultRoutePrefix}camera'),
+                      builder: (_) => const CameraScreen(),
+                    ),
                   );
                 },
               ),
