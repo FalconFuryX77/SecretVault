@@ -270,9 +270,9 @@ while the phone is in a pocket. The options:
 
 The background credential is sealed under a hardware keystore key that needs
 no user authentication (`u0`). An examiner with root can therefore recover the
-server address and device credential. This is why **one account per phone,
-shared by all its vaults** (§11) matters: the credential reveals that the phone
-backs up, not how many vaults it has.
+server address and device credential. The credential reveals that the phone
+backs up, not how many vaults it has: as built (§9.1), the queue serves one
+vault at a time.
 
 Users who want the strongest deniability can turn B off and run in mode A.
 
@@ -297,6 +297,10 @@ Option B, "Keep uploading while locked" in Settings → Backup, on by default.
   for adding pieces and log records and asking which pieces it lacks. It
   can't download, list, read the log, delete, or mint another. Turning the
   feature off, or noticing it was stopped, revokes it on the server.
+- **Timing.** With locked upload on, a change is sent or queued 3 seconds
+  after it's made (instead of 30), so it gets in before the vault auto-locks.
+  A change made in the last seconds before a lock, or a large file still
+  being sealed when the vault locks, waits for the next unlock.
 - **Settling.** The next time the vault backs up online, it first sends
   anything still queued itself, then reads its own chain from the server and
   checks which queued versions and deletions arrived. Whatever didn't (the
@@ -306,7 +310,9 @@ Option B, "Keep uploading while locked" in Settings → Backup, on by default.
   screen (it looks like a wrong PIN). Either shreds the queue and its state,
   deletes the keystore key and cancels the job. Nothing in the vault or on
   the server is touched. Locked upload then stays off until it's turned on
-  again inside the vault, where a note says it was stopped.
+  again inside the vault, which notices the stop as soon as it's unlocked
+  (offline too) and says so; the old login is turned off on the server at
+  the next online backup.
 
   The stop code is set inside the vault. The queue keeps only an HMAC of it
   under the code's PIN key (Argon2id plus the hardware binding), so checking
@@ -355,8 +361,14 @@ each file's `mac` before importing it into the local vault.
 
 This mirrors the container's "4 records, can't tell how many are used":
 
-- **One sync account per phone**, shared by every vault on it. The server and
-  the on-phone credential see one account either way.
+- **One account per vault (decided).** The first design called for one
+  account per phone, shared by its vaults, so that the *server* couldn't
+  count vaults. We dropped it: the server is run by the user or their
+  organisation and trusted with that much, and nothing on a seized phone
+  shows how many vaults back up (each vault's backup settings are inside
+  that vault's own encrypted data, and the locked-upload queue serves one
+  vault at a time). Separate accounts are also safer: a decoy's recovery
+  code, if it's forced out of you, can only touch the decoy's account.
 - Each vault has its own RS, SRK and key set, so pieces and log records from
   different vaults can't be told apart.
 - The account always has **exactly 4 recovery public keys** and **4 escrow

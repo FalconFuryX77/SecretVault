@@ -2,9 +2,9 @@
 
 An encrypted vault for Android, hidden inside a working video trimmer, built with Flutter. It is for people whose phones may be searched or seized: one PIN opens the real vault, another opens a harmless decoy, and nothing on the phone shows how many vaults there are. It records audio, photos and video straight into the vault, and backs the vault up, end-to-end encrypted, to a server you run.
 
-Website: **https://falconfuryx77.github.io/Undertow/**
+Website: **https://falconfuryx77.github.io/Undertow/** · **[Watch the 3-minute demo](https://github.com/FalconFuryX77/Undertow/releases/latest/download/Undertow-demo.mp4)**
 
-**Status: v3.0.0, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
+**Status: v3.1.1, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
 
 ## Install 📲
 
@@ -47,13 +47,13 @@ Settings → Backup sends the open vault to a server you run ([server/README.md]
 * **Restore in the app** with the recovery code: set up a new phone, bring back deleted files, or go back to how the backup was on a given day.
 * **Version history:** every version of every file, kept until you free up space (which needs the recovery code, so a taken phone can't erase the backup).
 * **Phones with access:** see them, revoke a lost one, or start over on a fresh account.
+* **Every vault can back up**, each to its own account with its own recovery code, so a decoy's code can never reach the real vault's backup.
 * **Over Tor**, through the Orbot app, if you choose.
 
 ### Known limits
 * Nothing here stops someone who forces you to open the *real* vault. Use a decoy, or the duress PIN.
 * Someone with a decoy's PIN *and* forensic tools can see hints in its numbers that another vault may exist ([details](docs/CONTAINER_FORMAT.md#11-limits-and-open-items)). A casual look shows nothing.
 * Only one vault on a phone can use the locked-upload queue. With root, someone can see that the queue exists and how big it is, unless the emergency stop was used first.
-* If two vaults on one phone both back up, the server sees two accounts.
 * Unlock is PIN-only by design: a finger can be pressed to a sensor by force, and it can't tell the real vault from a decoy.
 * The hidden recorder shows up the way Android requires: the green microphone dot while recording, and the app listed as running while armed. If music or a video is playing, the volume keys control that instead. On Samsung phones, set the app's battery use to Unrestricted.
 * On Android 7–10, images are decoded inside the app instead of the isolated process, and PDFs can't be opened.

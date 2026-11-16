@@ -3,6 +3,22 @@
 Every release of Undertow (called SecretVault until v3.0.0), newest first.
 Security-relevant changes are marked **security**.
 
+## v3.1.1 (2026-11-16)
+
+- Fixed: with "Keep uploading while locked" on, a change made in the last
+  half-minute before the vault locked (by default it locks after 30 s idle)
+  only reached the queue at the next unlock. A change now goes to the server
+  or the queue 3 seconds after it's made.
+- Fixed: after the emergency stop, the vault kept saying locked upload was on
+  until it next got online, while queueing nothing. It now notices the stop
+  as soon as it's unlocked, offline too, and turns the old login off on the
+  server once it's online.
+- Each vault that backs up has its own account and recovery code, by design
+  (the server is yours; a decoy's code can never reach the real vault's
+  backup). The docs no longer list a shared account as missing.
+- A three-minute demo video of every feature, attached to the release and
+  linked from the README and the website.
+
 ## v3.1.0 (2026-11-16): uploading while locked
 
 - **Keeps uploading while locked** (on by default, with an off switch in
