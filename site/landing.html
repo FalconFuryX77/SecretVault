@@ -1,8 +1,9 @@
 <title>Undertow</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="A video trimmer on the outside. An encrypted vault, decoys, a duress PIN and hardware-bound keys on the inside. Built for people whose phones may be searched or seized.">
-<!-- Fonts are served from this site (the app's own typefaces, SIL OFL), so
-     a visit doesn't tell a font service who is reading about this app. -->
+<!-- Fonts are served from this site (SIL OFL), so a visit doesn't tell a
+     font service who is reading about this app. The phone uses the system
+     font, as the app does. -->
 <style>
 @font-face { font-family: "Outfit"; src: url("fonts/Outfit-Variable.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Fira Code"; src: url("fonts/FiraCode-Variable.ttf") format("truetype"); font-weight: 300 700; font-display: swap; }
@@ -34,15 +35,21 @@
   --measure: 64ch;
   --radius: 10px;
 
-  /* The app itself is dark; the phone mock keeps its real colours in both themes. */
-  --app-bg: #090d16;
-  --app-card: #161b22;
-  --app-line: rgba(255, 255, 255, 0.08);
-  --app-text: #e8ebf2;
-  --app-dim: rgba(255, 255, 255, 0.55);
-  --app-accent: #a78bfa;
-  --app-blue: #58a6ff;
-  --app-danger: #fb7185;
+  /* The app is dark; the phone mock keeps its real colours in both page themes. */
+  --app-font: Roboto, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --app-canvas: #0f0f0e;
+  --app-surface: #191917;
+  --app-raised: #23231f;
+  --app-hairline: #2d2c28;
+  --app-ink: #edeae3;
+  --app-ink2: #a39f95;
+  --app-ink3: #6f6b63;
+  --app-signal: #e8a33d;
+  --app-on-signal: #14110b;
+  --app-alert: #e5574f;
+  --cover-bg: #0b0f17;
+  --cover-card: #161b22;
+  --cover-accent: #22d3ee;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -138,69 +145,166 @@ p { margin: 0; max-width: var(--measure); }
 .facts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--font-mono); font-size: var(--step--1); color: var(--muted); }
 .facts span::before { content: "■ "; color: var(--signal); }
 
-/* ── Phone demo ── */
+/* ── Phone demo: the app's real screens, in its own colours in both page themes ── */
 .demo { display: grid; justify-items: center; gap: 18px; min-width: 0; }
 .phone {
   width: min(300px, 100%); aspect-ratio: 9 / 18.5; max-width: 100%;
-  background: var(--app-bg); color: var(--app-text);
-  border-radius: 38px; padding: 12px; position: relative;
-  box-shadow: 0 0 0 2px #2a2f38, 0 0 0 9px #0b0d11, 0 30px 60px -20px rgba(10, 14, 22, 0.55);
-  font-family: var(--font-body); overflow: hidden;
+  background: #0a0a09; color: var(--app-ink);
+  border-radius: 38px; padding: 10px; position: relative;
+  box-shadow: 0 0 0 2px #2c2b28, 0 0 0 9px #0b0b0a, 0 30px 60px -20px rgba(10, 12, 14, 0.55);
+  font-family: var(--app-font); line-height: 1.35; overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 .phone.shake { animation: shake 0.45s ease-in-out; }
 @keyframes shake { 20%, 60% { transform: translateX(-7px) rotate(-1deg); } 40%, 80% { transform: translateX(7px) rotate(1deg); } }
-.screen { height: 100%; border-radius: 28px; overflow: hidden; background: var(--app-bg); display: flex; flex-direction: column; position: relative; }
-.statusbar { display: flex; justify-content: space-between; padding: 10px 18px 4px; font-size: 11px; color: var(--app-dim); font-family: var(--font-mono); }
-.view { flex: 1; display: flex; flex-direction: column; padding: 8px 14px 14px; gap: 10px; min-height: 0; }
+:where(.phone) .btn0 { appearance: none; background: none; border: 0; margin: 0; padding: 0; color: inherit; font: inherit; text-align: inherit; cursor: pointer; }
+.phone .btn0:focus-visible, .phone [tabindex]:focus-visible { outline: 2px solid var(--app-signal); outline-offset: 1px; border-radius: 8px; }
+.phone svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: block; flex: none; }
+.phone svg.i.dots { stroke-width: 3.2; }
+.screen { height: 100%; border-radius: 30px; overflow: hidden; background: var(--app-canvas); display: flex; flex-direction: column; position: relative; }
+.screen.on-cover { background: var(--cover-bg); }
+.statusbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px 4px; font-size: 11px; font-weight: 500; color: var(--app-ink); }
+.statusbar svg { display: block; fill: currentColor; }
+.statusbar .sb { display: flex; gap: 5px; align-items: center; }
+.view { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .view[hidden] { display: none !important; }
+.ic-btn { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: var(--app-ink); flex: none; }
+.ic-btn:hover { background: rgba(237, 234, 227, 0.06); }
 
-.app-bar { display: flex; align-items: center; gap: 10px; }
-.app-bar .title-btn { all: unset; cursor: pointer; display: grid; line-height: 1.2; border-radius: 6px; }
-.app-bar .title-btn:focus-visible { outline: 2px solid var(--app-accent); outline-offset: 2px; }
-.app-title { font-family: var(--font-display); font-weight: 700; font-size: 19px; }
-.app-sub { font-size: 10.5px; color: var(--app-dim); }
-.folder-ic { width: 32px; height: 32px; border-radius: 9px; background: #21262d; display: grid; place-items: center; color: var(--app-blue); flex: none; }
-.storage { background: var(--app-card); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; font-size: 11px; }
-.bar { height: 5px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; }
-.bar i { display: block; height: 100%; width: 61%; background: var(--app-blue); }
-.cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 10px; text-align: center; color: var(--app-dim); }
-.cats div { background: var(--app-card); border-radius: 10px; padding: 8px 2px; display: grid; gap: 4px; justify-items: center; }
-.dot { width: 16px; height: 16px; border-radius: 5px; }
-.rows { display: grid; gap: 2px; font-size: 12px; }
-.row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--app-line); }
-.row:last-child { border-bottom: 0; }
-.row small { display: block; font-size: 10px; color: var(--app-dim); }
-.ric { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.lockview { align-items: center; text-align: center; justify-content: space-between; }
-.lock-top { display: grid; gap: 8px; justify-items: center; padding-top: 6px; }
-.lock-ring { width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--app-accent); background: rgba(167, 139, 250, 0.12); display: grid; place-items: center; color: var(--app-accent); }
-.lock-ring.bad { border-color: var(--app-danger); color: var(--app-danger); background: rgba(251, 113, 133, 0.12); }
-.lock-title { font-family: var(--font-display); font-weight: 700; font-size: 18px; }
-.lock-msg { font-size: 11.5px; color: var(--app-dim); min-height: 1.4em; }
-.lock-msg.bad { color: var(--app-danger); }
-.pin-dots { display: flex; gap: 10px; justify-content: center; min-height: 12px; }
-.pin-dots i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25); }
-.pin-dots i.on { background: var(--app-accent); border-color: var(--app-accent); }
-.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; }
-.keypad button {
-  all: unset; cursor: pointer; text-align: center; padding: 9px 0; border-radius: 12px;
-  background: var(--app-card); font-family: var(--font-mono); font-size: 16px; color: var(--app-text);
-}
-.keypad button:hover { background: #1f2630; }
-.keypad button:focus-visible { outline: 2px solid var(--app-accent); }
-.back-btn { all: unset; cursor: pointer; align-self: flex-start; color: var(--app-dim); font-size: 18px; padding: 2px 6px; border-radius: 6px; }
+/* The cover: Video Trimmer keeps the look of a plain Android utility. */
+.c-bar { display: flex; align-items: center; padding: 4px 6px 4px 14px; position: relative; }
+.c-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: #fff; padding: 4px 2px; }
+.c-title svg.i { color: var(--cover-accent); width: 17px; height: 17px; }
+.c-bar .ic-btn { margin-left: auto; color: rgba(255, 255, 255, 0.7); }
+.c-menu { position: absolute; right: 10px; top: 38px; background: var(--cover-card); border-radius: 6px; padding: 4px 0; z-index: 5; min-width: 120px; border: 1px solid rgba(255, 255, 255, 0.06); }
+.c-menu[hidden] { display: none; }
+.c-menu .btn0 { display: block; width: 100%; padding: 9px 16px; font-size: 12px; color: #fff; }
+.c-label { font-size: 10px; color: rgba(255, 255, 255, 0.54); padding: 8px 16px 6px; }
+.c-clips { display: grid; gap: 7px; padding: 0 12px; }
+.clip { display: flex; align-items: center; gap: 9px; background: var(--cover-card); border-radius: 10px; padding: 7px; }
+.thumb { width: 64px; height: 40px; border-radius: 7px; flex: none; }
+.clip b { display: block; font-size: 11px; font-weight: 600; color: #fff; }
+.clip small { font-size: 9.5px; color: rgba(255, 255, 255, 0.54); }
+.clip svg.i { margin-left: auto; color: rgba(255, 255, 255, 0.38); width: 16px; height: 16px; }
+.fab { position: absolute; right: 14px; bottom: 16px; display: flex; align-items: center; gap: 6px; padding: 0 16px 0 12px; height: 40px; border-radius: 14px; font-size: 12.5px; z-index: 2; }
+.fab svg.i { width: 17px; height: 17px; stroke-width: 2; }
+.cover-fab { background: var(--cover-accent); color: #0b0f17; font-weight: 700; }
 
-.vault-head { display: flex; align-items: center; gap: 10px; }
-.vault-head .shield { width: 32px; height: 32px; border-radius: 9px; background: rgba(167, 139, 250, 0.18); display: grid; place-items: center; color: var(--app-accent); flex: none; }
-.vault-head b { font-family: var(--font-display); font-size: 16px; display: block; line-height: 1.2; }
-.vault-head small { color: #34d399; font-size: 10px; }
-.lock-btn { all: unset; cursor: pointer; margin-left: auto; color: var(--app-accent); padding: 6px; border-radius: 8px; }
-.lock-btn:focus-visible { outline: 2px solid var(--app-accent); }
-.vault-count { background: #151a2b; border: 1px solid rgba(167, 139, 250, 0.25); border-radius: 12px; padding: 10px 12px; font-size: 12px; font-weight: 600; }
-.vault-count small { display: block; color: var(--app-dim); font-weight: 400; font-size: 10.5px; }
-.toast { position: absolute; left: 12px; right: 12px; bottom: 12px; background: #1f2630; color: var(--app-text); border-radius: 10px; padding: 9px 12px; font-size: 11.5px; transform: translateY(140%); transition: transform 0.25s ease; }
-.toast.show { transform: translateY(0); }
+/* Lock: left-aligned, the status is the title; the system keyboard below. */
+.lock .back { margin: 2px 0 0 8px; }
+.lock-body { margin-top: auto; padding: 0 18px 16px; }
+.lock-label { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 500; color: var(--app-ink2); }
+.lock-label svg.i { width: 13px; height: 13px; }
+.lock-title { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; margin: 6px 0 14px; line-height: 1.25; }
+.pin-field { height: 40px; border-radius: 9px; background: var(--app-raised); border: 1px solid rgba(232, 163, 61, 0.7); display: flex; align-items: center; padding: 0 12px; font-size: 15px; letter-spacing: 3px; color: var(--app-ink); }
+.pin-field .ph { color: var(--app-ink3); font-size: 12px; letter-spacing: 0; }
+.pin-field .caret { width: 1.5px; height: 16px; background: var(--app-signal); margin-left: 2px; animation: caret 1s steps(1) infinite; }
+.pin-field.empty .caret { order: -1; margin: 0 2px 0 0; }
+.pin-field.bad { border-color: var(--app-alert); animation: pinshake 0.42s linear; }
+@keyframes caret { 50% { opacity: 0; } }
+@keyframes pinshake { 12% { transform: translateX(-8px); } 28% { transform: translateX(6px); } 44% { transform: translateX(-4px); } 60% { transform: translateX(2.5px); } 76% { transform: translateX(-1px); } }
+.u-primary { display: grid; place-items: center; width: 100%; height: 40px; margin-top: 10px; border-radius: 9px; background: var(--app-signal); color: var(--app-on-signal); font-size: 12.5px; font-weight: 500; text-align: center; }
+.u-primary[aria-busy="true"] { opacity: 0.8; }
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.kbd { background: #1f1f1f; padding: 8px 6px 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.kbd .btn0 { height: 34px; border-radius: 7px; background: #3b3b3b; color: #e3e3e3; font-size: 15px; display: grid; place-items: center; text-align: center; }
+.kbd .btn0:active { background: #4c4c4c; }
+.kbd .k-fn { background: #2c2c2c; }
+.kbd .k-ok { background: #a8c7fa; color: #062e6f; }
+.kbd svg.i { width: 17px; height: 17px; }
+
+/* Vault */
+.v-bar { display: flex; align-items: center; padding: 2px 6px 0; }
+.v-title { font-size: 15px; font-weight: 500; margin-left: 4px; flex: 1; }
+.v-scroll { flex: 1; overflow-y: auto; scrollbar-width: none; padding-bottom: 64px; }
+.v-scroll::-webkit-scrollbar, .set-scroll::-webkit-scrollbar, .sheet::-webkit-scrollbar { display: none; }
+.meter { padding: 8px 16px 0; }
+.m-top { display: flex; align-items: baseline; gap: 7px; }
+.m-total { font-size: 22px; font-weight: 400; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.m-cap { font-size: 10px; color: var(--app-ink2); }
+.m-bar { display: flex; gap: 2px; height: 3px; border-radius: 2px; overflow: hidden; margin-top: 8px; background: var(--app-raised); }
+.m-bar i { display: block; height: 100%; }
+.m-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; font-family: var(--font-mono); font-size: 8.5px; color: var(--app-ink2); }
+.m-legend span::before { content: ""; display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: var(--c); margin-right: 4px; vertical-align: 1px; }
+.search { margin: 12px 14px 0; height: 32px; border-radius: 9px; background: var(--app-raised); display: flex; align-items: center; gap: 8px; padding: 0 10px; color: var(--app-ink3); }
+.search svg.i { width: 15px; height: 15px; }
+.search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; padding: 0; font: inherit; font-size: 12px; color: var(--app-ink); }
+.search input::placeholder { color: var(--app-ink3); }
+.tabs { display: flex; gap: 13px; padding: 8px 16px 0; border-bottom: 1px solid var(--app-hairline); }
+.tab { position: relative; display: flex; align-items: baseline; gap: 4px; padding: 4px 0 7px; font-size: 11.5px; color: var(--app-ink2); }
+.tab small { font-family: var(--font-mono); font-size: 8.5px; color: var(--app-ink3); }
+.tab[aria-selected="true"] { color: var(--app-ink); }
+.tab[aria-selected="true"] small { color: var(--app-signal); }
+.tab::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; border-radius: 1px; background: var(--app-signal); transition: width 0.18s; }
+.tab[aria-selected="true"]::after { width: 16px; }
+.list { display: grid; }
+.v-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 16px; cursor: pointer; }
+.v-row:hover { background: rgba(237, 234, 227, 0.03); }
+.v-row + .v-row::before { content: ""; position: absolute; top: 0; left: 45px; right: 0; height: 1px; background: var(--app-hairline); }
+.v-row > svg.i { color: var(--app-ink2); width: 17px; height: 17px; }
+.v-row .t { flex: 1; min-width: 0; }
+.v-row b { display: block; font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-row small { display: block; margin-top: 2px; font-size: 9.5px; color: var(--app-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-row small.mono { font-family: var(--font-mono); font-size: 8.5px; }
+.v-row .ic-btn { width: 30px; height: 30px; color: var(--app-ink3); }
+.list.fresh .v-row { animation: enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--n) * 40ms); }
+@keyframes enter { from { opacity: 0; transform: translateY(6px); } }
+.list.grid { grid-template-columns: 1fr 1fr; gap: 7px; padding: 10px 14px 0; }
+.list.grid .v-row { flex-direction: column; align-items: flex-start; gap: 16px; padding: 10px 10px 10px; border-radius: 10px; background: var(--app-surface); }
+.list.grid .v-row::before { display: none; }
+.list.grid .v-row .t { width: 100%; }
+.list.grid .v-row .ic-btn { position: absolute; top: 2px; right: 2px; }
+.empty { padding: 26px 16px 0; }
+.empty b { display: block; font-size: 14px; font-weight: 500; }
+.empty small { display: block; margin-top: 6px; font-size: 10.5px; color: var(--app-ink2); }
+.add-fab { background: var(--app-signal); color: var(--app-on-signal); font-weight: 500; }
+
+/* Sheets, menus and toasts */
+.scrim { position: absolute; inset: 0; z-index: 4; background: rgba(0, 0, 0, 0.55); animation: fade 0.2s; }
+.scrim.clear { background: transparent; animation: none; }
+.scrim[hidden], .sheet[hidden], .pop[hidden] { display: none; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; max-height: 86%; overflow-y: auto; scrollbar-width: none; padding: 8px 0 14px; border-radius: 18px 18px 0 0; background: var(--app-surface); animation: rise 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.sheet::before { content: ""; display: block; width: 28px; height: 3px; margin: 0 auto 12px; border-radius: 2px; background: var(--app-ink3); opacity: 0.6; }
+.sheet h4 { margin: 0 16px 8px; font-size: 14.5px; font-weight: 500; letter-spacing: -0.01em; }
+.sheet p { margin: 0 16px 16px; font-size: 11px; line-height: 1.5; color: var(--app-ink2); }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { transform: translateY(100%); } }
+.s-row { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; padding: 9px 16px; }
+.s-row:hover { background: rgba(237, 234, 227, 0.04); }
+.s-row > svg.i { color: var(--app-ink2); width: 17px; height: 17px; }
+.s-row .t { flex: 1; min-width: 0; }
+.s-row b { display: block; font-size: 12px; font-weight: 400; }
+.s-row small { display: block; margin-top: 1px; font-size: 9.5px; color: var(--app-ink2); }
+.s-div { height: 1px; margin: 4px 16px; background: var(--app-hairline); }
+.hold { position: relative; display: grid; place-items: center; width: calc(100% - 32px); height: 40px; margin: 0 16px; border-radius: 9px; overflow: hidden; background: var(--app-raised); color: var(--app-alert); font-size: 12.5px; font-weight: 500; text-align: center; user-select: none; -webkit-user-select: none; touch-action: none; }
+.hold .over { position: absolute; inset: 0; display: grid; place-items: center; background: var(--app-alert); color: var(--app-canvas); clip-path: inset(0 100% 0 0); transition: clip-path 0.2s ease-out; }
+.hold.on .over { clip-path: inset(0 0 0 0); transition: clip-path 1.1s linear; }
+.cancel { display: block; margin: 6px auto 0; padding: 8px 16px; font-size: 12px; color: var(--app-ink2); }
+.pop { position: absolute; z-index: 5; min-width: 118px; padding: 4px 0; border-radius: 8px; background: var(--app-raised); border: 1px solid var(--app-hairline); animation: fade 0.12s; }
+.pop .btn0 { display: block; width: 100%; padding: 8px 14px; font-size: 12px; }
+.pop .btn0:hover { background: rgba(237, 234, 227, 0.05); }
+.pop .red { color: var(--app-alert); }
+.toast { position: absolute; left: 12px; right: 12px; bottom: 14px; z-index: 6; padding: 10px 12px; border-radius: 9px; background: var(--app-raised); color: var(--app-ink); font-size: 11px; line-height: 1.4; transform: translateY(calc(100% + 30px)); visibility: hidden; transition: transform 0.25s ease, visibility 0s 0.25s; pointer-events: none; }
+.toast.show { transform: translateY(0); visibility: visible; transition: transform 0.25s ease; }
+
+/* Settings: grouped rows on one surface, hairlines between them. */
+.set-bar { display: flex; align-items: center; gap: 4px; padding: 2px 6px 0; }
+.set-bar span { font-size: 15px; font-weight: 500; }
+.set-scroll { flex: 1; overflow-y: auto; scrollbar-width: none; padding: 0 0 16px; }
+.g-label { margin: 14px 18px 6px; font-size: 9.5px; font-weight: 500; color: var(--app-ink2); }
+.group { margin: 0 12px; border-radius: 12px; overflow: hidden; background: var(--app-surface); }
+.group .s-row { padding: 10px 12px; }
+.group .s-row + .s-row::before { content: ""; position: absolute; top: 0; left: 43px; right: 0; height: 1px; background: var(--app-hairline); }
+.s-row svg.chev { color: var(--app-ink3); width: 14px; height: 14px; }
+.s-row .val { font-family: var(--font-mono); font-size: 11px; color: var(--app-ink); }
+.s-row.red, .s-row.red > svg.i { color: var(--app-alert); }
+.sw { position: relative; width: 30px; height: 18px; flex: none; border-radius: 9px; border: 1.5px solid var(--app-ink3); background: var(--app-raised); transition: background 0.18s, border-color 0.18s; }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--app-ink3); transition: left 0.18s, background 0.18s; }
+.sw.on { background: var(--app-signal); border-color: var(--app-signal); }
+.sw.on::after { left: 14px; background: var(--app-on-signal); }
 
 .demo-guide { width: min(360px, 100%); display: grid; gap: 10px; font-size: var(--step--1); }
 .demo-guide ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; color: var(--muted); }
@@ -294,8 +398,8 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 @media (prefers-reduced-motion: reduce) {
   .redacted::after { animation: none; transform: scaleX(0); }
   .fill { animation: none; width: 100%; }
-  .phone.shake { animation: none; }
-  .toast { transition: none; }
+  .phone.shake, .pin-field.bad, .pin-field .caret, .list.fresh .v-row, .sheet, .scrim, .pop, .spin { animation: none; }
+  .toast, .tab::after, .sw, .sw::after { transition: none; }
 }
 </style>
 
@@ -313,11 +417,11 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
   <div class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">For journalists, fixers and documenters · Android · v3.1.1 beta</div>
+      <div class="eyebrow">For journalists, fixers and documenters · Android · v3.2.0 beta</div>
       <h1>Hand over your phone.<br>Keep your <span class="redacted">sources.</span></h1>
       <p class="lede">Undertow looks and works like an ordinary video trimmer. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware. It records straight into the vault and backs up to a server you trust.</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.1.1 for Android</a>
+        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.2.0 for Android</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow">See the source</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
@@ -328,68 +432,68 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
     <div class="demo" aria-label="Interactive demo of the app">
       <div class="phone" id="phone">
-        <div class="screen">
-          <div class="statusbar"><span>14:02</span><span>5G ▪ 81%</span></div>
+        <div class="screen on-cover" id="screen">
+          <div class="statusbar" aria-hidden="true"><span>9:41</span><span class="sb">
+            <svg width="13" height="11" viewBox="0 0 24 20"><path d="M12 19 0 5.5C3.3 2.4 7.5.5 12 .5s8.7 1.9 12 5z"/></svg>
+            <svg width="8" height="13" viewBox="0 0 12 20"><path d="M3.5 1h5v1.5H11V20H1V2.5h2.5z"/></svg></span></div>
 
-          <div class="view" id="v-files">
-            <div class="app-bar">
-              <div class="folder-ic" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-              </div>
-              <button class="title-btn" id="files-title" aria-label="Video Trimmer (triple-tap to open the hidden lock screen)">
-                <span class="app-title">Video Trimmer</span>
-                <span class="app-sub">Cut clips, keep the good part</span>
-              </button>
+          <div class="view cover" id="v-files">
+            <div class="c-bar">
+              <button class="btn0 c-title" id="files-title" aria-label="Video Trimmer (triple-tap to open the hidden lock screen)"><i data-i="scissors"></i><span>Video Trimmer</span></button>
+              <button class="btn0 ic-btn" id="cover-more" aria-label="More options" aria-haspopup="menu" aria-expanded="false"><i data-i="moreV"></i></button>
+              <div class="c-menu" id="cover-menu" role="menu" hidden><button class="btn0" id="clear-cache" role="menuitem">Clear cache</button></div>
             </div>
-            <div class="storage">
-              <div style="display:flex;justify-content:space-between"><span>Pick a video to trim</span><span style="color:var(--app-dim)">＋</span></div>
+            <div class="c-label">Your clips · Movies/Video Trimmer</div>
+            <div class="c-clips">
+              <div class="clip"><span class="thumb" style="background:linear-gradient(170deg,#9fb6c9 0 38%,#5c6f7d 38% 46%,#2f3a33 46%)"></span><div><b>Trim_0412.mp4</b><small>0:14 · 9.2 MB</small></div><i data-i="moreV"></i></div>
+              <div class="clip"><span class="thumb" style="background:radial-gradient(circle at 70% 35%,#f2c477 0 9%,transparent 10%),linear-gradient(180deg,#e58e5a,#7d4a63 60%,#2d2433)"></span><div><b>Trim_0409.mp4</b><small>0:31 · 21 MB</small></div><i data-i="moreV"></i></div>
+              <div class="clip"><span class="thumb" style="background:linear-gradient(100deg,#3b3f45 0 30%,#c9c2b4 30% 34%,#4b5157 34% 70%,#d8d1c2 70% 73%,#3b3f45 73%)"></span><div><b>Trim_0402.mp4</b><small>0:08 · 5.4 MB</small></div><i data-i="moreV"></i></div>
+              <div class="clip"><span class="thumb" style="background:linear-gradient(180deg,#7fb2d8 0 45%,#3d6f8e 45% 60%,#c2a36f 60%)"></span><div><b>Trim_0328.mp4</b><small>1:02 · 44 MB</small></div><i data-i="moreV"></i></div>
             </div>
-            <div class="cats">
-              <div><span class="dot" style="background:#f472b6"></span>Trim</div>
-              <div><span class="dot" style="background:#38bdf8"></span>Mute</div>
-              <div><span class="dot" style="background:#fbbf24"></span>Save</div>
-              <div><span class="dot" style="background:#34d399"></span>Share</div>
-            </div>
-            <div class="rows">
-              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0412.mp4<small>0:14 · 9.2 MB</small></div></div>
-              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0409.mp4<small>0:31 · 21 MB</small></div></div>
-              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0402.mp4<small>0:08 · 5.4 MB</small></div></div>
-              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0328.mp4<small>1:02 · 44 MB</small></div></div>
-            </div>
+            <button class="btn0 fab cover-fab" id="new-trim"><i data-i="add"></i>New trim</button>
           </div>
 
-          <div class="view lockview" id="v-lock" hidden>
-            <button class="back-btn" id="lock-back" aria-label="Back to Video Trimmer">‹</button>
-            <div class="lock-top">
-              <div class="lock-ring" id="lock-ring" aria-hidden="true">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-              </div>
-              <div class="lock-title">Locked</div>
-              <div class="lock-msg" id="lock-msg" aria-live="polite">Enter your PIN.</div>
-              <div class="pin-dots" id="pin-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <div class="view lock" id="v-lock" hidden>
+            <button class="btn0 ic-btn back" id="lock-back" aria-label="Back to Video Trimmer"><i data-i="back"></i></button>
+            <div class="lock-body">
+              <div class="lock-label"><i data-i="lock"></i><span>Locked</span></div>
+              <div class="lock-title" id="lock-msg" aria-live="polite">Enter your PIN.</div>
+              <div class="pin-field empty" id="pin-field" aria-hidden="true"><span id="pin-text" class="ph">PIN or passphrase</span><span class="caret"></span></div>
+              <button class="btn0 u-primary" id="unlock">Unlock</button>
             </div>
-            <div class="keypad" id="keypad">
-              <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
-              <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
-              <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
-              <button data-k="del" aria-label="Delete">⌫</button><button data-k="0">0</button><button data-k="ok" aria-label="Unlock">✓</button>
+            <div class="kbd" id="keypad" aria-label="Keyboard">
+              <button class="btn0" data-k="1">1</button><button class="btn0" data-k="2">2</button><button class="btn0" data-k="3">3</button>
+              <button class="btn0" data-k="4">4</button><button class="btn0" data-k="5">5</button><button class="btn0" data-k="6">6</button>
+              <button class="btn0" data-k="7">7</button><button class="btn0" data-k="8">8</button><button class="btn0" data-k="9">9</button>
+              <button class="btn0 k-fn" data-k="del" aria-label="Delete"><i data-i="backspace"></i></button><button class="btn0" data-k="0">0</button><button class="btn0 k-ok" data-k="ok" aria-label="Done"><i data-i="check"></i></button>
             </div>
           </div>
 
           <div class="view" id="v-vault" hidden>
-            <div class="vault-head">
-              <div class="shield" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5v6c0 5 3.4 9.6 8 11 4.6-1.4 8-6 8-11V5z"/></svg>
-              </div>
-              <div><b>Encrypted Safe</b><small>AES-256 GCM · Active</small></div>
-              <button class="lock-btn" id="vault-lock" aria-label="Lock">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-              </button>
+            <div class="v-bar">
+              <button class="btn0 ic-btn" id="vault-lock" aria-label="Lock"><i data-i="lock"></i></button>
+              <div class="v-title">Vault</div>
+              <button class="btn0 ic-btn" id="grid-toggle" aria-label="Show as a grid"><i data-i="grid"></i></button>
+              <button class="btn0 ic-btn" id="open-settings" aria-label="Settings"><i data-i="tune"></i></button>
+              <button class="btn0 ic-btn" id="vault-panic" aria-label="Instant panic lock"><i data-i="power"></i></button>
             </div>
-            <div class="vault-count" id="vault-count"></div>
-            <div class="rows" id="vault-rows"></div>
+            <div class="v-scroll">
+              <div class="meter"><div class="m-top"><span class="m-total" id="m-total"></span><span class="m-cap" id="m-cap"></span></div><div class="m-bar" id="m-bar"></div><div class="m-legend" id="m-legend"></div></div>
+              <label class="search"><i data-i="search"></i><input id="search" type="search" placeholder="Search" aria-label="Search the vault" autocomplete="off"></label>
+              <div class="tabs" id="tabs" role="tablist" aria-label="Filter"></div>
+              <div class="list" id="vault-rows"></div>
+            </div>
+            <button class="btn0 fab add-fab" id="add"><i data-i="add"></i>Add</button>
           </div>
 
+          <div class="view" id="v-settings" hidden>
+            <div class="set-bar"><button class="btn0 ic-btn" id="settings-back" aria-label="Back to the vault"><i data-i="back"></i></button><span>Settings</span></div>
+            <div class="set-scroll" id="settings-list"></div>
+          </div>
+
+          <div class="scrim" id="scrim" hidden></div>
+          <div class="sheet" id="sheet" role="dialog" aria-modal="true" hidden></div>
+          <div class="pop" id="pop" role="menu" hidden></div>
           <div class="toast" id="toast" role="status"></div>
         </div>
       </div>
@@ -398,8 +502,9 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
         <div class="seen" aria-live="polite"><span>Showing:</span><b id="seen">what an inspector sees</b></div>
         <ol>
           <li>Triple-tap <code>Video Trimmer</code>. Nothing on screen tells you that works.</li>
-          <li>Enter <code>2580</code> for your vault, or <code>1111</code> for the decoy you hand over.</li>
-          <li>Inside, lock it, or hit panic to wipe the keys from memory at once.</li>
+          <li>Type <code>2580</code> for your vault, or <code>1111</code> for the decoy you hand over, then Unlock.</li>
+          <li>Inside, filter and search, hold to shred a file, look through Settings, or tap the power icon to wipe the keys from memory at once.</li>
+          <li>On the trimmer, <code>⋮ → Clear cache</code> is the quiet stop for anything waiting to upload.</li>
         </ol>
         <button class="btn btn-ghost panic" id="panic">Simulate a panic shake</button>
       </div>
@@ -554,7 +659,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
 <footer>
   <div class="wrap foot">
-    <div>Undertow v3.1.1 · Android beta · Built in the open</div>
+    <div>Undertow v3.2.0 · Android beta · Built in the open</div>
     <nav aria-label="Documents">
       <a href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download</a>
       <a href="https://github.com/FalconFuryX77/Undertow">Source</a>
@@ -583,36 +688,102 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 })();
 (() => {
   const $ = (id) => document.getElementById(id);
-  const views = { files: $("v-files"), lock: $("v-lock"), vault: $("v-vault") };
+  const phone = $("phone"), screen = $("screen");
+  if (!phone) return;
+  const views = { files: $("v-files"), lock: $("v-lock"), vault: $("v-vault"), settings: $("v-settings") };
   const seen = $("seen");
   const REAL = "2580", DECOY = "1111";
 
-  const vaults = {
+  // Line icons in the app's style (Material, outlined and rounded).
+  const P = {
+    scissors: "M8.5 6a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM8.5 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM8 7.5 20 18M8 16.5 20 6",
+    moreV: "M12 6h.01M12 12h.01M12 18h.01",
+    moreH: "M6 12h.01M12 12h.01M18 12h.01",
+    add: "M12 5v14M5 12h14",
+    back: "M19 12H5M11 6l-6 6 6 6",
+    lock: "M7 11h10a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zM9 11V8a3 3 0 0 1 6 0v3",
+    grid: "M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z",
+    agenda: "M4.5 5h15v6h-15zM4.5 13h15v6h-15z",
+    tune: "M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4",
+    power: "M12 3.5v8M7.6 6.3a7 7 0 1 0 8.8 0",
+    search: "M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM20 20l-4.8-4.8",
+    notes: "M5 7h14M5 12h14M5 17h9",
+    audio: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2",
+    movie: "M4 5.5h16v13H4zM10 9.2l5 2.8-5 2.8z",
+    image: "M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15.5 9.5h.01",
+    pdf: "M7 3h7l5 5v13H7zM14 3v5h5M9.5 13h7M9.5 17h5",
+    camera: "M4 8h3l2-2.5h6L17 8h3v11H4zM12 10.5a3 3 0 1 1 0 6 3 3 0 0 1 0-6z",
+    mic: "M12 4a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0v-5A2.5 2.5 0 0 1 12 4zM6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3",
+    editNote: "M4 7h11M4 12h8M4 17h5M18.5 10.5l2 2-6 6H12.5v-2z",
+    photos: "M7 4h13v13H7zM4 7v13h13M7 14l3.5-3.5 3 3L15 12l5 5",
+    doc: "M7 3h7l5 5v13H7zM14 3v5h5M9.5 13h7M9.5 17h7",
+    zip: "M3.5 6h6l2 2h9v11h-17zM14 10h2M14 13h2M14 16h2",
+    pin: "M4 7h16v10H4zM8 12h.01M12 12h.01M16 12h.01",
+    mask: "M4.5 5.5h7v5.5a3.5 3.5 0 0 1-7 0zM12.5 9.5h7V15a3.5 3.5 0 0 1-7 0z",
+    fire: "M12 3c3 3.5 5 6 5 9.5a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3 0-5 1-8z",
+    trash: "M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13",
+    phoneOff: "M8 3h8v18H8zM11 18h2",
+    cloud: "M7 18a4.5 4.5 0 0 1-.5-9 6 6 0 0 1 11.3 1.5A3.75 3.75 0 0 1 17 18zM12 16v-5M9.5 13.5 12 11l2.5 2.5",
+    move: "M3.5 6h6l2 2h9v11h-17zM9.5 13.5h6M13 11l2.5 2.5L13 16",
+    swap: "M5 9h13M15 6l3 3-3 3M19 15H6M9 12l-3 3 3 3",
+    timer: "M12 8a6 6 0 1 1 0 12 6 6 0 0 1 0-12zM12 11v3l2 1.5M10 3h4",
+    chev: "M10 7l5 5-5 5",
+    check: "M5 12.5l4.5 4.5L19 7.5",
+    backspace: "M9 6h11v12H9l-5-6zM12.5 9.5l5 5M17.5 9.5l-5 5",
+  };
+  const icon = (n, cls = "") =>
+    `<svg class="i ${n.startsWith("more") ? "dots" : ""} ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+  phone.querySelectorAll("i[data-i]").forEach((el) => { el.outerHTML = icon(el.dataset.i); });
+
+  const KB = 1024, MB = KB * KB;
+  const VAULTS = {
     real: {
-      label: "what only you see", cls: "who-real",
+      label: "what only you see", cls: "who-real", hasDecoy: true,
       items: [
-        ["N", "#a78bfa", "Checkpoint notes", "Note · 1.2 KB"],
-        ["A", "#34d399", "interview_0412.m4a", "Audio · 18.4 MB"],
-        ["V", "#f472b6", "bridge_crossing.mp4", "Video · 212 MB"],
-        ["N", "#a78bfa", "Source contacts", "Note · 640 B"],
+        { kind: "note", name: "Checkpoint notes", size: 1.2 * KB, sub: "North gate: two officers after 22:00." },
+        { kind: "audio", name: "interview_0412.m4a", size: 18.4 * MB, when: "14:31" },
+        { kind: "video", name: "bridge_crossing.mp4", size: 212 * MB, when: "13:58" },
+        { kind: "pdf", name: "Field_report_14_Nov.pdf", size: 2.6 * MB, when: "09:12" },
+        { kind: "photo", name: "Market_morning.jpg", size: 4.1 * MB, when: "14 Nov" },
+        { kind: "note", name: "Source contacts", size: 640, sub: "Meet at the café, never the office." },
       ],
     },
     decoy: {
-      label: "the decoy you hand over", cls: "who-decoy",
+      label: "the decoy you hand over", cls: "who-decoy", hasDecoy: false,
       items: [
-        ["N", "#a78bfa", "Grocery list", "Note · 220 B"],
-        ["D", "#fbbf24", "Lease_2025.pdf", "Document · 1.1 MB"],
-        ["I", "#38bdf8", "Beach_day.jpg", "Image · 3.4 MB"],
+        { kind: "note", name: "Grocery list", size: 220, sub: "Eggs, rice, tomatoes, coffee" },
+        { kind: "pdf", name: "Lease_2025.pdf", size: 1.1 * MB, when: "3 Nov" },
+        { kind: "photo", name: "Beach_day.jpg", size: 3.4 * MB, when: "28 Oct" },
       ],
     },
   };
+  const KIND = {
+    note: { icon: "notes", tab: "notes", meter: "Notes", open: "Opens in the note editor. The keyboard doesn't learn what you type." },
+    audio: { icon: "audio", tab: "media", meter: "Audio", open: "Plays here, inside the vault. No other app sees it." },
+    video: { icon: "movie", tab: "media", meter: "Video", open: "Plays here, inside the vault. No other app sees it." },
+    photo: { icon: "image", tab: "media", meter: "Photos", open: "Opens here, decoded in a sealed-off process." },
+    pdf: { icon: "pdf", tab: "docs", meter: "Documents", open: "Opens here, decoded in a sealed-off process." },
+  };
+  const METER = ["Video", "Photos", "Audio", "Documents", "Notes"];
+  const SHADES = ["#EDEAE3", "#BDB9B0", "#8E8A81", "#615E57", "#45433E"];
+  const TABS = [["all", "All"], ["docs", "Documents"], ["media", "Media"], ["notes", "Notes"]];
 
-  let pin = "";
-  let taps = [];
-  let toastTimer;
+  let mode = null, items = [], tab = "all", query = "", grid = false;
+  let pin = "", checking = false, taps = [], toastTimer;
 
+  function fmt(b) {
+    const u = ["B", "KB", "MB", "GB"];
+    let i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return `${i === 0 || b >= 10 ? Math.round(b) : b.toFixed(1)} ${u[i]}`;
+  }
   function show(name) {
+    const hadFocus = phone.contains(document.activeElement);
+    closeOverlays();
     for (const [k, el] of Object.entries(views)) el.hidden = k !== name;
+    screen.classList.toggle("on-cover", name === "files");
+    // On the lock screen, Enter should unlock rather than press "back".
+    if (hadFocus) (name === "lock" ? $("unlock") : views[name].querySelector("button, input"))?.focus({ preventScroll: true });
   }
   function setSeen(text, cls) {
     seen.textContent = text;
@@ -623,76 +794,325 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
-  }
-  function renderPin() {
-    [...$("pin-dots").children].forEach((d, i) => d.classList.toggle("on", i < pin.length));
-  }
-  function setLockMsg(text, bad) {
-    $("lock-msg").textContent = text;
-    $("lock-msg").classList.toggle("bad", !!bad);
-    $("lock-ring").classList.toggle("bad", !!bad);
-  }
-  function toFiles() {
-    pin = ""; renderPin(); setLockMsg("Enter your PIN.");
-    show("files");
-    setSeen("what an inspector sees");
-  }
-  function openVault(kind) {
-    const v = vaults[kind];
-    $("vault-count").innerHTML = `${v.items.length} protected items<small>Shake hard anytime to lock</small>`;
-    $("vault-rows").innerHTML = v.items.map(([g, c, name, meta]) =>
-      `<div class="row"><span class="ric" style="background:${c}22;color:${c}">${g}</span><div>${name}<small>${meta}</small></div></div>`
-    ).join("");
-    show("vault");
-    setSeen(v.label, v.cls);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
   }
 
+  // ── Overlays: the bottom sheet, the row menu, the trimmer's menu ──
+  const scrim = $("scrim"), sheet = $("sheet"), pop = $("pop"), coverMenu = $("cover-menu");
+  function closeOverlays() {
+    scrim.hidden = sheet.hidden = pop.hidden = coverMenu.hidden = true;
+    scrim.classList.remove("clear");
+    $("cover-more").setAttribute("aria-expanded", "false");
+  }
+  function openSheet(html) {
+    closeOverlays();
+    sheet.innerHTML = html;
+    scrim.hidden = sheet.hidden = false;
+    sheet.querySelector("button")?.focus({ preventScroll: true });
+  }
+  function openFloating(el) {
+    closeOverlays();
+    scrim.classList.add("clear");
+    scrim.hidden = el.hidden = false;
+    el.querySelector("button")?.focus({ preventScroll: true });
+  }
+  scrim.addEventListener("click", closeOverlays);
+  phone.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlays(); });
+
+  // ── The cover ──
   $("files-title").addEventListener("click", () => {
     const now = Date.now();
     taps = taps.filter((t) => now - t < 800);
     taps.push(now);
-    if (taps.length >= 3) {
-      taps = [];
-      show("lock");
-      setSeen("the hidden lock screen");
-    }
+    if (taps.length < 3) return;
+    taps = [];
+    show("lock");
+    setSeen("the hidden lock screen");
   });
-  $("lock-back").addEventListener("click", toFiles);
-  $("vault-lock").addEventListener("click", () => { toFiles(); toast("Locked. Keys cleared."); });
+  $("cover-more").addEventListener("click", () => {
+    openFloating(coverMenu);
+    $("cover-more").setAttribute("aria-expanded", "true");
+  });
+  $("clear-cache").addEventListener("click", () => { closeOverlays(); toast("Cache cleared"); });
+  $("new-trim").addEventListener("click", () => toast("Pick a video, cut its start and end, save the clip."));
 
+  // ── The lock screen ──
+  function renderPin() {
+    const t = $("pin-text");
+    t.textContent = pin ? "•".repeat(pin.length) : "PIN or passphrase";
+    t.classList.toggle("ph", !pin);
+    $("pin-field").classList.toggle("empty", !pin);
+  }
+  function setTitle(text) { $("lock-msg").textContent = text; }
+  function setBusy(on) {
+    checking = on;
+    const b = $("unlock");
+    b.setAttribute("aria-busy", on ? "true" : "false");
+    b.innerHTML = on ? '<span class="spin" aria-hidden="true"></span><span class="sr-only">Checking</span>' : "Unlock";
+  }
+  function press(k) {
+    if (checking) return;
+    const f = $("pin-field");
+    if (k === "ok") return submit();
+    f.classList.remove("bad");
+    if (k === "del") pin = pin.slice(0, -1);
+    else if (pin.length < 12) pin += k;
+    setTitle("Enter your PIN.");
+    renderPin();
+  }
+  function submit() {
+    if (checking || !pin) return;
+    const kind = pin === REAL ? "real" : pin === DECOY ? "decoy" : null;
+    setBusy(true);
+    setTitle("Checking…");
+    setTimeout(() => {
+      setBusy(false);
+      pin = "";
+      renderPin();
+      if (kind) {
+        setTitle("Enter your PIN.");
+        openVault(kind);
+        return;
+      }
+      setTitle("Not recognised.");
+      const f = $("pin-field");
+      f.classList.remove("bad");
+      void f.offsetWidth;
+      f.classList.add("bad");
+    }, 550);
+  }
   $("keypad").addEventListener("click", (e) => {
     const b = e.target.closest("button");
-    if (!b) return;
-    const k = b.dataset.k;
-    if (k === "del") { pin = pin.slice(0, -1); }
-    else if (k === "ok") {
-      if (pin === REAL) { pin = ""; renderPin(); openVault("real"); return; }
-      if (pin === DECOY) { pin = ""; renderPin(); openVault("decoy"); return; }
-      pin = ""; setLockMsg("Not recognised.", true);
-      setTimeout(() => setLockMsg("Enter your PIN."), 1800);
-    } else if (pin.length < 4) {
-      pin += k;
-      setLockMsg("Enter your PIN.");
-      if (pin.length === 4) {
-        if (pin === REAL || pin === DECOY) {
-          const kind = pin === REAL ? "real" : "decoy";
-          setLockMsg("Checking…");
-          setTimeout(() => { pin = ""; renderPin(); openVault(kind); }, 450);
-        }
-      }
-    }
-    renderPin();
+    if (b) press(b.dataset.k);
+  });
+  $("unlock").addEventListener("click", submit);
+  $("lock-back").addEventListener("click", toFiles);
+  document.addEventListener("keydown", (e) => {
+    if (views.lock.hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest("input, textarea")) return;
+    if (/^[0-9]$/.test(e.key)) press(e.key);
+    else if (e.key === "Backspace") press("del");
+    else if (e.key === "Enter" && !e.target.closest?.("button")) submit();
+    else return;
+    e.preventDefault();
   });
 
-  $("panic").addEventListener("click", () => {
-    const phone = $("phone");
+  // ── The vault ──
+  function openVault(kind) {
+    mode = kind;
+    items = VAULTS[kind].items.map((it, id) => ({ ...it, id }));
+    tab = "all"; query = ""; grid = false;
+    $("search").value = "";
+    renderVault(true);
+    show("vault");
+    setSeen(VAULTS[kind].label, VAULTS[kind].cls);
+  }
+  function renderVault(fresh) {
+    const total = items.reduce((a, it) => a + it.size, 0);
+    $("m-total").textContent = fmt(total);
+    $("m-cap").textContent = items.length === 1 ? "1 item" : `${items.length} items`;
+    const parts = METER.map((m) => [m, items.filter((it) => KIND[it.kind].meter === m).reduce((a, it) => a + it.size, 0)])
+      .filter(([, b]) => b > 0);
+    $("m-bar").innerHTML = parts.map(([, b], i) =>
+      `<i style="flex:${Math.min(1000, Math.max(8, Math.floor((b * 1000) / total)))};background:${SHADES[i % SHADES.length]}"></i>`).join("");
+    $("m-legend").innerHTML = parts.map(([m], i) => `<span style="--c:${SHADES[i % SHADES.length]}">${m}</span>`).join("");
+
+    const count = (t) => (t === "all" ? items.length : items.filter((it) => KIND[it.kind].tab === t).length);
+    $("tabs").innerHTML = TABS.map(([t, label]) =>
+      `<button class="btn0 tab" role="tab" data-tab="${t}" aria-selected="${t === tab}">${label}<small>${count(t)}</small></button>`).join("");
+
+    const q = query.trim().toLowerCase();
+    const shown = items.filter((it) => (tab === "all" || KIND[it.kind].tab === tab) && (!q || it.name.toLowerCase().includes(q)));
+    const list = $("vault-rows");
+    list.classList.toggle("grid", grid);
+    list.classList.toggle("fresh", !!fresh);
+    list.innerHTML = shown.length
+      ? shown.map((it, n) => `
+        <div class="v-row" style="--n:${n}" data-id="${it.id}" role="button" tabindex="0" aria-label="Open ${it.name}">
+          ${icon(KIND[it.kind].icon)}
+          <div class="t"><b>${it.name}</b>${it.sub ? `<small>${it.sub}</small>` : `<small class="mono">${fmt(it.size)} · ${it.when}</small>`}</div>
+          <button class="btn0 ic-btn" data-more="${it.id}" aria-label="More options for ${it.name}" aria-haspopup="menu">${icon("moreH")}</button>
+        </div>`).join("")
+      : q
+        ? '<div class="empty"><b>Nothing matches</b><small>Try another word, or another filter.</small></div>'
+        : '<div class="empty"><b>Nothing here yet</b><small>Add photos, documents, notes or recordings. They stay encrypted on this phone.</small></div>';
+    $("grid-toggle").innerHTML = icon(grid ? "agenda" : "grid");
+    $("grid-toggle").setAttribute("aria-label", grid ? "Show as a list" : "Show as a grid");
+  }
+  $("tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tab]");
+    if (!b) return;
+    tab = b.dataset.tab;
+    renderVault();
+    $("tabs").querySelector(`[data-tab="${tab}"]`)?.focus({ preventScroll: true });
+  });
+  $("search").addEventListener("input", (e) => { query = e.target.value; renderVault(); });
+  $("grid-toggle").addEventListener("click", () => { grid = !grid; renderVault(true); });
+  const byId = (id) => items.find((it) => it.id === Number(id));
+  $("vault-rows").addEventListener("click", (e) => {
+    const more = e.target.closest("[data-more]");
+    if (more) return openMenu(byId(more.dataset.more), more);
+    const row = e.target.closest(".v-row");
+    if (row) toast(KIND[byId(row.dataset.id).kind].open);
+  });
+  $("vault-rows").addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("v-row")) {
+      e.preventDefault();
+      toast(KIND[byId(e.target.dataset.id).kind].open);
+    }
+  });
+
+  function openMenu(it, btn) {
+    const sr = screen.getBoundingClientRect(), br = btn.getBoundingClientRect();
+    pop.innerHTML = '<button class="btn0" role="menuitem" data-act="open">Open</button>'
+      + '<button class="btn0" role="menuitem" data-act="export">Export</button>'
+      + '<button class="btn0" role="menuitem" data-act="rename">Rename</button>'
+      + '<button class="btn0 red" role="menuitem" data-act="shred">Shred</button>';
+    pop.style.right = `${Math.max(8, sr.right - br.right + 4)}px`;
+    pop.style.top = `${Math.min(br.top - sr.top + 6, sr.height - 160)}px`;
+    pop.dataset.id = it.id;
+    openFloating(pop);
+  }
+  pop.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    const it = byId(pop.dataset.id);
+    closeOverlays();
+    if (b.dataset.act === "open") toast(KIND[it.kind].open);
+    else if (b.dataset.act === "export") toast("Saves a decrypted copy where you choose, after asking.");
+    else if (b.dataset.act === "rename") toast("The new name is encrypted with the file.");
+    else confirmShred(it);
+  });
+
+  // Destroying something takes a held press: the bar fills in red; letting go early cancels.
+  function confirmShred(it) {
+    openSheet(`<h4>Shred "${it.name}"?</h4>
+      <p>Its key is destroyed and its data overwritten. It cannot be recovered from this phone.</p>
+      <button class="btn0 hold" id="hold" aria-label="Hold to shred (press and hold)">Hold to shred<span class="over" aria-hidden="true">Hold to shred</span></button>
+      <button class="btn0 cancel" id="hold-cancel">Cancel</button>`);
+    const hold = $("hold");
+    let timer = null;
+    const start = (e) => {
+      e.preventDefault();
+      if (timer) return;
+      hold.classList.add("on");
+      timer = setTimeout(() => {
+        timer = null;
+        items = items.filter((x) => x !== it);
+        closeOverlays();
+        renderVault();
+        toast(`Shredded "${it.name}"`);
+        if (navigator.vibrate) navigator.vibrate(30);
+      }, 1100);
+    };
+    const stop = () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+      hold.classList.remove("on");
+    };
+    hold.addEventListener("pointerdown", start);
+    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => hold.addEventListener(ev, stop));
+    hold.addEventListener("contextmenu", (e) => e.preventDefault());
+    hold.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) start(e); });
+    hold.addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") stop(); });
+    $("hold-cancel").addEventListener("click", closeOverlays);
+  }
+
+  const ADD = [
+    ["camera", "Camera", "Photos and video, never in the gallery", "Photos and video go straight in. Photos lose their location."],
+    ["mic", "Record audio", "Encrypted as it records", "Records into the vault, saved every second."],
+    ["editNote", "Note", "Text, passwords, anything typed", "Your keyboard doesn't learn what you type here."],
+    null,
+    ["photos", "Photos and videos", "From this phone", "Encrypts a copy of what you pick."],
+    ["doc", "Document", "PDF, Word, spreadsheets, slides, text", "Opens inside the vault, never in another app."],
+    ["zip", "Any other file", "Archives, backups, anything", "Any file can be kept here, encrypted."],
+  ];
+  $("add").addEventListener("click", () => {
+    openSheet("<h4>Add to the vault</h4>" + ADD.map((r, i) => r
+      ? `<button class="btn0 s-row" data-add="${i}">${icon(r[0])}<span class="t"><b>${r[1]}</b><small>${r[2]}</small></span></button>`
+      : '<div class="s-div"></div>').join(""));
+  });
+  sheet.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-add]");
+    if (!b) return;
+    closeOverlays();
+    toast(ADD[b.dataset.add][3]);
+  });
+
+  // ── Settings ──
+  let idle = 1, leaveLock = true;
+  const IDLE = ["15s", "30s", "60s", "2m"];
+  function renderSettings() {
+    const row = (ic, title, detail, say, extra = "") =>
+      `<button class="btn0 s-row ${extra}" data-say="${say}">${icon(ic)}<span class="t"><b>${title}</b>${detail ? `<small>${detail}</small>` : ""}</span>${icon("chev", "chev")}</button>`;
+    const group = (label, rows) => `<div class="g-label">${label}</div><div class="group">${rows.join("")}</div>`;
+    const decoy = VAULTS[mode].hasDecoy
+      ? [
+        row("pin", "Change decoy PIN", "The PIN you can give up under pressure", "Changes the decoy's PIN. This vault's stays the same."),
+        row("fire", "Change duress PIN", "Opens the decoy and erases this vault", "Typed on the lock screen, it opens the decoy and erases this vault."),
+        row("trash", "Remove decoy vault", "Erases the decoy and everything in it", "Asks you to hold to confirm, like shredding.", "red"),
+      ]
+      : [row("mask", "Set up a decoy vault", "A second PIN that opens a harmless vault", "Sets a second PIN that opens a harmless vault.")];
+    $("settings-list").innerHTML =
+      group("Access", [row("pin", "Change PIN", "The PIN that opens this vault", "Asks for the new PIN twice.")])
+      + group("Decoy vault", decoy)
+      + group("Recording", [
+        row("mic", "Record audio", "", "A big record button, a clock, and a blinking REC light."),
+        row("phoneOff", "Hidden recorder", "Record with the screen off", "Volume presses or the assistant button start and stop it, screen off."),
+      ])
+      + group("Backup", [
+        row("cloud", "Backup", "Encrypted copies on a server you trust", "The server only ever holds ciphertext."),
+        row("move", "Move to another phone or app", "", "Saves the vault to one file and shows a code that opens it."),
+      ])
+      + group("Locking", [
+        `<button class="btn0 s-row" id="set-leave" role="switch" aria-checked="${leaveLock}">${icon("swap")}<span class="t"><b>Lock when I leave the app</b></span><span class="sw ${leaveLock ? "on" : ""}"></span></button>`,
+        `<button class="btn0 s-row" id="set-idle" aria-label="Lock when idle: ${IDLE[idle]}">${icon("timer")}<span class="t"><b>Lock when idle</b></span><span class="val">${IDLE[idle]}</span></button>`,
+      ]);
+  }
+  $("open-settings").addEventListener("click", () => {
+    renderSettings();
+    $("settings-list").scrollTop = 0;
+    show("settings");
+  });
+  $("settings-back").addEventListener("click", () => show("vault"));
+  $("settings-list").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.id === "set-leave") {
+      leaveLock = !leaveLock;
+      b.setAttribute("aria-checked", String(leaveLock));
+      b.querySelector(".sw").classList.toggle("on", leaveLock);
+    } else if (b.id === "set-idle") {
+      idle = (idle + 1) % IDLE.length;
+      b.querySelector(".val").textContent = IDLE[idle];
+      b.setAttribute("aria-label", `Lock when idle: ${IDLE[idle]}`);
+    } else if (b.dataset.say) {
+      toast(b.dataset.say);
+    }
+  });
+
+  // ── Locking ──
+  function toFiles() {
+    pin = "";
+    renderPin();
+    setTitle("Enter your PIN.");
+    $("pin-field").classList.remove("bad");
+    mode = null;
+    items = [];
+    show("files");
+    setSeen("what an inspector sees");
+  }
+  $("vault-lock").addEventListener("click", () => { toFiles(); toast("Locked. Keys cleared."); });
+  function panic() {
     phone.classList.remove("shake");
     void phone.offsetWidth;
     phone.classList.add("shake");
-    const wasOpen = !views.vault.hidden || !views.lock.hidden;
+    const wasOpen = views.files.hidden;
     toFiles();
     toast(wasOpen ? "Panic lock. Keys cleared from memory." : "Already locked.");
-  });
+  }
+  $("vault-panic").addEventListener("click", panic);
+  $("panic").addEventListener("click", panic);
 })();
 </script>

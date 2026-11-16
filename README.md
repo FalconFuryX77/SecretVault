@@ -4,7 +4,7 @@ An encrypted vault for Android, hidden inside a working video trimmer, built wit
 
 Website: **https://falconfuryx77.github.io/Undertow/** · **[Watch the 3-minute demo](https://falconfuryx77.github.io/Undertow/#video)**
 
-**Status: v3.1.1, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
+**Status: v3.2.0, an early release.** It works end to end on emulators and real phones and is covered by the tests below. Each release goes through an adversarial review of the whole codebase for bugs and security issues, with a regression test for every fix; what that review found but didn't fix is listed in the [threat model](docs/THREAT_MODEL.md#6-known-gaps-and-open-decisions). None of that replaces an independent audit, which it hasn't had yet ([audit brief](docs/AUDIT_BRIEF.md)). Don't make it the only copy of anything that matters.
 
 ## Install 📲
 
@@ -16,7 +16,7 @@ SHA-256 of the signing certificate:
 ```
 
 * The app shows up as **Video Trimmer**, and it is one: pick a video, trim it, save it. Triple-tap the title on its home screen to reach the lock screen.
-* The vault lives inside the app's private storage. **Uninstalling the app erases it.** To move a vault to another phone or app, use Settings → *Move to Another Phone or App*.
+* The vault lives inside the app's private storage. **Uninstalling the app erases it.** To move a vault to another phone or app, use Settings → *Move to another phone or app*.
 * **Coming from the old app** (SecretVault, which showed up as "Files")? It can't be updated in place. Follow [Moving from the old app](docs/RELEASING.md#moving-from-the-old-app-secretvault--files-up-to-v210).
 
 ## How it protects your files 🔐

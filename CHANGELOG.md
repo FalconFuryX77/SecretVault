@@ -3,6 +3,30 @@
 Every release of Undertow (called SecretVault until v3.0.0), newest first.
 Security-relevant changes are marked **security**.
 
+## v3.2.0 (2026-11-16): a calmer, native design
+
+- A new look for the whole vault. Warm greys with one amber colour for the
+  action and anything live; red only where something gets destroyed.
+  Android's own typeface for text and a monospaced one for sizes, dates and
+  codes. Settings are grouped rows with plain, sentence-case labels instead
+  of a card and a coloured tile per row. The rules are in
+  [docs/DESIGN.md](docs/DESIGN.md).
+- The vault shows its size as a meter split by kind of file, and filters
+  are text tabs with counts.
+- **security** Shredding a file and removing the decoy vault now take a held
+  press (about a second): letting go early cancels, so a slip under pressure
+  can't destroy anything. Screen readers confirm with a long press.
+- The lock screen says where it stands in its title ("Enter your PIN.",
+  "Not recognised.") and the field shakes on a wrong PIN.
+- Recorder: one large button with a red dot, a large clock and a slowly
+  blinking REC light. Hidden recorder: the volume button and the number of
+  presses are picked like a hardware switch.
+- The website's phone shows the new design and can be tried: filters,
+  search, hold to shred, the Add sheet, Settings, panic, and the trimmer's
+  "Clear cache".
+- Nothing changed in the vault format, encryption, backup or server: a
+  vault from v3.1 opens as it is.
+
 ## v3.1.1 (2026-11-16)
 
 - Fixed: with "Keep uploading while locked" on, a change made in the last
