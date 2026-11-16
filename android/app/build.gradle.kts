@@ -13,8 +13,8 @@ plugins {
 // variable ORG_GRADLE_PROJECT_appId).
 //
 // The old package, for an update that lets earlier installs move their
-// vault out (signed with the old development key):
-//   ORG_GRADLE_PROJECT_appId=com.example.gesture_unlock ORG_GRADLE_PROJECT_legacySigning=true flutter build apk --release
+// vault out (signed with the old development key; see docs/RELEASING.md):
+//   flutter build apk --release --split-per-abi -P appId=com.example.gesture_unlock -P legacySigning=true
 val appId = (project.findProperty("appId") as String?) ?: "com.videotrimmer.local"
 val legacySigning = (project.findProperty("legacySigning") as String?) == "true"
 
