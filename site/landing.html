@@ -309,11 +309,11 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
   <div class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">For journalists, fixers and documenters · Android · v3.0.0 beta</div>
+      <div class="eyebrow">For journalists, fixers and documenters · Android · v3.1.0 beta</div>
       <h1>Hand over your phone.<br>Keep your <span class="redacted">sources.</span></h1>
       <p class="lede">Undertow looks and works like an ordinary video trimmer. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware. It records straight into the vault and backs up to a server you trust.</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.0.0 for Android</a>
+        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.1.0 for Android</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow">See the source</a>
         <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
@@ -451,6 +451,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
     </div>
     <div class="features">
       <div class="feature"><span class="k">Panic shake</span><h3>Lock in one motion</h3><p>Shake the phone hard, or just press the power button, and the open vault locks at once, clearing its keys from memory.</p></div>
+      <div class="feature"><span class="k">Quiet stop</span><h3>Clear the trail in a tap</h3><p>"Clear cache" in the trimmer's menu, or a stop code typed as if it were a wrong PIN, wipes anything still waiting to upload and the login it would use. The vault and your backup stay as they are.</p></div>
       <div class="feature"><span class="k">Auto-lock</span><h3>Locks behind you</h3><p>Leaving the app or putting the phone down locks the vault. Typing a long note keeps it open.</p></div>
       <div class="feature"><span class="k">No screenshots</span><h3>Blank in recent apps</h3><p>Vault screens can't be captured and show blank in the app switcher. The cover app behaves normally.</p></div>
       <div class="feature"><span class="k">Tamper-evident</span><h3>Refuses altered files</h3><p>Every 64 KB of every file is authenticated. A changed, swapped or cut-short file won't open.</p></div>
@@ -494,10 +495,10 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 <section id="sync">
   <div class="wrap sync">
     <div class="sync-copy">
-      <span class="status-chip">Automatic backup · previews first · restore in the app</span>
+      <span class="status-chip">Automatic · keeps going while locked · previews first</span>
       <h2>Getting your work out on a bad signal</h2>
-      <p>The safest file is one that has already left the phone. Undertow backs up by itself while the vault is open, in small encrypted pieces that resume where they stopped, so even a few seconds of signal count. New photos and videos go first as small copies, so something gets out even on a bad line.</p>
-      <p>The server only ever holds ciphertext. A news desk or NGO can run its own. And a phone taken from you can't delete what already got out.</p>
+      <p>The safest file is one that has already left the phone. Undertow backs up by itself, in small encrypted pieces that resume where they stopped, so even a few seconds of signal count. With no signal, what's left waits in a sealed queue that goes out the moment a network appears, even with the vault locked and the phone in your pocket. New photos and videos go first as small copies, so something gets out even on a bad line.</p>
+      <p>The server only ever holds ciphertext. A news desk or NGO can run its own. A phone taken from you can't delete what already got out: the login it keeps for uploading can add to the backup, never read or remove it.</p>
     </div>
     <div class="signal" aria-label="Test results for uploads over intermittent signal">
       <div class="eyebrow">From our test rig</div>
@@ -524,6 +525,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <li><b>Use a real passphrase.</b><span>A 6-digit PIN can be worked through on the phone itself in a few weeks. Longer is much safer.</span></li>
       <li><b>A lab with the decoy's PIN can see hints.</b><span>Not proof, but numbers in the decoy's own data that suggest something else shares the phone.</span></li>
       <li><b>The recorder can be noticed.</b><span>Android shows a green microphone dot while it records and lists the app as running while it's armed. If music is playing, the volume keys control the music instead.</span></li>
+      <li><b>A lab can see an upload queue.</b><span>If something is still waiting to upload, a rooted examination shows that a queue exists and how big it is. The quiet stop removes it.</span></li>
       <li><b>Uninstalling erases the vault.</b><span>The vault lives inside the app. Back it up, or move it out from Settings, before removing or reinstalling.</span></li>
       <li><b>Android only, and in beta.</b><span>It hasn't had an independent security review yet.</span></li>
     </ul>
@@ -532,7 +534,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
 <footer>
   <div class="wrap foot">
-    <div>Undertow v3.0.0 · Android beta · Built in the open</div>
+    <div>Undertow v3.1.0 · Android beta · Built in the open</div>
     <nav aria-label="Documents">
       <a href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download</a>
       <a href="https://github.com/FalconFuryX77/Undertow">Source</a>
