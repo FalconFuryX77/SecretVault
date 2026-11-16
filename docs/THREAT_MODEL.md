@@ -40,7 +40,7 @@ possibly for a few minutes. No tools, no prior knowledge of this app.
 
 | Defence | Status |
 |---|---|
-| App opens as a working cover app (currently a file manager) with no vault UI, buttons or wording | Built |
+| App opens as a working cover app (a video trimmer that really trims, under a neutral package name) with no vault UI, buttons or wording | Built |
 | Vault entry is a covert triple-tap on the cover app's header | Built |
 | The motion sensor is read only while a vault is open; the cover app never reacts to movement | Built |
 | Vault screens set `FLAG_SECURE` (no screenshots, blank in the recents list) | Built |
