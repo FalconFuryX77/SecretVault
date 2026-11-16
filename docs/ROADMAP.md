@@ -32,11 +32,7 @@ can be) and committed on its own. Decisions taken: both hidden triggers
    - [x] Restore in the app from the recovery code; device list and
          revocation; start over on a new account; restore "as of" a time,
          skipping revoked devices.
-   - [ ] **One backup account per phone.** Still open. Sharing an account
-         safely needs per-vault scoping on the server (otherwise one vault's
-         recovery code could delete every vault's backup), and pruning that
-         touches only a vault's own pieces. The locked-upload queue already
-         hides the vault count on the phone (one vault uses it at a time).
+   - [x] **Backup accounts:** decided, one per vault (see parked ideas).
    - [x] **Upload while locked** (outbox, decision D1 option B): on by
          default, an off switch, and a quiet emergency stop ("Clear cache"
          in the cover app, or a stop code on the lock screen) that wipes
@@ -61,7 +57,6 @@ internet** (needs a domain and a host; the configuration and
 
 ## Next up
 
-- **One account per phone** (above).
 - **Pairing a second phone** with a QR code (SYNC_DESIGN §10), as an
   alternative to the recovery code.
 - **Offload**: "delete from this phone once it's safely on the server"
@@ -84,6 +79,10 @@ internet** (needs a domain and a host; the configuration and
   stress; a finger can be forced onto a sensor and can't pick the decoy.
 - **Compression for backups:** not worth it; photos and video are already
   compressed.
+- **One backup account per phone**, shared by its vaults: it would only
+  hide the number of vaults from the server, which the user runs and
+  trusts. A seized phone shows nothing either way, and separate accounts
+  mean a decoy's recovery code can never reach the real vault's backup.
 - **Hiding the decoy's layout numbers** (its ceiling and spare-record count):
   doing so would mean dropping the rules that keep vaults from overwriting
   each other. We chose safety; see the threat model.

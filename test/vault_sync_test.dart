@@ -298,6 +298,7 @@ void main() {
         vaults: vaults,
         sync: sync,
         afterChange: const Duration(milliseconds: 300),
+        afterChangeQueued: const Duration(milliseconds: 300),
         afterUnlock: const Duration(milliseconds: 300),
       );
       var s = await vaults.create(pin: '482913', initialChunks: 64);
@@ -335,6 +336,43 @@ void main() {
       expect(await backedUp(), 2);
       await vaults.lock();
       expect(auto.state.value.running, isFalse);
+      auto.dispose();
+    });
+
+    test('automatic backup: with locked upload on, a change goes within seconds, before an auto-lock', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      final vaults = VaultService(crypto: crypto, storageDir: () async => Directory('${tmp.path}/quick'));
+      final sync = VaultSync(outbox: MemoryOutbox());
+      final auto = AutoBackup(
+        vaults: vaults,
+        sync: sync,
+        afterChange: const Duration(minutes: 10),
+        afterChangeQueued: const Duration(milliseconds: 300),
+        afterUnlock: const Duration(milliseconds: 300),
+      );
+      final s = await vaults.create(pin: '482913', initialChunks: 64);
+      await sync.connect(s, server: serverUrl.toString(), recoverySecret: VaultSync.newRecoverySecret());
+      Future<int> backedUp() async {
+        final j = (s.extras['sync.journal'] as Map?) ?? const {};
+        return ((j['jobs'] as Map?) ?? const {}).values.where((v) => (v as Map)['state'] == 'committed').length;
+      }
+
+      auto.attach(s);
+      await Future<void>.delayed(const Duration(seconds: 1));
+      await s.upsertItem(fileItem('q1', 'Quick', 'text/plain', VaultCategory.note).copyWith(content: 'q'));
+      for (var i = 0; i < 50 && await backedUp() < 1; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect(await backedUp(), 1, reason: 'sent within seconds, not 10 minutes');
+      // With locked upload off, the usual (here: 10 minute) wait applies.
+      await sync.setLockedUpload(s, false);
+      await s.upsertItem(fileItem('q2', 'Slow', 'text/plain', VaultCategory.note).copyWith(content: 's'));
+      await Future<void>.delayed(const Duration(seconds: 2));
+      expect(await backedUp(), 1);
+      await vaults.lock();
       auto.dispose();
     });
 
@@ -574,9 +612,14 @@ void main() {
       expect((await outbox.status()).armed, isFalse);
       expect(outbox.queue, isEmpty);
 
-      // Next unlock: what was queued goes directly; locked upload stays off,
-      // and the old login no longer works.
+      // Next unlock, still offline: the stop is noticed and shown at once.
       s = (await c.unlockWithPin('482913'))!;
+      expect(await sync.noticeStop(s), isTrue);
+      expect(VaultSync.lockedUploadStopped(s), isTrue);
+      expect(VaultSync.lockedUpload(s), isFalse);
+      expect(await sync.noticeStop(s), isFalse, reason: 'once');
+      // Online: what was queued goes directly; it stays off, and the old
+      // login no longer works.
       await online(s);
       expect((await sync.backupAll(s)).uploaded, 1);
       expect(VaultSync.lockedUploadStopped(s), isTrue);
@@ -600,6 +643,22 @@ void main() {
       final drained = await sync.backupAll(s);
       expect(drained.uploaded, 0);
       expect(outbox.queue, isEmpty);
+
+      // Cleared again ("Clear cache"), noticed offline, and turned on again
+      // before any online backup: it stays on, and the old login dies.
+      final token2 = outbox.state!['token'] as String;
+      await outbox.stop();
+      expect(await sync.noticeStop(s), isTrue);
+      await sync.setLockedUpload(s, true);
+      await sync.backupAll(s);
+      expect(VaultSync.lockedUpload(s), isTrue);
+      expect(await sync.queueStatus(s), isNotNull);
+      final old2 = SyncApi(serverUrl)..useUploadToken(account, token2);
+      await expectLater(old2.missing(['00' * 32]), throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)));
+      old2.close();
+      final fresh = SyncApi(serverUrl)..useUploadToken(account, outbox.state!['token'] as String);
+      expect(await fresh.missing([]), isEmpty);
+      fresh.close();
 
       // Another vault on the phone leaves this vault's queue alone, and
       // without a queue of its own an offline backup just fails as before.

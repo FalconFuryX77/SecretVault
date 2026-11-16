@@ -47,13 +47,13 @@ Settings → Backup sends the open vault to a server you run ([server/README.md]
 * **Restore in the app** with the recovery code: set up a new phone, bring back deleted files, or go back to how the backup was on a given day.
 * **Version history:** every version of every file, kept until you free up space (which needs the recovery code, so a taken phone can't erase the backup).
 * **Phones with access:** see them, revoke a lost one, or start over on a fresh account.
+* **Every vault can back up**, each to its own account with its own recovery code, so a decoy's code can never reach the real vault's backup.
 * **Over Tor**, through the Orbot app, if you choose.
 
 ### Known limits
 * Nothing here stops someone who forces you to open the *real* vault. Use a decoy, or the duress PIN.
 * Someone with a decoy's PIN *and* forensic tools can see hints in its numbers that another vault may exist ([details](docs/CONTAINER_FORMAT.md#11-limits-and-open-items)). A casual look shows nothing.
 * Only one vault on a phone can use the locked-upload queue. With root, someone can see that the queue exists and how big it is, unless the emergency stop was used first.
-* If two vaults on one phone both back up, the server sees two accounts.
 * Unlock is PIN-only by design: a finger can be pressed to a sensor by force, and it can't tell the real vault from a decoy.
 * The hidden recorder shows up the way Android requires: the green microphone dot while recording, and the app listed as running while armed. If music or a video is playing, the volume keys control that instead. On Samsung phones, set the app's battery use to Unrestricted.
 * On Android 7–10, images are decoded inside the app instead of the isolated process, and PDFs can't be opened.

@@ -1057,13 +1057,41 @@ class VaultSync {
     }
   }
 
+  /// Notices, without the network, that the queue this vault armed is gone:
+  /// the emergency stop ("Clear cache", or the stop code). Locked upload is
+  /// then off (and says so) until it's turned on again here; the login the
+  /// queue had is turned off on the server at the next online backup.
+  /// Called at unlock. True if it noticed a stop just now.
+  Future<bool> noticeStop(VaultSession s) async {
+    final c = _locked(s);
+    final arm = c['arm'] as String?;
+    if (arm == null) return false;
+    final st = await outbox.status();
+    if (!st.supported || (st.armed && st.armId == arm)) return false;
+    c
+      ..['on'] = false
+      ..['stopped'] = true
+      ..['revoke'] = true
+      ..remove('arm');
+    await s.putExtra(_lockedKey, c);
+    return true;
+  }
+
   /// Keeps the queue armed with a fresh upload-only login while locked
   /// upload is on; notices when it was stopped; turns the login off on the
   /// server when it's no longer used. Needs the network.
   Future<void> _keepArmed(VaultSession session, SyncApi api, String server) async {
+    final st0 = await outbox.status();
+    if (!st0.supported) return;
+    await noticeStop(session);
     final c = _locked(session);
+    if (c['revoke'] == true) {
+      // The login a stopped (or switched-off) queue had stops working.
+      await api.revokeUploadTokens();
+      c.remove('revoke');
+      await session.putExtra(_lockedKey, c);
+    }
     final st = await outbox.status();
-    if (!st.supported) return;
     final arm = c['arm'] as String?;
     final mine = arm != null && st.armed && st.armId == arm;
     if (!lockedUpload(session)) {
@@ -1076,17 +1104,6 @@ class VaultSync {
       return;
     }
     if (st.armed && !mine) return; // another vault's queue: left alone
-    if (!st.armed && arm != null) {
-      // It was armed and is gone: the emergency stop. Off until turned on
-      // again here, and the login it had stops working.
-      await api.revokeUploadTokens();
-      c
-        ..['on'] = false
-        ..['stopped'] = true
-        ..remove('arm');
-      await session.putExtra(_lockedKey, c);
-      return;
-    }
     final tag = c['tag'] == null ? null : base64Decode(c['tag'] as String);
     if (!mine || st.expires == null || st.expires!.isBefore(DateTime.now().add(const Duration(days: 7)))) {
       final t = await api.uploadToken();
