@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 /// One video the trimmer saved (in Movies/Video Trimmer).

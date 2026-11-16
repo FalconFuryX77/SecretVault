@@ -4,7 +4,6 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gesture_unlock/models/vault_state.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
 import 'package:gesture_unlock/vault/crypto_primitives.dart';
 import 'package:gesture_unlock/vault/platform_keys.dart';
@@ -65,7 +64,6 @@ void main() {
       final s2 = await c.unlockWithPin('482913');
       expect(s2, isNotNull);
       expect(s2!.entries.single.item.content, 'secret note');
-      expect(s2.type, VaultType.primary);
       await s2.close();
     });
 
@@ -502,28 +500,45 @@ void main() {
       final d = (await c.unlockWithPin('111222'))!;
       expect(d.entries, isEmpty);
       expect(d.hasDecoy, isFalse);
-      expect(d.type, VaultType.decoy);
       await d.close();
     });
 
-    test("the decoy's stand-in decoy setup reveals nothing and opens nothing", () async {
-      final s = await createVault();
-      await s.createDecoy(pin: '111222');
+    test("the deepest vault's stand-in decoy reveals nothing and opens nothing", () async {
+      // Four records, four vaults: the fourth has none to give a decoy, so
+      // it shows the stand-in.
+      final pins = ['482913', 'pin-a-1', 'pin-b-2', 'pin-c-3'];
+      final s = await createVault(chunks: 24);
+      await s.createDecoy(pin: pins[1]);
       await s.close();
-      final d = (await VaultContainer(containerFile, crypto).unlockWithPin('111222'))!;
+      for (var i = 1; i < 3; i++) {
+        final v = (await VaultContainer(containerFile, crypto).unlockWithPin(pins[i]))!;
+        await v.createDecoy(pin: pins[i + 1]);
+        await v.close();
+      }
+      final d = (await VaultContainer(containerFile, crypto).unlockWithPin(pins[3]))!;
+      expect(d.canManageDecoy, isFalse);
       expect(d.showsDecoy, isFalse, reason: 'looks like a lone vault');
       // The real PIN is accepted like any free PIN: no "already in use".
       await d.standInDecoySetup('482913', shown: true);
       expect(d.showsDecoy, isTrue);
       // Its own PIN is refused, as a lone vault refuses its own.
-      await expectLater(d.standInDecoySetup('111222', shown: true), throwsA(isA<CredentialInUseException>()));
+      await expectLater(d.standInDecoySetup(pins[3], shown: true), throwsA(isA<CredentialInUseException>()));
       await d.standInDecoySetup('765432', shown: true);
+      // A duress PIN too, like a vault with a real decoy.
+      await d.setDuressPin('duress-x');
+      expect(d.hasDuressPin, isTrue);
       await d.close();
       final c = VaultContainer(containerFile, crypto);
       expect(await c.unlockWithPin('765432'), isNull, reason: 'the stand-in PIN opens nothing');
+      expect(await c.unlockWithPin('duress-x'), isNull, reason: 'nor does its duress PIN, which destroys nothing');
+      final d2 = (await c.unlockWithPin(pins[3]))!;
+      expect(d2.hasDuressPin, isTrue);
+      await d2.standInDecoySetup('', shown: false);
+      expect(d2.showsDecoy, isFalse);
+      expect(d2.hasDuressPin, isFalse);
+      await d2.close();
       final r = (await c.unlockWithPin('482913'))!;
-      expect(r.type, VaultType.primary, reason: 'the real vault is untouched');
-      expect(r.hasDecoy, isTrue);
+      expect(r.hasDecoy, isTrue, reason: 'the real vault is untouched');
       await r.close();
     });
 
@@ -714,6 +729,300 @@ void main() {
       await s.createDecoy(pin: '111222');
       expect(await containerFile.length(), sizeNoDecoy);
       await s.close();
+    });
+  });
+
+  group('format 2', () {
+    Future<VaultSession?> tryOpen(String pin) => VaultContainer(containerFile, crypto).unlockWithPin(pin);
+    Future<VaultSession> open(String pin) async => (await tryOpen(pin))!;
+    Uint8List pattern(int n, int mult) => Uint8List.fromList(List.generate(n, (k) => (k * mult) & 0xff));
+
+    test('a format 1 container opens, migrates, and keeps both vaults intact', () async {
+      // Made by the format 1 code (see test/fixtures/container/README.md).
+      await File('test/fixtures/container/v1.bin').copy(containerFile.path);
+      const real = {'r0': (70000, 3), 'r1': (70001, 4), 'r2': (70002, 5), 'r3': (200000, 11)};
+      Future<void> checkReal(VaultSession s) async {
+        for (final MapEntry(key: id, value: (n, m)) in real.entries) {
+          expect(await s.readAll(s.entryById(id)!), pattern(n, m), reason: id);
+        }
+      }
+
+      final r = await open('real-pin-v1');
+      await checkReal(r);
+      expect(r.extras['rec.key'], {'pub': 'AAAA', 'priv': 'BBBB'});
+      expect(r.hasDecoy, isTrue);
+      expect(r.decoyDamaged, isFalse);
+      // Enough writes to grow the file: none may land in the decoy's chunks.
+      for (var i = 0; i < 4; i++) {
+        await r.importBytes(pattern(300000, 13 + i), _meta('n$i', 'n$i.bin'));
+      }
+      await r.close();
+
+      final d = await open('decoy-pin-v1');
+      expect(await d.readAll(d.entryById('d0')!), pattern(100000, 7));
+      // A format 1 decoy had no records to give: it shows the stand-in.
+      expect(d.canManageDecoy, isFalse);
+      for (var i = 0; i < 3; i++) {
+        await d.importBytes(pattern(250000, 17 + i), _meta('e$i', 'e$i.bin'));
+      }
+      await d.close();
+
+      final r2 = await open('real-pin-v1');
+      await checkReal(r2);
+      for (var i = 0; i < 4; i++) {
+        expect(await r2.readAll(r2.entryById('n$i')!), pattern(300000, 13 + i));
+      }
+      // The migrated vault can replace its decoy with one that can nest.
+      await r2.removeDecoy();
+      expect(r2.canManageDecoy, isTrue);
+      await r2.createDecoy(pin: 'new-decoy');
+      await r2.close();
+      expect(await tryOpen('decoy-pin-v1'), isNull);
+      final d2 = await open('new-decoy');
+      expect(d2.canManageDecoy, isTrue);
+      await d2.close();
+      final r3 = await open('real-pin-v1');
+      await checkReal(r3);
+      await r3.close();
+    });
+
+    test('any vault can host a decoy: a chain of four, each writing on its own, none overwrites another', () async {
+      final pins = ['482913', 'pin-a-1', 'pin-b-2', 'pin-c-3'];
+      final s = await createVault(chunks: 24);
+      await s.importBytes(pattern(150000, 3), _meta('f0', 'f0'));
+      await s.createDecoy(pin: pins[1]);
+      await s.close();
+      for (var i = 1; i < 4; i++) {
+        final v = await open(pins[i]);
+        expect(v.entries, isEmpty);
+        expect(v.hasDecoy, isFalse);
+        await v.importBytes(pattern(150000, 3 + i), _meta('f$i', 'f$i'));
+        if (i < 3) {
+          expect(v.canManageDecoy, isTrue);
+          await v.createDecoy(pin: pins[i + 1]);
+        } else {
+          expect(v.canManageDecoy, isFalse, reason: 'four records, four vaults');
+        }
+        await v.close();
+      }
+      // Each opened alone writes enough to grow the file: deepest first,
+      // then top first.
+      for (var round = 0; round < 2; round++) {
+        for (var k = 0; k < 4; k++) {
+          final i = round == 0 ? 3 - k : k;
+          final v = await open(pins[i]);
+          await v.importBytes(pattern(200000, 30 + i * 2 + round), _meta('g$round', 'g$round'));
+          await v.close();
+        }
+      }
+      for (var i = 0; i < 4; i++) {
+        final v = await open(pins[i]);
+        expect(v.entries, hasLength(3));
+        expect(await v.readAll(v.entryById('f$i')!), pattern(150000, 3 + i), reason: 'vault $i');
+        for (var round = 0; round < 2; round++) {
+          expect(await v.readAll(v.entryById('g$round')!), pattern(200000, 30 + i * 2 + round), reason: 'vault $i');
+        }
+        await v.close();
+      }
+      final r = await open(pins[0]);
+      final chunks = r.debugChunks;
+      expect(chunks, hasLength(4));
+      final seen = <int>{};
+      for (final v in chunks.values) {
+        for (final c in v.all) {
+          expect(seen.add(c), isTrue, reason: 'chunk $c belongs to two vaults');
+        }
+      }
+      // Removing the decoy removes everything inside it.
+      await r.removeDecoy();
+      expect(r.hasDecoy, isFalse);
+      expect(r.canManageDecoy, isTrue);
+      await r.close();
+      for (var i = 1; i < 4; i++) {
+        expect(await tryOpen(pins[i]), isNull, reason: 'vault $i');
+      }
+      final r2 = await open(pins[0]);
+      expect(r2.entries, hasLength(3));
+      await r2.createDecoy(pin: 'again-1');
+      await r2.close();
+      await (await open('again-1')).close();
+    });
+
+    test("hosting a decoy moves the host's files up and leaves the bottom to the decoy", () async {
+      final s = await createVault(chunks: 40);
+      final files = {for (var i = 0; i < 5; i++) 'f$i': pattern(65508 * 2 + i, 5 + i)};
+      for (final e in files.entries) {
+        await s.importBytes(e.value, _meta(e.key, e.key));
+      }
+      expect(s.debugChunks.values.single.all.reduce(min), lessThan(5), reason: 'a lone vault fills from the bottom');
+      final progress = <double>[];
+      await s.createDecoy(pin: '111222', onProgress: progress.add);
+      expect(progress.last, 1.0);
+      final host = s.debugChunks.values.first.all;
+      expect(host.reduce(min), greaterThan(20), reason: 'now at the top');
+      for (final e in files.entries) {
+        expect(await s.readAll(s.entryById(e.key)!), e.value);
+      }
+      await s.close();
+
+      final len = await containerFile.length();
+      final d = await open('111222');
+      await d.importBytes(pattern(65508 * 10, 9), _meta('d', 'd'));
+      expect(await containerFile.length(), len, reason: 'the decoy had room below');
+      await d.close();
+      final s2 = await open('482913');
+      for (final e in files.entries) {
+        expect(await s2.readAll(s2.entryById(e.key)!), e.value);
+      }
+      await s2.close();
+      final d2 = await open('111222');
+      expect(await d2.readAll(d2.entryById('d')!), pattern(65508 * 10, 9));
+      await d2.close();
+    });
+
+    test('the duress PIN destroys the vault that set it and opens its decoy, which takes its space', () async {
+      final s = await createVault(chunks: 32);
+      await s.importBytes(pattern(200000, 3), _meta('secret', 'secret'));
+      await s.createDecoy(pin: '111222');
+      expect(s.hasDuressPin, isFalse);
+      // It can't be a PIN that opens something, and nothing can take it.
+      await expectLater(s.setDuressPin('482913'), throwsA(isA<CredentialInUseException>()));
+      await expectLater(s.setDuressPin('111222'), throwsA(isA<CredentialInUseException>()));
+      await s.setDuressPin('999000');
+      await s.setDuressPin('999000');
+      expect(s.hasDuressPin, isTrue);
+      await expectLater(s.changeDecoyPin('999000'), throwsA(isA<CredentialInUseException>()));
+      await expectLater(s.changePin('999000'), throwsA(isA<CredentialInUseException>()));
+      await s.close();
+      final d = await open('111222');
+      await d.importBytes(pattern(100000, 5), _meta('decoy', 'decoy'));
+      await d.close();
+      final record = File(containerFile.path).readAsBytesSync().sublist(0, ContainerLayout.chunkSize);
+
+      final len = await containerFile.length();
+      final duress = await open('999000');
+      expect(duress.entries.single.item.id, 'decoy');
+      expect(await duress.readAll(duress.entryById('decoy')!), pattern(100000, 5));
+      expect(duress.hasDecoy, isFalse);
+      expect(duress.hasDuressPin, isFalse);
+      expect(duress.canManageDecoy, isTrue);
+      // The whole file is its own now: more than fitted below the real
+      // vault goes in without growing it.
+      await duress.importBytes(pattern(65508 * 25, 7), _meta('big', 'big'));
+      expect(await containerFile.length(), len);
+      expect(await duress.readAll(duress.entryById('big')!), pattern(65508 * 25, 7));
+      await duress.close();
+
+      expect(await tryOpen('482913'), isNull, reason: 'the real vault is gone');
+      expect(await tryOpen('999000'), isNull, reason: 'the duress PIN works once');
+      final d2 = await open('111222');
+      expect(d2.entries, hasLength(2));
+      await d2.close();
+      // One record was overwritten whole: the real vault's. (The filler
+      // after the superblocks changes only when a record is wiped.)
+      final after = File(containerFile.path).readAsBytesSync().sublist(0, ContainerLayout.chunkSize);
+      const tail = 256 + 2 * ContainerLayout.superSlotLen;
+      var changedRecords = 0;
+      for (var r = 0; r < ContainerLayout.recordCount; r++) {
+        final o = ContainerLayout.recordOffset(r);
+        var same = 0;
+        for (var i = tail; i < ContainerLayout.recordSize; i++) {
+          if (record[o + i] == after[o + i]) same++;
+        }
+        if (same < (ContainerLayout.recordSize - tail) ~/ 2) changedRecords++;
+      }
+      expect(changedRecords, 1, reason: 'the destroyed vault\'s record is new random bytes');
+    });
+
+    test('a duress PIN inside a chain leaves the vaults above it alone', () async {
+      final s = await createVault(chunks: 48);
+      await s.importBytes(pattern(300000, 3), _meta('top', 'top'));
+      await s.createDecoy(pin: 'pin-a-1');
+      await s.close();
+      final a = await open('pin-a-1');
+      await a.importBytes(pattern(150000, 4), _meta('a', 'a'));
+      await a.createDecoy(pin: 'pin-b-2');
+      await a.setDuressPin('duress-a');
+      await a.close();
+      final b0 = await open('pin-b-2');
+      await b0.importBytes(pattern(100000, 5), _meta('b', 'b'));
+      await b0.close();
+
+      final b = await open('duress-a');
+      expect(b.entries.single.item.id, 'b');
+      for (var i = 0; i < 8; i++) {
+        await b.importBytes(pattern(200000, 20 + i), _meta('w$i', 'w$i'));
+      }
+      await b.close();
+      expect(await tryOpen('pin-a-1'), isNull);
+
+      final top = await open('482913');
+      expect(await top.readAll(top.entryById('top')!), pattern(300000, 3));
+      expect(top.decoyDamaged, isTrue, reason: 'its decoy is gone');
+      for (var i = 0; i < 3; i++) {
+        await top.importBytes(pattern(200000, 40 + i), _meta('t$i', 't$i'));
+      }
+      await top.close();
+      final b2 = await open('pin-b-2');
+      for (var i = 0; i < 8; i++) {
+        expect(await b2.readAll(b2.entryById('w$i')!), pattern(200000, 20 + i));
+      }
+      await b2.close();
+    });
+
+    test('the duress PIN needs a decoy, goes with it, and can be removed', () async {
+      final s = await createVault();
+      await expectLater(s.setDuressPin('999000'), throwsStateError);
+      await s.createDecoy(pin: '111222');
+      await s.setDuressPin('999000');
+      await s.removeDuressPin();
+      expect(s.hasDuressPin, isFalse);
+      await s.close();
+      expect(await tryOpen('999000'), isNull);
+      final s2 = await open('482913');
+      await s2.setDuressPin('999000');
+      await s2.removeDecoy();
+      expect(s2.hasDuressPin, isFalse);
+      await s2.close();
+      expect(await tryOpen('999000'), isNull);
+      await (await open('482913')).close();
+    });
+
+    test('moving a chain of decoys moves them all; a duress PIN, bound to the old phone, stays behind', () async {
+      final s = await createVault(chunks: 32);
+      await s.importBytes(pattern(100000, 3), _meta('top', 'top'));
+      await s.createDecoy(pin: 'pin-a-1');
+      await s.setDuressPin('duress-0');
+      await s.close();
+      final a = await open('pin-a-1');
+      await a.createDecoy(pin: 'pin-b-2');
+      await a.close();
+
+      final copy = File('${tmp.path}/moved.bin');
+      final s2 = await open('482913');
+      final code = await s2.exportForTransfer((offset, slot) async {
+        final bytes = await containerFile.readAsBytes();
+        bytes.setRange(offset, offset + slot.length, slot);
+        await copy.writeAsBytes(bytes, flush: true);
+      });
+      await s2.close();
+      final other = VaultCrypto(
+        binding: FixedDeviceBinding(Uint8List.fromList(List.filled(32, 7))),
+        pinParams: KdfParams.testing,
+        growChunks: 8,
+      );
+      expect(await VaultContainer.transferVaultCount(copy, code), 3);
+      final dest = File('${tmp.path}/other/c.bin');
+      await VaultContainer.completeTransfer(copy, dest, other, code, ['n0', 'n1', 'n2']);
+      final c = VaultContainer(dest, other);
+      final r = (await c.unlockWithPin('n0'))!;
+      expect(await r.readAll(r.entryById('top')!), pattern(100000, 3));
+      expect(r.hasDuressPin, isFalse);
+      await r.close();
+      expect(await c.unlockWithPin('duress-0'), isNull);
+      for (final p in ['n1', 'n2']) {
+        await (await c.unlockWithPin(p))!.close();
+      }
     });
   });
 }

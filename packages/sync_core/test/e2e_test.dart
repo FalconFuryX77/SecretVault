@@ -368,6 +368,73 @@ void main() {
     api.close();
     a.close();
   });
+
+  test('version history: current, replaced and deleted versions, oldest first; old ones still restore', () async {
+    final (id, _) = await newAccount();
+    final engine = await engineFor(id, direct);
+    final v1 = Uint8List.fromList(utf8.encode('draft one ' * 100));
+    final v2 = Uint8List.fromList(utf8.encode('draft two ' * 100));
+    await engine.backupSource(MemorySyncSource(v1), fileId: 'n', meta: {'title': 'n', 'v': 1});
+    await engine.backupSource(MemorySyncSource(v2), fileId: 'n', meta: {'title': 'n', 'v': 2});
+    await engine.backupSource(MemorySyncSource(noise(5000, 2)), fileId: 'x', meta: {'title': 'x'});
+    await engine.deleteFile('x', (await engine.history())['x']!.single.version);
+
+    final h = await engine.history();
+    expect(h.keys.toSet(), {'n', 'x'});
+    expect([for (final v in h['n']!) v.retired == null], [false, true]);
+    expect(h['n']!.first.deleted, isFalse);
+    expect(h['x']!.single.deleted, isTrue);
+    final old = await engine.manifestOf(h['n']!.first.manifestId);
+    expect(old.meta['v'], 1);
+    expect(await engine.contentOf(old).expand((p) => p).toList(), v1);
+  });
+
+  test('pruning frees what only old versions used, keeps what is current or shared, and needs the recovery key', () async {
+    final (id, rs) = await newAccount();
+    final engine = await engineFor(id, direct);
+    final shared = noise(300 * 1024, 21);
+    final a1 = Uint8List.fromList([...shared, ...noise(200 * 1024, 22)]);
+    final a2 = Uint8List.fromList([...shared, ...noise(200 * 1024, 23)]);
+    await engine.backupSource(MemorySyncSource(a1), fileId: 'a', meta: {'title': 'a', 'v': 1});
+    await engine.backupSource(MemorySyncSource(a2), fileId: 'a', meta: {'title': 'a', 'v': 2});
+    await engine.backupSource(MemorySyncSource(noise(400 * 1024, 24)), fileId: 'g', meta: {'title': 'g'});
+    await engine.deleteFile('g', (await engine.history())['g']!.single.version);
+    final api = SyncApi(direct);
+    await useIdentity(api, id);
+    // A piece no log record mentions: an upload still under way elsewhere.
+    final orphan = hex(randomBytes(32));
+    await api.putPiece(orphan, noise(1000, 25));
+    Future<int> count() async => (await api.listPieces()).pieces.length;
+    final before = await count();
+    final rk = await RecoveryKeys.fromSecret(rs);
+    final slot = await recoverySlot(api, id.account, rk);
+
+    // Within the retention period nothing goes, not even the orphan.
+    final early = await engine.prune(retention: const Duration(days: 30), recovery: rk.signing, keyIndex: slot);
+    print('[measure] prune, nothing old yet: $early');
+    expect(early.piecesDeleted, 0);
+    expect(await count(), before);
+
+    // A month later. Append-only: without the recovery key the server refuses.
+    final later = DateTime.now().add(const Duration(days: 31));
+    await expectLater(engine.prune(retention: const Duration(days: 30), now: later), throwsA(isA<ApiException>()));
+    final r = await engine.prune(retention: const Duration(days: 30), recovery: rk.signing, keyIndex: slot, now: later);
+    print('[measure] prune a month later: $r');
+    expect(r.versionsDropped, 2);
+    expect(r.piecesDeleted, greaterThan(1));
+    expect(await count(), before - r.piecesDeleted);
+    expect(await api.missing([orphan]), [orphan]);
+    final h = await engine.history();
+    expect(await api.missing([h['a']!.first.manifestId, h['g']!.single.manifestId]), hasLength(2));
+    // The current version still restores byte for byte: the pieces it
+    // shares with the dropped one were kept.
+    final out = await (await engineFor(id, direct)).restoreAll(Directory('${tmp.path}/pruned'));
+    expect(out, hasLength(1));
+    expect(await out.single.readAsBytes(), a2);
+    // Nothing more to do the second time.
+    expect((await engine.prune(retention: const Duration(days: 30), recovery: rk.signing, keyIndex: slot, now: later)).piecesDeleted, 0);
+    api.close();
+  });
 }
 
 /// Remembers every state the engine saved, so a test can roll the journal

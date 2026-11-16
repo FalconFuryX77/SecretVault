@@ -70,7 +70,6 @@ void main() {
     expect(vault.isUnlocked, isFalse);
     expect(await unlock.verifyPin(pin), isTrue);
     expect(unlock.state, UnlockState.unlocked);
-    expect(unlock.activeVaultType, VaultType.primary);
     expect(vault.isUnlocked, isTrue);
 
     unlock.lockVault();
@@ -196,7 +195,7 @@ void main() {
       await settle();
       await unlock.verifyPin(pin);
       final vp = VaultProvider(vaultService: vault);
-      await vp.loadVault(VaultType.primary);
+      await vp.loadVault();
 
       await vp.saveNote(title: 'Café ☕ notes', content: "line1\nline2 '; DROP TABLE x; -- 🚀");
       await vp.saveNote(title: 'Seeds', content: 'abandon ability able', category: VaultCategory.keySecret);
@@ -216,7 +215,7 @@ void main() {
       await settle();
       expect(vp.allItems, isEmpty);
       await unlock.verifyPin(pin);
-      await vp.loadVault(VaultType.primary);
+      await vp.loadVault();
       expect(vp.notes.single.content, contains('🚀'));
 
       await vp.deleteItem(vp.keySecrets.single);
@@ -229,7 +228,7 @@ void main() {
       await settle();
       await unlock.verifyPin(pin);
       final vp = VaultProvider(vaultService: vault);
-      await vp.loadVault(VaultType.primary);
+      await vp.loadVault();
 
       final src = File('${tmp.path}/doc.pdf');
       await src.writeAsBytes(List.generate(200000, (i) => i % 251));
@@ -264,10 +263,10 @@ void main() {
 
       await Future.delayed(const Duration(milliseconds: 100));
       expect(await unlock.verifyPin('groceries1'), isTrue);
-      expect(unlock.activeVaultType, VaultType.decoy);
-      await vp.loadVault(unlock.activeVaultType);
+      await vp.loadVault();
       expect(vp.allItems, isEmpty);
-      expect(vault.session!.canManageDecoy, isFalse);
+      // It could host a decoy of its own, like any vault.
+      expect(vault.session!.canManageDecoy, isTrue);
       unlock.dispose();
     });
   });

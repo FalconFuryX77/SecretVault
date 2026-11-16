@@ -305,10 +305,19 @@ This mirrors the container's "4 records, can't tell how many are used":
 - **Conflicts:** photos, video and audio never change after capture, so only
   notes can conflict. Two versions with the same parent → keep both and show
   a "conflict copy". Delete vs. edit → the edit wins (never lose data silently).
-- **Pruning:** a device with SRK computes the live piece set from the log and
-  checkpoints, lists the server's pieces, and deletes unreferenced ones older
-  than the retention period. Only clients can do this; the server can't see
-  references.
+- **Pruning** ("Free up server space" in the app): a device with SRK
+  verifies the whole log, keeps every current version and every version
+  replaced or deleted less than the retention period ago (7, 30, 90 or 365
+  days; 30 by default), reads all their manifests, then deletes every piece
+  none of them references, and only if the server dated it before the
+  retention cut-off too, so another phone's upload still under way keeps its
+  pieces. If the log fails verification or a kept manifest can't be read,
+  nothing is deleted. Only clients can do this; the server can't see
+  references. The log itself is never pruned, so history still lists removed
+  versions (as no longer on the server).
+- **Version history** (in the app): every file the log has seen, with each
+  version current, replaced or deleted; any version still on the server can
+  be restored as a copy next to the current file.
 - **Append-only mode** (server setting, recommended for newsrooms): device
   tokens can upload but never delete. Pruning needs a recovery-key signature.
   A seized phone can't erase what has already reached the server.

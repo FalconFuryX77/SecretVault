@@ -59,9 +59,10 @@ Forces you to "open the vault" or hand over the PIN, under threat.
 | Nothing in the decoy's UI, settings or storage shows that another vault exists | Built |
 | Container has 4 key records whether 1 or 2 are in use; unused ones are random bytes | Built |
 | Decoy can never be made to reveal the real vault's key: only the real vault knows about the decoy, not the other way round | Built |
-| Optional duress PIN that silently destroys the real vault's key | Not built (would be opt-in; see §6) |
+| A decoy can host a real decoy of its own, up to four vaults in a chain; every vault follows the same rules, so none can tell whether it is someone's decoy | Built |
+| Optional duress PIN: opens the decoy and destroys the vault that set it (its record and index, so every file key). Opt-in behind a warning | Built |
 | Each vault has its own recording key and sees only its own recordings and recorder state; opening the decoy never reveals the real vault's recordings | Built |
-| Settings look the same in both vaults (both have a decoy section). A decoy can't safely create a vault of its own, so in a decoy "Set up a decoy" goes through the same steps but the PIN it sets opens nothing: someone who tests it can tell | Built (partial) |
+| Settings look the same in every vault: the same decoy section, the same duress option. Only the fourth vault in a chain (no record left to give) shows a stand-in decoy whose PIN opens nothing: someone who tests it can tell | Built |
 | Refused PIN changes say nothing about why and count as failed unlock attempts; failures expire after 24 h instead of being reset by any successful unlock (so the decoy PIN can't be used to reset guesses at the real one) | Built |
 
 **Residual risk:** the coercer may not believe there is only one vault. The
@@ -91,9 +92,13 @@ after forcing an unlock of the phone itself, with time and tools.
 - The app is installed, and it holds a large high-entropy file. We don't hide
   that encrypted data exists, only how much and how many vaults.
 - With the decoy PIN *and* a copy of the file system, an examiner can read
-  the decoy's own index, which records that it is a decoy (its allocation
-  direction and ceiling). That proves a second vault exists. A casual
-  inspector, or a coercer without forensic tools, doesn't get this.
+  the decoy's own index. Since format 2 it no longer says "decoy", but its
+  numbers still hint at one: a ceiling below the end of the file with
+  nothing grown above it, and fewer than three spare records (see
+  [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md) §11). A casual inspector, or a
+  coercer without forensic tools, doesn't get this.
+- An examiner who imaged the phone *before* a duress PIN was used can see,
+  comparing images, that one record and some chunks were overwritten.
 - Recordings waiting to move into a vault sit encrypted in the app's private
   storage until the next unlock, so their number and sizes show that
   something was recorded (not what, or for which vault).
@@ -209,18 +214,21 @@ the 256-bit path in the URL they can't read from it.
 
 | Gap | Notes |
 |---|---|
-| Duress PIN | Would destroy the real vault's key on entry. Risky if the coercer notices data vanished, so opt-in only, with a clear warning. Not built. |
-| Rollback of the container file | Restoring an older copy of the file isn't detected locally. |
-| PIN Unicode normalisation | Passphrases with accented characters aren't NFC-normalised yet, so different keyboards could produce different keys. |
+| Decoy layout tells | With the decoy's PIN and a copy of the file, its index shows a ceiling below the file's end and fewer than three spare records. Hiding them would mean dropping the rules that stop vaults overwriting each other. See [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md) §11. |
+| Stand-in decoy | Only for the fourth vault in a chain: its decoy PIN and duress PIN open nothing, which a coercer can test. |
+| Duress PIN | Destroys the vault that set it, at once and for good. Someone who saw the vault before, or imaged the phone, may notice it's gone. A vault above the destroyed one shows its decoy as damaged. |
 | Hidden recorder visible to other apps | While armed with the screen off, the recorder holds an active media session. Apps with notification access (smartwatch companions, automation apps) can see it, and could start a recording with volume commands. |
-| Recording key not rotated | A vault's recording key pair is kept for good. Shredded staging files are overwritten in place, but flash wear-levelling can keep old blocks, which that key could still decrypt. |
-| Clipboard | Text copied out of a vault viewer can stay in the keyboard's clipboard history. The recovery code can't be copied. |
-| Backup accounts per vault | SYNC_DESIGN §11 calls for one sync account per phone shared by its vaults. Today each vault that backs up creates its own, so if both vaults back up, the server sees two accounts from the same phone. |
-| Backup log sizes | Log records aren't padded, so their sizes tell the server whether an operation is a new file, an edit or a delete, and when. |
-| Backup ordering | Across devices, the server orders the log, and a device's chain isn't checked against a head the client already knew, so a malicious server can roll back or drop the newest records without detection. |
-| Seized phone and restore | Even in append-only mode, a seized phone can append "deleted" records that hide files from a restore (their pieces stay on the server). Restore carries on past broken files, but restoring "as of" a time, or ignoring a revoked device's records, isn't built yet. |
-| Very large files | A file of roughly 10 GB or more needs a manifest over the server's 2 MiB limit and isn't backed up. |
-| Image decoding is not sandboxed | Images are decoded by Flutter's native codecs in the app process. Moving them to the isolated renderer, like PDFs, is planned. |
-| Decoy can't host its own decoy | By design; a decoy opened alone can't see the real vault, so a nested one could overwrite real data. |
+| Rollback guard | A rolled-back container is detected from a small state file kept beside it (sealed under the hardware binding). Rolling back the container *and* that file together isn't detected. |
+| Clipboard | Copied text is marked sensitive and cleared after a minute or on lock, but a keyboard's own clipboard history may keep it. The recovery code can't be copied. |
+| Backup accounts per vault | SYNC_DESIGN §11 calls for one sync account per phone shared by its vaults. Today each vault that backs up creates its own, so if two vaults back up, the server sees two accounts (from the same address, unless over Tor). Tied to decision D1 below: the shape of a shared account depends on how a locked uploader would hold its credential. |
+| Pruning with several phones | Freeing up server space deletes pieces that only old versions used. If another phone backs up the same content at that very moment and finds those pieces still there, its new version can lose them; a restore then refuses that file (every file is checked end to end) rather than return it wrong. |
+| Moving a vault | Anyone holding the moved copy *and* its transfer code can open the vaults in it without a PIN until the new phone finishes the move. The code is shown once and never stored. |
+| Tor | Backups over Tor go through Orbot's local proxy; if Orbot isn't running the app refuses rather than falling back. Trust in Orbot is assumed. |
 | Container format needs external review | It is a composition of standard primitives (see [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md)) and hasn't been reviewed by a third party. |
-| Locked background upload vs deniability | See decision D1 in [SYNC_DESIGN.md](SYNC_DESIGN.md#9-decision-d1-uploading-while-the-vault-is-locked). |
+| Locked background upload vs deniability | See decision D1 in [SYNC_DESIGN.md](SYNC_DESIGN.md#9-decision-d1-uploading-while-the-vault-is-locked). Not built yet. |
+
+Closed since the review of 2026-11-16: duress PIN, rollback detection, PIN
+normalisation, recording-key rotation (daily, with structureless staging
+files), clipboard handling, padded backup log records, chain-head checks,
+restore "as of" a time and ignoring a revoked phone, manifests for very large
+files, sandboxed image decoding, and nested decoys.

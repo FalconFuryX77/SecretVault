@@ -37,6 +37,10 @@ class SyncApi {
   int bytesSent = 0;
   int requests = 0;
 
+  /// The server writes UTC times without a zone; read them as UTC.
+  static DateTime parseServerTime(String s) =>
+      DateTime.parse(RegExp(r'(Z|[+-]\d\d:?\d\d)$').hasMatch(s) ? s : '${s}Z');
+
   SyncApi(this.base, {http.Client? client, this.timeout = const Duration(seconds: 30)})
       : _http = client ?? http.Client();
 
@@ -162,6 +166,37 @@ class SyncApi {
           revoked: d['revoked_at'] == null ? null : DateTime.parse(d['revoked_at'] as String),
         ),
     ];
+  }
+
+  /// One page of the account's pieces, in id order (device token). The
+  /// server's clock dates them.
+  Future<({List<({String id, int size, DateTime created})> pieces, String? next})> listPieces({
+    String after = '',
+    int limit = 1000,
+  }) async {
+    final req = http.Request('GET', _u('/v1/pieces', {'after': after, 'limit': '$limit'}))..headers.addAll(await _auth());
+    final r = await _send(req);
+    if (r.statusCode != 200) throw ApiException(r.statusCode, r.body);
+    final j = jsonDecode(r.body) as Map<String, dynamic>;
+    return (
+      pieces: [
+        for (final p in (j['pieces'] as List).cast<Map<String, dynamic>>())
+          (id: p['id'] as String, size: p['size'] as int, created: parseServerTime(p['created_at'] as String)),
+      ],
+      next: j['next'] as String?,
+    );
+  }
+
+  /// Deletes pieces. On an append-only account the server also wants the
+  /// recovery key's signature ([recovery]); sent anyway, it's ignored.
+  Future<int> deletePieces(List<String> ids, {SimpleKeyPair? recovery, int keyIndex = 0}) async {
+    final raw = utf8.encode(jsonEncode({'ids': ids}));
+    final headers = await _auth();
+    if (recovery != null) {
+      headers.addAll(await recoveryHeader(account!, recovery, 'delete-pieces', raw, keyIndex: keyIndex));
+    }
+    final r = await _json('POST', '/v1/pieces/delete', raw: raw, headers: headers);
+    return r['deleted'] as int;
   }
 
   Future<List<String>> missing(List<String> ids) async {

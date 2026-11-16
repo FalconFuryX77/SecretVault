@@ -85,6 +85,40 @@ class RestoreEntry {
   const RestoreEntry(this.fileId, this.version, this.manifestId, this.device, this.time);
 }
 
+/// One version of a file, as the log tells it.
+class BackupVersion {
+  final String fileId;
+  final String version;
+  final String manifestId;
+
+  /// The device that wrote it, and when it says it did.
+  final String device;
+  final DateTime time;
+
+  /// When it stopped being the file's current version (a newer one was
+  /// written, or it was deleted). Null while it's current.
+  DateTime? retired;
+
+  /// Retired by a delete rather than by a newer version.
+  bool deleted = false;
+
+  BackupVersion(this.fileId, this.version, this.manifestId, this.device, this.time);
+}
+
+/// What [SyncEngine.prune] did.
+class PruneReport {
+  /// Versions retired before the cut-off: their pieces could go, unless a
+  /// version still kept shares them.
+  final int versionsDropped;
+  final int piecesDeleted;
+  final int bytesFreed;
+  final int piecesKept;
+  const PruneReport(this.versionsDropped, this.piecesDeleted, this.bytesFreed, this.piecesKept);
+
+  @override
+  String toString() => 'PruneReport(dropped $versionsDropped versions, deleted $piecesDeleted pieces / $bytesFreed B, kept $piecesKept)';
+}
+
 /// Where the engine keeps its progress. In the app this lives inside the
 /// vault; the CLI uses a JSON file. It's an optimisation: the server is the
 /// source of truth for which pieces exist.
@@ -566,12 +600,7 @@ class SyncEngine {
   /// device's clock says), to undo later changes. [excludeDevices] ignores
   /// everything those devices wrote, e.g. a phone that was taken.
   Future<List<RestoreEntry>> liveFiles({DateTime? asOf, Set<String> excludeDevices = const {}}) async {
-    final records = await _withRetry(() => api.readLog(), () {});
-    final j = await journal.load();
-    final heads = <String, ChainState>{};
-    final bodies = await verifyLog(sealer, records, knownHeads: _knownHeads(j), headsOut: heads);
-    j['heads'] = {for (final e in heads.entries) e.key: e.value.toJson()};
-    await journal.save(j);
+    final bodies = await _verifiedLog();
     final live = <String, RestoreEntry>{};
     for (final b in bodies) {
       if (excludeDevices.contains(b.device)) continue;
@@ -585,6 +614,104 @@ class SyncEngine {
       }
     }
     return live.values.toList();
+  }
+
+  /// The whole log, every chain verified and checked against the chain
+  /// positions this client saw before (which it then remembers).
+  Future<List<LogBody>> _verifiedLog() async {
+    final records = await _withRetry(() => api.readLog(), () {});
+    final j = await journal.load();
+    final heads = <String, ChainState>{};
+    final bodies = await verifyLog(sealer, records, knownHeads: _knownHeads(j), headsOut: heads);
+    j['heads'] = {for (final e in heads.entries) e.key: e.value.toJson()};
+    await journal.save(j);
+    return bodies;
+  }
+
+  /// Every file the log has seen, each with its versions oldest first:
+  /// current, replaced by a newer one, or deleted (see [BackupVersion]).
+  /// Versions that [prune] removed are still listed (the log keeps them);
+  /// their manifests are gone from the server.
+  Future<Map<String, List<BackupVersion>>> history() async {
+    final out = <String, List<BackupVersion>>{};
+    final current = <String, BackupVersion>{};
+    for (final b in await _verifiedLog()) {
+      for (final op in b.ops) {
+        if (op.type == 'put') {
+          final v = BackupVersion(op.file, op.version, op.manifestId!, b.device, b.time);
+          current[op.file]?.retired ??= b.time;
+          current[op.file] = v;
+          (out[op.file] ??= []).add(v);
+        } else if (op.type == 'del' && current[op.file]?.version == op.version) {
+          final v = current.remove(op.file)!;
+          v.retired = b.time;
+          v.deleted = true;
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Frees server space: deletes every piece no kept version needs. A
+  /// version is kept while it's current, and for [retention] after it was
+  /// replaced or deleted; older ones go, except for pieces they share with
+  /// a kept version. Pieces the log doesn't mention at all (an upload that
+  /// never finished) go too, once they're older than [retention].
+  ///
+  /// Nothing younger than [retention] (by the server's clock) is ever
+  /// deleted, so another phone's upload in progress keeps its pieces. The
+  /// log is verified first and every kept manifest read: if anything can't
+  /// be, nothing is deleted.
+  ///
+  /// Append-only accounts need [recovery] (the recovery key) to delete.
+  Future<PruneReport> prune({
+    required Duration retention,
+    SimpleKeyPair? recovery,
+    int keyIndex = 0,
+    DateTime? now,
+  }) async {
+    final cutoff = (now ?? DateTime.now()).toUtc().subtract(retention);
+    final keep = <String>{};
+    var dropped = 0;
+    for (final versions in (await history()).values) {
+      for (final v in versions) {
+        final retired = v.retired;
+        if (retired != null && retired.isBefore(cutoff)) {
+          dropped++;
+          continue;
+        }
+        keep.add(v.manifestId);
+        final top = Manifest.decode(
+          await codec.open(v.manifestId, await _withRetry(() => api.getPiece(v.manifestId), () {}), manifest: true),
+        );
+        keep.addAll(top.parts.map((p) => p.$1));
+        final m = top.parts.isEmpty ? top : await manifestOf(v.manifestId);
+        keep.addAll(m.pieces.map((p) => p.$1));
+      }
+    }
+    final doomed = <String>[];
+    var bytes = 0, kept = 0;
+    var after = '';
+    while (true) {
+      final page = await _withRetry(() => api.listPieces(after: after), () {});
+      for (final p in page.pieces) {
+        if (keep.contains(p.id) || !p.created.isBefore(cutoff)) {
+          kept++;
+        } else {
+          doomed.add(p.id);
+          bytes += p.size;
+        }
+      }
+      final next = page.next;
+      if (next == null) break;
+      after = next;
+    }
+    var deleted = 0;
+    for (var i = 0; i < doomed.length; i += 500) {
+      final batch = doomed.sublist(i, min(doomed.length, i + 500));
+      deleted += await _withRetry(() => api.deletePieces(batch, recovery: recovery, keyIndex: keyIndex), () {});
+    }
+    return PruneReport(dropped, deleted, bytes, kept);
   }
 
   /// A file's content, piece by piece, each verified (AEAD and name), and

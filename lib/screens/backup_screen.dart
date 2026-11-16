@@ -10,6 +10,7 @@ import '../sync/auto_backup.dart';
 import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
+import 'backup_history_screen.dart';
 
 /// Backup for the vault that is currently open: connect it to a server,
 /// then back it up. Files are encrypted on the phone; the server never
@@ -328,6 +329,71 @@ class _BackupScreenState extends State<BackupScreen> {
           ? 'Nothing to restore: every backed-up file is already here.'
           : 'Restored ${r.restored} ${r.restored == 1 ? 'file' : 'files'}'
               '${r.failed.isEmpty ? '' : '; ${r.failed.length} could not be restored'}.');
+    }
+  }
+
+  /// Removes from the server what only old versions needed, after asking
+  /// how long to keep them and for the recovery code.
+  Future<void> _freeUpSpace() async {
+    final session = context.read<VaultService>().session;
+    if (session == null || _busy) return;
+    var days = VaultSync.retentionDays(session);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: const Color(0xFF161B22),
+          title: Text('Free up server space', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Removes versions of files that were replaced or deleted longer ago than this. '
+                'Current files are never touched. Removed versions are gone for good.',
+                style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+              ),
+              const SizedBox(height: 12),
+              DropdownButton<int>(
+                key: const Key('retention-days'),
+                value: days,
+                dropdownColor: const Color(0xFF161B22),
+                items: [
+                  for (final d in const [7, 30, 90, 365])
+                    DropdownMenuItem(
+                      value: d,
+                      child: Text(d == 365 ? 'Keep for a year' : 'Keep for $d days',
+                          style: AppFonts.outfit(color: Colors.white)),
+                    ),
+                ],
+                onChanged: (v) => setLocal(() => days = v ?? days),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(
+              key: const Key('free-space-go'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (go != true || !mounted) return;
+    await _sync.setRetentionDays(session, days);
+    final secret = await _askRecoveryCode(
+      'Removing anything from the backup needs the recovery code, so a phone in the wrong '
+      'hands can never erase what already reached the server.',
+    );
+    if (secret == null || !mounted) return;
+    final r = await _withProgress('Freeing up space…', (_) => _sync.freeUpSpace(session, secret));
+    if (r != null && mounted) {
+      setState(() => _note = r.piecesDeleted == 0
+          ? 'Nothing to remove: no version is older than that.'
+          : 'Freed ${formatBytes(r.bytesFreed)} from ${r.versionsDropped} old '
+              '${r.versionsDropped == 1 ? 'version' : 'versions'}.');
     }
   }
 
@@ -659,6 +725,26 @@ class _BackupScreenState extends State<BackupScreen> {
         onPressed: _busy ? null : _restoreMissing,
         icon: const Icon(Icons.restore_rounded, size: 18, color: Colors.white54),
         label: Text('Restore files from the backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+      ),
+    ),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        key: const Key('history-open'),
+        onPressed: _busy
+            ? null
+            : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupHistoryScreen())),
+        icon: const Icon(Icons.history_rounded, size: 18, color: Colors.white54),
+        label: Text('Version history', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+      ),
+    ),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        key: const Key('free-space'),
+        onPressed: _busy ? null : _freeUpSpace,
+        icon: const Icon(Icons.cleaning_services_rounded, size: 18, color: Colors.white54),
+        label: Text('Free up server space', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
       ),
     ),
     _devicesCard(),

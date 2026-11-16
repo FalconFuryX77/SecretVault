@@ -181,7 +181,7 @@ class _SetupScreenState extends State<SetupScreen> {
       rootNavigatorKey.currentState?.push(
         MaterialPageRoute(
           settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
-          builder: (_) => VaultHomeScreen(vaultType: session.type),
+          builder: (_) => const VaultHomeScreen(),
         ),
       );
     } catch (_) {}

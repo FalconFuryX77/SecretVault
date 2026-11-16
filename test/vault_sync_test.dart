@@ -393,6 +393,59 @@ void main() {
       await a.close();
       await b.close();
     });
+
+    test('version history: an old version and a deleted file come back as copies; freeing up space needs the code', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      final s = await newVault();
+      await s.upsertItem(fileItem('note', 'Plan', 'text/plain', VaultCategory.note).copyWith(content: 'first draft'));
+      final photo = noise(200000, 31);
+      await s.importBytes(photo, fileItem('pic', 'photo.jpg', 'image/jpeg', VaultCategory.image));
+      final sync = VaultSync();
+      final rs = VaultSync.newRecoverySecret();
+      await sync.connect(s, server: serverUrl.toString(), recoverySecret: rs);
+      await sync.backupAll(s);
+      // As the note editor saves: new text, new time.
+      await s.upsertItem(s.entryById('note')!.item.copyWith(content: 'second draft', updatedAt: DateTime(2026, 11, 2)));
+      await s.delete('pic');
+      await sync.backupAll(s);
+
+      final h = await sync.history(s);
+      final note = h.firstWhere((f) => f.fileId == 'note');
+      final pic = h.firstWhere((f) => f.fileId == 'pic');
+      expect(note.versions, hasLength(2));
+      expect(note.versions.first.current, isTrue);
+      expect(note.inVault, isTrue);
+      expect(pic.deleted, isTrue);
+      expect(pic.inVault, isFalse);
+      expect(pic.title, 'photo.jpg');
+
+      final t1 = await sync.restoreVersion(s, note, note.versions.last);
+      expect(t1, startsWith('Plan ('));
+      expect(s.entries.firstWhere((e) => e.item.title == t1).item.content, 'first draft');
+      expect(s.entryById('note')!.item.content, 'second draft', reason: 'the current note is untouched');
+      final t2 = await sync.restoreVersion(s, pic, pic.versions.first);
+      expect(await s.readAll(s.entries.firstWhere((e) => e.item.title == t2)), photo);
+
+      // A wrong code removes nothing; with nothing kept, the old versions go.
+      await expectLater(sync.freeUpSpace(s, VaultSync.newRecoverySecret()), throwsA(isA<SyncSetupException>()));
+      await sync.setRetentionDays(s, 0);
+      final r = await sync.freeUpSpace(s, rs);
+      expect(r.versionsDropped, 2);
+      expect(r.piecesDeleted, greaterThan(0));
+      final after = await sync.history(s);
+      final note2 = after.firstWhere((f) => f.fileId == 'note');
+      expect(note2.versions.first.available, isTrue);
+      expect(note2.versions.last.available, isFalse);
+      expect(after.firstWhere((f) => f.fileId == 'pic').versions.single.available, isFalse);
+      // The current version still comes back from the backup.
+      await s.delete('note');
+      expect((await sync.restoreMissing(s)).restored, 1);
+      expect(s.entryById('note')!.item.content, 'second draft');
+      await s.close();
+    });
   });
 
   test('release builds take https, or http only to this phone itself', () {
