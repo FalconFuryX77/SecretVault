@@ -155,7 +155,13 @@ class UnlockProvider extends ChangeNotifier {
     notifyListeners();
     // A lockout may have started while a vault was open (refused PIN
     // changes count too); honour it before checking anything.
-    final lockoutEnd = await _authService.getLockoutEndTime();
+    DateTime? lockoutEnd;
+    try {
+      lockoutEnd = await _authService.getLockoutEndTime();
+    } catch (_) {
+      // Unreadable lockout state: fall through to a normal check rather
+      // than leaving the screen stuck "authenticating".
+    }
     if (lockoutEnd != null) {
       _startLockoutCountdown(max(1, lockoutEnd.difference(DateTime.now()).inSeconds));
       return false;
@@ -176,7 +182,14 @@ class UnlockProvider extends ChangeNotifier {
         return true;
       }
     } catch (_) {}
-    await _onFailedAttempt();
+    try {
+      await _onFailedAttempt();
+    } finally {
+      if (state == UnlockState.authenticating) {
+        state = UnlockState.locked;
+        notifyListeners();
+      }
+    }
     return false;
   }
 
@@ -303,6 +316,21 @@ class UnlockProvider extends ChangeNotifier {
 
   // ─── Inactivity Auto-Lock ────────────────────────────────
 
+  DateTime? _inactivityHold;
+
+  /// Holds off the inactivity lock (not the app-switch lock) while [op]
+  /// runs, for at most 10 minutes: for screens the user reads or copies
+  /// from without touching it, like the recovery code.
+  Future<T> holdingInactivityLock<T>(Future<T> Function() op) async {
+    _inactivityHold = DateTime.now();
+    try {
+      return await op();
+    } finally {
+      _inactivityHold = null;
+      if (state == UnlockState.unlocked) _resetInactivityTimer();
+    }
+  }
+
   void onUserActivity() {
     if (state == UnlockState.unlocked) {
       _resetInactivityTimer();
@@ -315,8 +343,11 @@ class UnlockProvider extends ChangeNotifier {
 
     _inactivityTimer = Timer(Duration(seconds: _inactivityTimeoutSeconds), () {
       if (state != UnlockState.unlocked) return;
-      if (_vault.isBusy || _suppressAutoLock > 0) {
-        // Don't cut off an import, an export, or the user picking files.
+      final held = _inactivityHold != null &&
+          DateTime.now().difference(_inactivityHold!) < const Duration(minutes: 10);
+      if (_vault.isBusy || _suppressAutoLock > 0 || held) {
+        // Don't cut off an import, an export, the user picking files, or
+        // the user copying a recovery code onto paper.
         _resetInactivityTimer();
       } else {
         lockVault();

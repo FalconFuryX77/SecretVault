@@ -236,9 +236,18 @@ void main() {
       await waitFor(t, find.byKey(const Key('recovery-code')));
       final code = t.widget<Text>(find.byKey(const Key('recovery-code'))).data!;
       expect(RegExp(r'^([0-9a-f]{4} ){15}[0-9a-f]{4}$').hasMatch(code), isTrue);
-      await t.enterText(find.byKey(const Key('recovery-confirm')), code.split(' ').last);
+      await tapWhenReady(t, find.byKey(const Key('recovery-written')));
+      // The code is hidden now; two of its groups are asked for.
+      await waitFor(t, find.byKey(const Key('recovery-group-0')));
+      expect(find.byKey(const Key('recovery-code')), findsNothing);
+      final groups = code.split(' ');
+      for (var i = 0; i < 2; i++) {
+        final label = t.widget<TextField>(find.byKey(Key('recovery-group-$i'))).decoration!.labelText!;
+        final n = int.parse(RegExp(r'Group (\d+)').firstMatch(label)!.group(1)!);
+        await t.enterText(find.byKey(Key('recovery-group-$i')), groups[n - 1]);
+      }
       await t.pump();
-      await tapWhenReady(t, find.text('I wrote it down'));
+      await tapWhenReady(t, find.byKey(const Key('recovery-confirm')));
       await waitFor(t, find.text('Not backed up yet'));
       final backupClock = Stopwatch()..start();
       await tapWhenReady(t, find.text('Back up now'));
