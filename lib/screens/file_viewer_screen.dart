@@ -10,6 +10,7 @@ import '../theme/app_fonts.dart';
 import '../vault/crypto_primitives.dart';
 import '../viewers/document_view.dart';
 import '../viewers/file_kind.dart';
+import '../viewers/image_view.dart';
 import '../viewers/media_player_view.dart';
 import '../viewers/pdf_view.dart';
 import '../viewers/text_file_view.dart';
@@ -303,25 +304,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   }
 
   // ─── Image Viewer (Pinch-to-zoom & Rotate) ──────────────────────
-  Widget _buildImageViewer(Uint8List bytes) {
-    return Center(
-      child: InteractiveViewer(
-        panEnabled: true,
-        minScale: 0.5,
-        maxScale: 4.0,
-        child: Image.memory(
-          bytes,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) => Center(
-            child: Text(
-              'Failed to render image format.',
-              style: AppFonts.outfit(color: Colors.white54),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _buildImageViewer(Uint8List bytes) => VaultImageView(bytes: bytes);
 
   Widget _noPreview(Uint8List bytes) {
     final ext = extensionOf(_currentItem.title);

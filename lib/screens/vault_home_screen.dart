@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../navigation/vault_routes.dart';
+import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
 import '../viewers/file_kind.dart';
 import 'export_dialog.dart';
@@ -39,7 +40,32 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<VaultProvider>().loadVault(widget.vaultType);
+      _warnIfRolledBack();
     });
+  }
+
+  /// The container is older than the last version this phone saved: an
+  /// earlier copy of it was put back (see RollbackGuard).
+  void _warnIfRolledBack() {
+    final session = context.read<VaultService>().session;
+    if (session == null || !session.rolledBack) return;
+    session.rolledBack = false;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: Text('This vault was rolled back',
+            style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'The vault file is older than the last version this phone saved. Someone may have put back '
+          'an earlier copy of it, which would undo recent changes (new files, deletions, a PIN change). '
+          'Check that nothing is missing, and that files you deleted are gone.',
+          key: const Key('rollback-warning'),
+          style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+      ),
+    );
   }
 
   @override

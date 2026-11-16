@@ -28,7 +28,8 @@ import java.util.concurrent.TimeUnit
  * gets page pixels back through shared memory. Nothing touches storage.
  *
  * Channel `app.vault/pdf`: open(data) -> page sizes, render(page, w, h) ->
- * RGBA bytes, close().
+ * RGBA bytes, close(), and image(data, maxSide, maxPixels) -> {width,
+ * height, RGBA data} for vault images.
  */
 class PdfSandbox(private val activity: Activity) {
     private val executor = Executors.newSingleThreadExecutor()
@@ -55,6 +56,13 @@ class PdfSandbox(private val activity: Activity) {
             "open" -> run(result) { open(call.argument<ByteArray>("data")!!) }
             "render" -> run(result) {
                 render(call.argument<Int>("page")!!, call.argument<Int>("width")!!, call.argument<Int>("height")!!)
+            }
+            "image" -> run(result) {
+                image(
+                    call.argument<ByteArray>("data")!!,
+                    call.argument<Int>("maxSide") ?: 4096,
+                    (call.argument<Number>("maxPixels") ?: 12_000_000).toLong(),
+                )
             }
             "close" -> {
                 // Unbind right away on this (main) thread, not behind a call
@@ -138,7 +146,8 @@ class PdfSandbox(private val activity: Activity) {
         // A renderer that never answers (an exploit, or a pathological file)
         // is cut off: unbinding kills it and the call below then throws.
         val watchdog = Runnable { unbindNow() }
-        main.postDelayed(watchdog, if (code == PdfRenderService.OPEN) OPEN_TIMEOUT_MS else RENDER_TIMEOUT_MS)
+        val slow = code == PdfRenderService.OPEN || code == PdfRenderService.DECODE
+        main.postDelayed(watchdog, if (slow) OPEN_TIMEOUT_MS else RENDER_TIMEOUT_MS)
         try {
             data.writeInterfaceToken(PdfRenderService.DESCRIPTOR)
             write(data)
@@ -223,6 +232,60 @@ class PdfSandbox(private val activity: Activity) {
             return out
         } finally {
             SharedMemory.unmap(buffer)
+        }
+    }
+
+    /** Decodes an image in the renderer: (width, height, RGBA pixels). */
+    private fun image(bytes: ByteArray, maxSide: Int, maxPixels: Long): Map<String, Any> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            bytes.fill(0)
+            throw SandboxError("unsupported", "needs Android 11")
+        }
+        val side = maxSide.coerceIn(1, PdfRenderService.MAX_SIDE)
+        val pixelsMax = maxPixels.coerceIn(1, PdfRenderService.MAX_PIXELS)
+        val fd: FileDescriptor = Os.memfd_create("img", 0)
+        val (w, h) = try {
+            var off = 0
+            while (off < bytes.size) off += Os.write(fd, bytes, off, bytes.size - off)
+            Os.lseek(fd, 0, OsConstants.SEEK_SET)
+            val shared = ParcelFileDescriptor.dup(fd)
+            try {
+                @Suppress("UNCHECKED_CAST")
+                transact(PdfRenderService.DECODE, {
+                    it.writeFileDescriptor(shared.fileDescriptor)
+                    it.writeInt(side)
+                    it.writeLong(pixelsMax)
+                }) { r ->
+                    if (r.dataAvail() < 8) throw SandboxError("broken", "bad reply from the renderer")
+                    val width = r.readInt()
+                    val height = r.readInt()
+                    // The renderer parsed hostile data: check what it says.
+                    if (width !in 1..side || height !in 1..side || width.toLong() * height > pixelsMax) {
+                        throw SandboxError("broken", "bad image size from the renderer")
+                    }
+                    width to height
+                } as Pair<Int, Int>
+            } finally {
+                shared.close()
+            }
+        } finally {
+            Os.close(fd)
+            bytes.fill(0)
+        }
+        val size = w * h * 4
+        val shm = SharedMemory.create("img", size)
+        try {
+            transact(PdfRenderService.PIXELS, { shm.writeToParcel(it, 0) }) { null }
+            val buffer = shm.mapReadOnly()
+            try {
+                val out = ByteArray(size)
+                buffer.get(out, 0, size)
+                return mapOf("width" to w, "height" to h, "data" to out)
+            } finally {
+                SharedMemory.unmap(buffer)
+            }
+        } finally {
+            shm.close()
         }
     }
 

@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../vault/crypto_primitives.dart';
 import '../vault/platform_keys.dart';
+import '../vault/rollback_guard.dart';
 import 'security_channel_service.dart';
 import '../vault/vault_container.dart';
 
@@ -16,6 +19,10 @@ class VaultService {
   /// Neutral filename: the cover app is a file manager, so a cache-style
   /// blob in its private storage is unremarkable.
   static const containerName = 'thumbnails.cache';
+
+  /// The rollback guard's state (see RollbackGuard): sealed, meaningless
+  /// without this phone's keystore.
+  static const rollbackStateName = 'thumbnails.idx';
 
   final VaultCrypto crypto;
   final Future<Directory> Function() _dirProvider;
@@ -74,6 +81,7 @@ class VaultService {
     );
     _session = s;
     await SecurityChannelService.setVaultOpen(true);
+    await _watchRollback(s);
     return s;
   }
 
@@ -81,8 +89,37 @@ class VaultService {
     await lock();
     final s = await (await _container()).unlockWithPin(pin);
     _session = s;
-    if (s != null) await SecurityChannelService.setVaultOpen(true);
+    if (s != null) {
+      await SecurityChannelService.setVaultOpen(true);
+      await _watchRollback(s);
+    }
     return s;
+  }
+
+  Uint8List? _rollbackKey;
+  Future<void> _rollbackWrites = Future.value();
+
+  /// Compares the vault with the last commit recorded for it, then records
+  /// every commit from now on. Best effort: never stops an unlock.
+  Future<void> _watchRollback(VaultSession s) async {
+    try {
+      final guard = RollbackGuard(
+        File(p.join((await _dirProvider()).path, rollbackStateName)),
+        crypto.binding,
+      );
+      final key = await s.rollbackKey();
+      _rollbackKey = key;
+      final record = s.recordIndex;
+      final stored = await guard.recorded(record, key);
+      // Warned once; the vault as it is now becomes the reference.
+      s.rolledBack = stored != null && s.generation < stored;
+      await guard.record(record, key, s.generation);
+      s.onCommitted = (gen) {
+        _rollbackWrites = _rollbackWrites.then((_) => guard.record(record, key, gen)).catchError((Object _) {});
+      };
+    } catch (_) {
+      // A broken state file mustn't lock anyone out.
+    }
   }
 
   Future<void> lock() async {
@@ -94,6 +131,11 @@ class VaultService {
       _closing = closing;
       if (!_lockEvents.isClosed) _lockEvents.add(null);
       await closing;
+      s.onCommitted = null;
+      await _rollbackWrites;
+      final k = _rollbackKey;
+      _rollbackKey = null;
+      if (k != null) CryptoPrimitives.wipe(k);
     }
     // A second lock (or an unlock) must still wait for an earlier session to
     // finish its last write before the file is opened again.
