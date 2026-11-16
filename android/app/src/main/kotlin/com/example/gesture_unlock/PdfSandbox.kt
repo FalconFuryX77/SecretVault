@@ -268,6 +268,20 @@ class PdfSandbox(private val activity: Activity) {
         }
     }
 
+    /**
+     * For other native code (photo previews): decodes an image in the
+     * renderer and waits for it. Never call it on the main thread. Null if
+     * the image can't be decoded there (or Android is older than 11).
+     */
+    fun decodeImage(bytes: ByteArray, maxSide: Int, maxPixels: Long): Triple<Int, Int, ByteArray>? {
+        val m = try {
+            executor.submit<Map<String, Any>> { image(bytes, maxSide, maxPixels) }.get()
+        } catch (e: Exception) {
+            return null
+        }
+        return Triple(m["width"] as Int, m["height"] as Int, m["data"] as ByteArray)
+    }
+
     /** Decodes an image in the renderer: (width, height, RGBA pixels). */
     private fun image(bytes: ByteArray, maxSide: Int, maxPixels: Long): Map<String, Any> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {

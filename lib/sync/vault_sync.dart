@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import '../models/vault_item.dart';
 import '../vault/vault_container.dart';
 import '../vault/vault_index.dart';
+import 'previews.dart';
 
 /// Reads one vault item for the sync engine, decrypting only in memory.
 /// Nothing is written to disk in the clear in order to be backed up.
@@ -58,6 +59,12 @@ class BackupSummary {
   final int wireBytes;
   final int retries;
   final Duration elapsed;
+
+  /// Small copies sent ahead of their originals.
+  final int previews;
+
+  /// Originals held back until the phone is on Wi-Fi.
+  final int waitingForWifi;
   const BackupSummary({
     required this.total,
     required this.uploaded,
@@ -67,6 +74,8 @@ class BackupSummary {
     required this.wireBytes,
     required this.retries,
     required this.elapsed,
+    this.previews = 0,
+    this.waitingForWifi = 0,
   });
 }
 
@@ -142,6 +151,27 @@ bool _isNetworkError(Object e) =>
 class VaultSync {
   static const String _configKey = 'sync.config';
   static const String _lastKey = 'sync.last';
+  static const String _previewsKey = 'sync.previews';
+  static const String _wifiKey = 'sync.wifiOriginals';
+
+  /// Makes the small copies sent first (see [previewsFirst]).
+  final PreviewMaker previews;
+
+  VaultSync({this.previews = const PlatformPreviewMaker()});
+
+  /// Whether a new photo, video or recording goes up first as a small copy,
+  /// then in full (on by default): on a bad connection the copy is what
+  /// arrives. See SYNC_DESIGN §5.
+  static bool previewsFirst(VaultSession s) => s.extras[_previewsKey] != false;
+  Future<void> setPreviewsFirst(VaultSession s, bool on) => s.putExtra(_previewsKey, on ? null : false);
+
+  /// Whether the full-size originals of those wait for Wi-Fi (off by default).
+  static bool originalsOnWifiOnly(VaultSession s) => s.extras[_wifiKey] == true;
+  Future<void> setOriginalsOnWifiOnly(VaultSession s, bool on) => s.putExtra(_wifiKey, on ? true : null);
+
+  /// The backup's file id for [itemId]'s preview.
+  static String previewId(String itemId) => '$itemId~p';
+  static String? _previewOf(String fileId) => fileId.endsWith('~p') ? fileId.substring(0, fileId.length - 2) : null;
 
   /// Plain http:// is refused in release builds, except to this phone's
   /// own loopback address (a server reached through a USB tunnel such as
@@ -383,11 +413,14 @@ class VaultSync {
     final engine = await _engine(api, identity, session);
     final live = await engine.liveFiles(asOf: asOf, excludeDevices: excludeDevices);
     final have = {for (final e in session.entries) e.item.id};
+    final liveIds = {for (final f in live) f.fileId};
     var restored = 0, already = 0;
     final failed = <String>[];
     for (var i = 0; i < live.length; i++) {
       final f = live[i];
-      if (have.contains(f.fileId)) {
+      // A preview comes back only when its original can't.
+      final of = _previewOf(f.fileId);
+      if (have.contains(f.fileId) || (of != null && (liveIds.contains(of) || have.contains(of)))) {
         already++;
         continue;
       }
@@ -711,7 +744,9 @@ class VaultSync {
       // Items that were backed up before but are gone from the vault now.
       // Done first: when the account is full, uploads fail, and a deletion
       // should still get through.
-      final current = {for (final e in entries) e.item.id};
+      final current = {
+        for (final e in entries) ...[e.item.id, previewId(e.item.id)],
+      };
       final j = await journal.load();
       final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
       for (final id in jobs.keys.toList()) {
@@ -736,6 +771,48 @@ class VaultSync {
         await journal.save(fresh);
       }
 
+      // Never backed up yet: no committed version, and not an edit of one.
+      bool firstUpload(Map? job) => job == null || (job['state'] != 'committed' && job['parent'] == null);
+
+      // Previews first: small copies of new photos, videos and recordings.
+      var previewsSent = 0, waiting = 0;
+      if (previewsFirst(session)) {
+        for (var i = 0; i < entries.length; i++) {
+          final entry = entries[i];
+          if (!previews.wants(entry)) continue;
+          final jobs = ((await journal.load())['jobs'] as Map?) ?? const {};
+          final pid = previewId(entry.item.id);
+          if (!firstUpload(jobs[entry.item.id] as Map?) || (jobs[pid] as Map?)?['state'] == 'committed') continue;
+          onProgress?.call(i, entries.length, entry.item.title);
+          Preview? p;
+          try {
+            p = await previews.make(session, entry);
+          } catch (_) {
+            if (!session.isOpen) rethrow;
+            p = null; // no preview, the original goes as usual
+          }
+          if (p == null) continue;
+          try {
+            final report = await engine.backupSource(p.source, fileId: pid, meta: {
+              ..._metaFor(entry),
+              'id': pid,
+              'title': '${entry.item.title} (preview)',
+              'mimeType': p.mime,
+              'mime': p.mime,
+              'fileSizeBytes': p.length,
+              'role': 'preview',
+              'previewOf': entry.item.id,
+            });
+            previewsSent++;
+            payload += report.payloadBytes;
+            retries += report.retries;
+          } finally {
+            await p.close();
+          }
+        }
+      }
+      final holdOriginals = originalsOnWifiOnly(session) && !await previews.unmetered();
+
       for (var i = 0; i < entries.length; i++) {
         final entry = entries[i];
         final item = entry.item;
@@ -745,6 +822,10 @@ class VaultSync {
         final job = jobs[item.id] as Map?;
         if (job != null && job['state'] == 'committed' && jsonEncode(job['meta']) == jsonEncode(meta)) {
           unchanged++;
+          continue;
+        }
+        if (holdOriginals && previews.wants(entry) && firstUpload(job)) {
+          waiting++;
           continue;
         }
         final SyncSource source = entry.fileKey != null
@@ -767,6 +848,8 @@ class VaultSync {
         wireBytes: api.bytesSent,
         retries: retries,
         elapsed: clock.elapsed,
+        previews: previewsSent,
+        waitingForWifi: waiting,
       );
     } finally {
       api.close();
