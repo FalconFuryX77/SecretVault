@@ -73,6 +73,16 @@ class MainActivity : FlutterActivity() {
 
     private val pdfSandbox by lazy { PdfSandbox(this) }
     private var camera: VaultCamera? = null
+    private val mover by lazy { FileMover(this) }
+    private val trimmer by lazy { VideoTrimmer(this) }
+
+    @Deprecated("Deprecated in Android")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        if (mover.onActivityResult(requestCode, resultCode, data)) return
+        if (trimmer.onActivityResult(requestCode, resultCode, data)) return
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+    }
 
     /** Whether vault text was copied since the clipboard was last cleared. */
     private var copiedSensitive = false
@@ -220,6 +230,13 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+
+        MethodChannel(messenger, "app.vault/move").setMethodCallHandler { call, result ->
+            mover.handle(call, result)
+        }
+        MethodChannel(messenger, "app.trim/video").setMethodCallHandler { call, result ->
+            trimmer.handle(call, result)
+        }
 
         val cam = VaultCamera(this, flutterEngine.renderer)
         camera = cam
