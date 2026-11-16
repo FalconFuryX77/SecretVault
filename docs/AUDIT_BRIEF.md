@@ -33,7 +33,8 @@ Who it's for and what they face: [THREAT_MODEL.md](THREAT_MODEL.md).
    records and wrapped keys; it can withhold or drop data but not read or
    forge it, and clients detect rolled-back logs. ([SYNC_DESIGN.md](SYNC_DESIGN.md))
 7. **A seized phone can't erase the backup** on an append-only server, and a
-   revoked phone is refused.
+   revoked phone is refused. The login a locked phone keeps for uploading
+   can only add to the backup, never read or delete.
 8. **Crash safety.** A crash at any point leaves every vault openable with
    its previous or new state (including while hosting a decoy, which moves
    files, and while a duress PIN destroys a vault).
@@ -52,6 +53,7 @@ Who it's for and what they face: [THREAT_MODEL.md](THREAT_MODEL.md).
 | Backup engine | `packages/sync_core/lib/src/` | Piece naming (HMAC), sealing, padded log, chain verification, pruning |
 | Server | `server/app/` | Auth (Ed25519 challenges), recovery signatures, append-only, quotas |
 | Move tool | `vault_container.dart` (`exportForTransfer`, `completeTransfer`), `FileMover.kt` | Transfer slot sealed under a one-time code |
+| Uploading while locked | `Outbox.kt`, `lib/sync/outbox.dart`, `vault_sync.dart` (`_settleQueue`, `_keepArmed`), server `upload-token` routes | State sealed under a keystore key that needs no unlock; the upload-only token's scope on every route; the stop code's check value; settling records that may or may not have arrived |
 | Assistant trigger | `AssistTriggerActivity.kt` | Accepts only system callers |
 
 ## Known weak points (already listed)

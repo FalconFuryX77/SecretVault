@@ -276,6 +276,56 @@ backs up, not how many vaults it has.
 
 Users who want the strongest deniability can turn B off and run in mode A.
 
+### 9.1 As built (v3.1)
+
+Option B, "Keep uploading while locked" in Settings → Backup, on by default.
+
+- **When it queues.** Backup always tries the server first. Only when it
+  can't get through (the network is down or keeps dropping) does it seal
+  what's left into the queue instead: the same pieces, manifests and log
+  records it would have sent, already encrypted under the vault's keys. The
+  log records keep their order and counters. Previews go in first; originals
+  that should wait for Wi-Fi aren't queued, since the queue can't know what
+  network it will be sent over.
+- **The phone's side** (`Outbox.kt`): one file per queued item, plus a
+  state file (server, token, order) sealed under a hardware-keystore key
+  that needs no unlock. A WorkManager job sends the queue in order whenever
+  a network is up, through Orbot if the vault uses Tor, and never reads
+  anything back.
+- **The login it keeps is upload-only.** At each backup the vault mints a
+  token (14 days, renewed before it gets close) that the server accepts only
+  for adding pieces and log records and asking which pieces it lacks. It
+  can't download, list, read the log, delete, or mint another. Turning the
+  feature off, or noticing it was stopped, revokes it on the server.
+- **Settling.** The next time the vault backs up online, it first sends
+  anything still queued itself, then reads its own chain from the server and
+  checks which queued versions and deletions arrived. Whatever didn't (the
+  queue was wiped, or a record was lost) is backed up again directly.
+- **Emergency stop**, for a tense moment, without unlocking anything:
+  "Clear cache" in Video Trimmer's menu, or the stop code typed on the lock
+  screen (it looks like a wrong PIN). Either shreds the queue and its state,
+  deletes the keystore key and cancels the job. Nothing in the vault or on
+  the server is touched. Locked upload then stays off until it's turned on
+  again inside the vault, where a note says it was stopped.
+
+  The stop code is set inside the vault. The queue keeps only an HMAC of it
+  under the code's PIN key (Argon2id plus the hardware binding), so checking
+  it costs the lock screen nothing extra and the queue holds nothing it
+  could be guessed from off the phone. It must open no vault.
+- **Size.** The queue uses at most 1 GiB, or a tenth of the free space if
+  that's smaller, and never leaves less than 2 GiB free. What doesn't fit
+  waits for the next unlock.
+- **One vault at a time.** The queue belongs to the vault that armed it;
+  another vault on the phone leaves it alone (and looks the same in its own
+  Settings). So the queue never shows how many vaults there are, but only one
+  of them can use it.
+
+What an examiner with root and the phone learns: that the app has a queue,
+its size, and (from the sealed state, which the phone itself can open) the
+server address and an upload-only token. With that token they could add
+junk to the account, never read or remove anything. Using the emergency stop
+before handing the phone over removes all of it.
+
 ## 10. Restore, pairing and losing a phone
 
 **New phone, old phone in hand (pairing):** the old phone asks for a one-time

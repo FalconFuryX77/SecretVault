@@ -99,6 +99,9 @@ after forcing an unlock of the phone itself, with time and tools.
   coercer without forensic tools, doesn't get this.
 - An examiner who imaged the phone *before* a duress PIN was used can see,
   comparing images, that one record and some chunks were overwritten.
+- If uploading while locked is on and something is waiting, the queue: its
+  size, the server address and an upload-only token (the phone can open the
+  sealed state, so root can too). The emergency stop removes it.
 - Recordings waiting to move into a vault sit encrypted in the app's private
   storage until the next unlock, so their number and sizes show that
   something was recorded (not what, or for which vault).
@@ -220,12 +223,12 @@ the 256-bit path in the URL they can't read from it.
 | Hidden recorder visible to other apps | While armed with the screen off, the recorder holds an active media session. Apps with notification access (smartwatch companions, automation apps) can see it, and could start a recording with volume commands. |
 | Rollback guard | A rolled-back container is detected from a small state file kept beside it (sealed under the hardware binding). Rolling back the container *and* that file together isn't detected. |
 | Clipboard | Copied text is marked sensitive and cleared after a minute or on lock, but a keyboard's own clipboard history may keep it. The recovery code can't be copied. |
-| Backup accounts per vault | SYNC_DESIGN §11 calls for one sync account per phone shared by its vaults. Today each vault that backs up creates its own, so if two vaults back up, the server sees two accounts (from the same address, unless over Tor). Tied to decision D1 below: the shape of a shared account depends on how a locked uploader would hold its credential. |
+| Backup accounts per vault | SYNC_DESIGN §11 calls for one sync account per phone shared by its vaults. Today each vault that backs up creates its own, so if two vaults back up, the server sees two accounts (from the same address, unless over Tor). Sharing one safely needs per-vault scoping on the server, not built yet. |
 | Pruning with several phones | Freeing up server space deletes pieces that only old versions used. If another phone backs up the same content at that very moment and finds those pieces still there, its new version can lose them; a restore then refuses that file (every file is checked end to end) rather than return it wrong. |
 | Moving a vault | Anyone holding the moved copy *and* its transfer code can open the vaults in it without a PIN until the new phone finishes the move. The code is shown once and never stored. |
 | Tor | Backups over Tor go through Orbot's local proxy; if Orbot isn't running the app refuses rather than falling back. Trust in Orbot is assumed. |
 | Container format needs external review | It is a composition of standard primitives (see [CONTAINER_FORMAT.md](CONTAINER_FORMAT.md)) and hasn't been reviewed by a third party. |
-| Locked background upload vs deniability | See decision D1 in [SYNC_DESIGN.md](SYNC_DESIGN.md#9-decision-d1-uploading-while-the-vault-is-locked). Not built yet. |
+| Uploading while locked | On by default. With root, an examiner can see the queue, its size, the server address and an upload-only token (which can add to the account, never read or delete). "Clear cache" in the cover app, or the stop code on the lock screen, wipes all of it; use one before handing the phone over. Only one vault on a phone can use the queue. See [SYNC_DESIGN.md §9.1](SYNC_DESIGN.md#91-as-built-v31). |
 
 Closed since the review of 2026-11-16: duress PIN, rollback detection, PIN
 normalisation, recording-key rotation (daily, with structureless staging

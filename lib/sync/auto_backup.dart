@@ -141,6 +141,18 @@ class AutoBackup {
     if (_running || !_active) return;
     final s = _session!;
     if (!_online) {
+      // No network: if this vault uploads while locked, what's new goes into
+      // the queue now, for the phone to send when a network appears.
+      if (VaultSync.lockedUpload(s) && await sync.queueStatus(s) != null) {
+        _running = true;
+        try {
+          await sync.backupAll(s, offline: true);
+        } catch (_) {
+          // Left for the next try.
+        } finally {
+          _running = false;
+        }
+      }
       state.value = AutoBackupState(lastError: state.value.lastError, waitingForNetwork: true);
       return;
     }

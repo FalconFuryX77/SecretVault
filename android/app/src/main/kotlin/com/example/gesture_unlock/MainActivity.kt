@@ -73,6 +73,7 @@ class MainActivity : FlutterActivity() {
 
     private val pdfSandbox by lazy { PdfSandbox(this) }
     private val previews by lazy { PreviewMaker(applicationContext, pdfSandbox) }
+    private val outbox by lazy { Outbox(applicationContext) }
     private var camera: VaultCamera? = null
     private val mover by lazy { FileMover(this) }
     private val trimmer by lazy { VideoTrimmer(this) }
@@ -188,6 +189,11 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(messenger, PDF_CHANNEL).setMethodCallHandler { call, result ->
             pdfSandbox.handle(call, result)
+        }
+
+        // Uploading while the vault is locked (see Outbox).
+        MethodChannel(messenger, "app.vault/outbox").setMethodCallHandler { call, result ->
+            outbox.handle(call, result)
         }
 
         // Backup previews (see PreviewMaker), and whether the network costs

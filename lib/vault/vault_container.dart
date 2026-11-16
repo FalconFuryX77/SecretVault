@@ -333,7 +333,11 @@ class VaultContainer {
   }
 
   /// Tries the PIN against every record. Returns null if it matches none.
-  Future<VaultSession?> unlockWithPin(String pin) async {
+  ///
+  /// [onNoMatch] then gets the PIN's stop tag ([VaultSession.stopTag]), so
+  /// the caller can check it against the locked-upload stop code without
+  /// another key derivation.
+  Future<VaultSession?> unlockWithPin(String pin, {Future<void> Function(Uint8List stopTag)? onNoMatch}) async {
     final session = await _openSession();
     try {
       final kek = await crypto.pinKek(pin, session._salt);
@@ -353,6 +357,11 @@ class VaultContainer {
       if (hit == null) {
         // A duress PIN: destroys the vault that set it, opens its decoy.
         final duress = await session._findDuressSlot(kek);
+        if (duress == null && onNoMatch != null) {
+          try {
+            await onNoMatch(await VaultSession.stopTagFor(kek));
+          } catch (_) {}
+        }
         CryptoPrimitives.wipe(kek);
         if (duress == null || !await session._executeDuress(duress.$1, duress.$2)) {
           await session.close();
@@ -1060,6 +1069,27 @@ class VaultSession {
       } catch (_) {}
     }
   }
+
+  // ─── Stop code (locked upload) ──────────────────────────────────
+
+  /// The tag the upload queue keeps to recognise [code] on the lock screen:
+  /// a MAC under the code's PIN key, so checking it there costs nothing
+  /// extra and the queue never holds anything the code can be guessed from
+  /// off the phone. [code] must open nothing (no PIN or duress PIN).
+  Future<Uint8List> stopTag(String code) {
+    return _locked(() async {
+      final kek = await _crypto.pinKek(code, _salt);
+      try {
+        if (await _pinInUse(kek)) throw CredentialInUseException();
+        // Awaited here: the key is wiped as soon as this block is left.
+        return await stopTagFor(kek);
+      } finally {
+        CryptoPrimitives.wipe(kek);
+      }
+    });
+  }
+
+  static Future<Uint8List> stopTagFor(Uint8List kek) => CryptoPrimitives.hmacSha256(kek, utf8.encode('undertow/stop'));
 
   // ─── Duress PIN ─────────────────────────────────────────────────
 

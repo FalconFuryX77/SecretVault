@@ -7,6 +7,7 @@ import '../providers/unlock_provider.dart';
 import '../util/format.dart';
 import '../services/vault_service.dart';
 import '../sync/auto_backup.dart';
+import '../sync/outbox.dart';
 import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
@@ -743,6 +744,7 @@ class _BackupScreenState extends State<BackupScreen> {
         ),
       ),
     ],
+    if (context.read<VaultService>().session case final s?) _lockedCard(s),
     if (context.read<VaultService>().session case final s?)
       _torSwitch(VaultSync.usesTor(s), (v) async {
         if (v && !await VaultSync.torAvailable()) {
@@ -810,6 +812,10 @@ class _BackupScreenState extends State<BackupScreen> {
   ];
 
   Widget _resultCard(BackupSummary s) {
+    if (s.queued > 0 && s.uploaded == 0) {
+      return _okCard('No connection: ${s.queued} ${s.queued == 1 ? 'item is' : 'items are'} queued, and go up '
+          'as soon as there is a signal, even with the vault locked.');
+    }
     final parts = <String>[
       '${s.uploaded} sent',
       if (s.previews > 0) '${s.previews} ${s.previews == 1 ? 'preview' : 'previews'} sent first',
@@ -832,6 +838,140 @@ class _BackupScreenState extends State<BackupScreen> {
         style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13),
       ),
     );
+  }
+
+  Widget _okCard(String text) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF059669).withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.4)),
+        ),
+        child: Text(text, style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13)),
+      );
+
+  /// Locked upload: the switch, what the queue holds, and the stop code.
+  Widget _lockedCard(VaultSession s) {
+    final on = VaultSync.lockedUpload(s);
+    final stopped = VaultSync.lockedUploadStopped(s);
+    return FutureBuilder<OutboxStatus?>(
+      future: _sync.queueStatus(s),
+      builder: (context, snap) {
+        final q = snap.data;
+        final String line;
+        if (stopped) {
+          line = 'Stopped: the cache was cleared, or the stop code was typed. The queue and its login are gone. '
+              'Turn it on again when it\'s safe.';
+        } else if (!on) {
+          line = 'Off: backup runs only while the vault is open.';
+        } else if (q != null && q.count > 0) {
+          line = 'On: ${formatBytes(q.bytes)} waiting for a signal.';
+        } else {
+          line = 'On: with no connection, what\'s left waits in a queue that the phone sends when a network '
+              'appears, even locked. The phone keeps only a login that can add to the backup, never read it.';
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SwitchListTile(
+              key: const Key('locked-upload'),
+              contentPadding: EdgeInsets.zero,
+              value: on,
+              onChanged: _busy
+                  ? null
+                  : (v) async {
+                      await _sync.setLockedUpload(s, v);
+                      if (mounted) setState(() {});
+                    },
+              activeThumbColor: const Color(0xFFA78BFA),
+              title: Text('Keep uploading while locked', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+              subtitle: Text(line, key: const Key('locked-upload-state'), style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+            ),
+            if (on)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const Key('stop-code'),
+                  onPressed: _busy ? null : () => _setStopCode(s),
+                  icon: const Icon(Icons.front_hand_rounded, size: 18, color: Colors.white54),
+                  label: Text(
+                    VaultSync.hasStopCode(s) ? 'Change the stop code' : 'Set a stop code',
+                    style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// The stop code: typed on the lock screen, it looks like a wrong PIN
+  /// and wipes the queue and its login.
+  Future<void> _setStopCode(VaultSession s) async {
+    final a = TextEditingController(), b = TextEditingController();
+    final had = VaultSync.hasStopCode(s);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: Text('Stop code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'If you type this code on the lock screen, it looks like a wrong PIN, and the upload queue and its '
+              'login are wiped. Your vault and your backup stay as they are. "Clear cache" in Video Trimmer\'s menu '
+              'does the same. Uploading while locked then stays off until you turn it on here.',
+              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('stop-code-1'),
+              controller: a,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              style: AppFonts.outfit(color: Colors.white),
+              decoration: const InputDecoration(labelText: 'New stop code'),
+            ),
+            TextField(
+              key: const Key('stop-code-2'),
+              controller: b,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              style: AppFonts.outfit(color: Colors.white),
+              decoration: const InputDecoration(labelText: 'Confirm'),
+            ),
+          ],
+        ),
+        actions: [
+          if (had) TextButton(onPressed: () => Navigator.pop(ctx, ''), child: const Text('Remove')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            key: const Key('stop-code-save'),
+            onPressed: () {
+              if (a.text.length < 6 || a.text != b.text) return;
+              Navigator.pop(ctx, a.text);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    a.dispose();
+    b.dispose();
+    if (result == null || !mounted) return;
+    try {
+      await _sync.setStopCode(s, result.isEmpty ? null : result);
+      if (mounted) setState(() => _note = result.isEmpty ? 'Stop code removed.' : 'Stop code set.');
+    } on CredentialInUseException {
+      // Saying why would tell whoever tried that the code opens something.
+      if (!mounted) return;
+      await context.read<UnlockProvider>().registerRefusedPin();
+      if (mounted) setState(() => _error = "That code can't be used. Choose a different one.");
+    }
   }
 
   Widget _field(
