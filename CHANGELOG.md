@@ -16,6 +16,8 @@ Security-relevant changes are marked **security**.
 - Each vault that backs up has its own account and recovery code, by design
   (the server is yours; a decoy's code can never reach the real vault's
   backup). The docs no longer list a shared account as missing.
+- A three-minute demo video of every feature, attached to the release and
+  linked from the README and the website.
 
 ## v3.1.0 (2026-11-16): uploading while locked
 
