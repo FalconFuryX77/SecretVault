@@ -22,9 +22,7 @@ import 'settings_screen.dart';
 /// SecretVault Unlocked File Safe Dashboard Screen.
 /// Provides a native Android file safe experience (Documents, Media, Audio, Archives, Notes).
 class VaultHomeScreen extends StatefulWidget {
-  final VaultType vaultType;
-
-  const VaultHomeScreen({super.key, required this.vaultType});
+  const VaultHomeScreen({super.key});
 
   @override
   State<VaultHomeScreen> createState() => _VaultHomeScreenState();
@@ -39,7 +37,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<VaultProvider>().loadVault(widget.vaultType);
+      context.read<VaultProvider>().loadVault();
       _warnIfRolledBack();
     });
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_fonts.dart';
@@ -83,7 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (pin == null || session == null) return;
     try {
       if (decoy) {
-        if (session.canManageDecoy) {
+        if (session.hasDecoy) {
           await session.changeDecoyPin(pin);
         } else {
           await session.standInDecoySetup(pin, shown: true);
@@ -108,9 +110,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     final session = _session;
     if (pin == null || session == null) return;
+    // This vault's files move up to leave the decoy the bottom of the
+    // container; on a full vault that takes a while.
+    final progress = ValueNotifier<double>(0);
+    var shown = false;
+    final timer = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      shown = true;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF161B22),
+            content: ValueListenableBuilder<double>(
+              valueListenable: progress,
+              builder: (_, v, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Making room for the decoy…', style: AppFonts.outfit(color: Colors.white)),
+                  const SizedBox(height: 16),
+                  LinearProgressIndicator(key: const Key('decoy-progress'), value: v > 0 ? v : null),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    });
     try {
       if (session.canManageDecoy) {
-        await session.createDecoy(pin: pin);
+        await session.createDecoy(pin: pin, onProgress: (v) => progress.value = v);
       } else {
         await session.standInDecoySetup(pin, shown: true);
       }
@@ -122,7 +153,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _refused();
     } catch (e) {
       _toast('Could not create decoy: $e', error: true);
+    } finally {
+      timer.cancel();
+      if (shown && mounted) Navigator.of(context).pop();
+      progress.dispose();
     }
+  }
+
+  /// The duress PIN: opens the decoy, and erases this vault for good.
+  Future<void> _setDuressPin() async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: Text('Duress PIN', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'If this PIN is ever entered on the lock screen, this vault and everything in it '
+          'is erased for good, and your decoy vault opens instead, as if it were the only one.\n\n'
+          'There is no undo, and no warning when it happens. Use it only if you could be '
+          'forced to unlock in front of someone.\n\n'
+          'If this vault is backed up, its recovery code can still restore it from your server later.',
+          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            key: const Key('duress-understood'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('I understand', style: TextStyle(color: Color(0xFFFB7185))),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    final pin = await _askNewPin(
+      'Set Duress PIN',
+      'Different from your PIN and your decoy PIN. Entering it erases this vault.',
+    );
+    final session = _session;
+    if (pin == null || session == null) return;
+    try {
+      await session.setDuressPin(pin);
+      if (mounted) setState(() {});
+      _toast('Duress PIN set.');
+    } on CredentialInUseException {
+      await _refused();
+    } catch (e) {
+      _toast('Could not set the duress PIN: $e', error: true);
+    }
+  }
+
+  Future<void> _removeDuressPin() async {
+    final session = _session;
+    if (session == null) return;
+    await session.removeDuressPin();
+    if (mounted) setState(() {});
+    _toast('Duress PIN removed.');
   }
 
   /// Copies this vault (and its decoy) to a file the user picks, with a
@@ -260,7 +346,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     final session = _session;
     if (ok != true || session == null) return;
-    if (session.canManageDecoy) {
+    if (session.hasDecoy) {
       await session.removeDecoy();
     } else {
       await session.standInDecoySetup('', shown: false);
@@ -344,6 +430,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: 'Erases the decoy and its contents',
                 onTap: _removeDecoy,
               ),
+              const SizedBox(height: 8),
+              if (session?.hasDuressPin == true) ...[
+                _buildSettingCard(
+                  icon: Icons.local_fire_department_rounded,
+                  color: const Color(0xFFFB7185),
+                  title: 'Change Duress PIN',
+                  subtitle: 'Opens the decoy and erases this vault',
+                  onTap: _setDuressPin,
+                ),
+                const SizedBox(height: 8),
+                _buildSettingCard(
+                  icon: Icons.remove_circle_outline_rounded,
+                  color: Colors.white54,
+                  title: 'Remove Duress PIN',
+                  subtitle: 'Only your PIN and the decoy PIN will open anything',
+                  onTap: _removeDuressPin,
+                ),
+              ] else
+                _buildSettingCard(
+                  icon: Icons.local_fire_department_rounded,
+                  color: const Color(0xFFFB7185),
+                  title: 'Set Up Duress PIN',
+                  subtitle: 'A PIN that opens the decoy and erases this vault',
+                  onTap: _setDuressPin,
+                ),
             ],
           ],
 

@@ -136,7 +136,7 @@ class _MoveInScreenState extends State<MoveInScreen> {
       rootNavigatorKey.currentState?.push(
         MaterialPageRoute(
           settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
-          builder: (_) => VaultHomeScreen(vaultType: session.type),
+          builder: (_) => const VaultHomeScreen(),
         ),
       );
     } on CredentialInUseException {
@@ -228,7 +228,7 @@ class _MoveInScreenState extends State<MoveInScreen> {
                 _button('Continue', 'move-in-code-ok', _checkCode),
               ] else ...[
                 for (var i = 0; i < n; i++)
-                  _field(_pins[i], i == 0 ? 'PIN for the vault' : 'PIN for its decoy', key: 'move-in-pin-$i', obscure: true),
+                  _field(_pins[i], i == 0 ? 'PIN for the vault' : (i == 1 ? 'PIN for its decoy' : 'PIN for decoy $i'), key: 'move-in-pin-$i', obscure: true),
                 _button('Move In', 'move-in-finish', _finish),
               ],
               if (_busy) ...[

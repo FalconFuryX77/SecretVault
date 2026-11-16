@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:sync_core/sync_core.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/vault_item.dart';
 import '../vault/vault_container.dart';
@@ -83,6 +84,39 @@ class BackupDevice {
   final DateTime? revoked;
   final bool isThisPhone;
   const BackupDevice(this.id, this.added, this.revoked, this.isThisPhone);
+}
+
+/// One version of a backed-up file (see [VaultSync.history]).
+class BackupVersionInfo {
+  final String version;
+  final String manifestId;
+
+  /// When it was backed up, and when it stopped being current (replaced by
+  /// a newer version, or deleted). The phone's clock wrote both.
+  final DateTime time;
+  final DateTime? retired;
+  final bool deleted;
+
+  /// Still on the server: not removed when space was freed.
+  final bool available;
+
+  const BackupVersionInfo(this.version, this.manifestId, this.time, this.retired, this.deleted, this.available);
+
+  bool get current => retired == null;
+}
+
+/// A file the backup has seen, with its versions newest first.
+class BackupFileHistory {
+  final String fileId;
+  final String title;
+
+  /// The vault still holds this file.
+  final bool inVault;
+  final List<BackupVersionInfo> versions;
+  const BackupFileHistory(this.fileId, this.title, this.inVault, this.versions);
+
+  bool get deleted => versions.first.deleted;
+  DateTime get lastChange => versions.first.retired ?? versions.first.time;
 }
 
 class SyncSetupException implements Exception {
@@ -362,35 +396,7 @@ class VaultSync {
         final meta = Map<String, dynamic>.from(m.meta);
         final title = meta['title'] as String? ?? f.fileId;
         onProgress?.call(i, live.length, title);
-        final base = VaultItem.fromMap({...meta, 'id': f.fileId, 'content': null});
-        final IndexEntry entry;
-        if (meta['kind'] == 'note') {
-          final bytes = BytesBuilder(copy: false);
-          await for (final part in engine.contentOf(m)) {
-            bytes.add(part);
-          }
-          await session.upsertItem(base.copyWith(content: utf8.decode(bytes.takeBytes())));
-          entry = session.entryById(f.fileId)!;
-        } else {
-          final it = StreamIterator(engine.contentOf(m));
-          var pending = Uint8List(0);
-          Future<Uint8List> read(int max) async {
-            if (pending.isEmpty) {
-              if (!await it.moveNext()) return Uint8List(0);
-              pending = it.current;
-            }
-            final n = pending.length < max ? pending.length : max;
-            final out = Uint8List.sublistView(pending, 0, n);
-            pending = Uint8List.sublistView(pending, n);
-            return out;
-          }
-
-          try {
-            entry = await session.importStream(m.size, base.copyWith(fileSizeBytes: m.size), read);
-          } finally {
-            await it.cancel();
-          }
-        }
+        final entry = await _import(engine, session, m, VaultItem.fromMap({...meta, 'id': f.fileId, 'content': null}));
         // Mark it as backed up already, so it isn't uploaded again.
         final j = await VaultJournalStore(session).load();
         final jobs = ((j['jobs'] as Map?) ?? {}).cast<String, dynamic>();
@@ -412,6 +418,152 @@ class VaultSync {
     }
     onProgress?.call(live.length, live.length, '');
     return RestoreSummary(restored, already, failed);
+  }
+
+  /// Streams [m]'s content into the vault as [base] (a note's text goes in
+  /// the item itself), each piece checked on the way.
+  Future<IndexEntry> _import(SyncEngine engine, VaultSession session, Manifest m, VaultItem base) async {
+    if (m.meta['kind'] == 'note') {
+      final bytes = BytesBuilder(copy: false);
+      await for (final part in engine.contentOf(m)) {
+        bytes.add(part);
+      }
+      await session.upsertItem(base.copyWith(content: utf8.decode(bytes.takeBytes())));
+      return session.entryById(base.id)!;
+    }
+    final it = StreamIterator(engine.contentOf(m));
+    var pending = Uint8List(0);
+    Future<Uint8List> read(int max) async {
+      if (pending.isEmpty) {
+        if (!await it.moveNext()) return Uint8List(0);
+        pending = it.current;
+      }
+      final n = pending.length < max ? pending.length : max;
+      final out = Uint8List.sublistView(pending, 0, n);
+      pending = Uint8List.sublistView(pending, n);
+      return out;
+    }
+
+    try {
+      return await session.importStream(m.size, base.copyWith(fileSizeBytes: m.size), read);
+    } finally {
+      await it.cancel();
+    }
+  }
+
+  /// Every file this vault's backup has seen, with its versions: the
+  /// current one, older ones, and deleted files, as long as the server
+  /// keeps them (see [freeUpSpace]). Newest change first.
+  Future<List<BackupFileHistory>> history(
+    VaultSession session, {
+    void Function(int done, int total, String title)? onProgress,
+  }) async {
+    final identity = _identity(session);
+    final api = _api(_server(session), tor: usesTor(session), timeout: const Duration(seconds: 30));
+    try {
+      return await _exclusive(session, () async {
+        final engine = await _engine(api, identity, session);
+        final all = await engine.history();
+        final gone = (await api.missing([
+          for (final vs in all.values)
+            for (final v in vs) v.manifestId,
+        ])).toSet();
+        final out = <BackupFileHistory>[];
+        var i = 0;
+        for (final MapEntry(key: fileId, value: versions) in all.entries) {
+          final here = session.entryById(fileId);
+          var title = here?.item.title;
+          if (title == null) {
+            // Gone from the vault: the newest manifest still on the server.
+            for (final v in versions.reversed) {
+              if (gone.contains(v.manifestId)) continue;
+              try {
+                title = (await engine.manifestOf(v.manifestId)).meta['title'] as String?;
+              } catch (_) {}
+              if (title != null) break;
+            }
+          }
+          onProgress?.call(i++, all.length, title ?? '');
+          out.add(BackupFileHistory(fileId, title ?? 'Removed from the server', here != null, [
+            for (final v in versions.reversed)
+              BackupVersionInfo(v.version, v.manifestId, v.time, v.retired, v.deleted, !gone.contains(v.manifestId)),
+          ]));
+        }
+        onProgress?.call(all.length, all.length, '');
+        out.sort((a, b) => b.lastChange.compareTo(a.lastChange));
+        return out;
+      });
+    } on ApiException catch (e) {
+      throw SyncSetupException('The server answered with an error (${e.status}).', e);
+    } finally {
+      api.close();
+    }
+  }
+
+  /// Brings [version] of [file] back into the vault as a new item next to
+  /// whatever is there, titled with the version's date. Returns that title.
+  Future<String> restoreVersion(VaultSession session, BackupFileHistory file, BackupVersionInfo version) async {
+    final identity = _identity(session);
+    final api = _api(_server(session), tor: usesTor(session), timeout: const Duration(seconds: 30));
+    try {
+      return await _exclusive(session, () async {
+        final engine = await _engine(api, identity, session);
+        final m = await engine.manifestOf(version.manifestId);
+        final meta = Map<String, dynamic>.from(m.meta);
+        final t = version.time.toLocal();
+        String two(int n) => n.toString().padLeft(2, '0');
+        final title = '${meta['title'] ?? file.title} '
+            '(${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}.${two(t.minute)})';
+        final now = DateTime.now().toIso8601String();
+        await _import(engine, session, m, VaultItem.fromMap({
+          ...meta,
+          'id': const Uuid().v4(),
+          'title': title,
+          'createdAt': now,
+          'updatedAt': now,
+          'content': null,
+        }));
+        return title;
+      });
+    } on ApiException catch (e) {
+      if (e.status == 404) throw SyncSetupException('That version is no longer on the server.', e);
+      throw SyncSetupException('The server answered with an error (${e.status}).', e);
+    } on IntegrityException catch (e) {
+      throw SyncSetupException("That version didn't pass its integrity check, so it wasn't restored.", e);
+    } finally {
+      api.close();
+    }
+  }
+
+  static const String retentionKey = 'sync.retention';
+
+  /// How long replaced and deleted versions stay on the server before
+  /// [freeUpSpace] may remove them (default 30 days).
+  static int retentionDays(VaultSession s) => (s.extras[retentionKey] as int?) ?? 30;
+  Future<void> setRetentionDays(VaultSession s, int days) => s.putExtra(retentionKey, days == 30 ? null : days);
+
+  /// Deletes from the server what only versions replaced or deleted more
+  /// than [retentionDays] ago needed. Needs the recovery code: the server
+  /// keeps everything otherwise, so a taken phone can't erase the backup.
+  Future<PruneReport> freeUpSpace(VaultSession session, Uint8List recoverySecret) async {
+    final identity = _identity(session);
+    final api = _api(_server(session), tor: usesTor(session), timeout: const Duration(seconds: 30));
+    try {
+      return await _exclusive(session, () async {
+        final rk = await RecoveryKeys.fromSecret(recoverySecret);
+        final slot = await recoverySlot(api, identity.account, rk);
+        final engine = await _engine(api, identity, session);
+        return engine.prune(retention: Duration(days: retentionDays(session)), recovery: rk.signing, keyIndex: slot);
+      });
+    } on ApiException catch (e) {
+      if (e.status == 401) throw SyncSetupException("That recovery code doesn't match this backup.", e);
+      throw SyncSetupException('The server answered with an error (${e.status}).', e);
+    } on IntegrityException catch (e) {
+      if (e.message.contains('recovery')) throw SyncSetupException("That recovery code doesn't match this backup.", e);
+      throw SyncSetupException("The backup's history didn't pass its checks, so nothing was removed.", e);
+    } finally {
+      api.close();
+    }
   }
 
   /// The backup account's devices, this phone marked.

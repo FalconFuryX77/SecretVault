@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
-import '../models/vault_state.dart';
 import '../models/vault_item.dart';
 import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
@@ -27,9 +26,6 @@ class VaultProvider extends ChangeNotifier {
 
   /// Files above this are exported rather than decrypted into RAM.
   static const int maxPreviewBytes = 64 * 1024 * 1024;
-
-  VaultType _activeVaultType = VaultType.primary;
-  VaultType get activeVaultType => _activeVaultType;
 
   List<VaultItem> _allItems = [];
   List<VaultItem> get allItems => _allItems;
@@ -97,8 +93,7 @@ class VaultProvider extends ChangeNotifier {
 
   // ─── Session ────────────────────────────────────────────
 
-  Future<void> loadVault(VaultType vaultType) async {
-    _activeVaultType = vaultType;
+  Future<void> loadVault() async {
     _refreshFromSession();
     // Recordings made while the vault was locked move in now.
     unawaited(importRecordings().catchError((Object _) => 0));

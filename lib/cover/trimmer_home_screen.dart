@@ -43,14 +43,14 @@ class _TrimmerHomeScreenState extends State<TrimmerHomeScreen> {
     super.initState();
     SecurityChannelService.clearAll();
     _load();
-    _unlockSub = context.read<UnlockProvider>().onVaultUnlocked.listen((vaultType) {
+    _unlockSub = context.read<UnlockProvider>().onVaultUnlocked.listen((_) {
       if (!mounted) return;
       final nav = Navigator.of(context);
       nav.popUntil((route) => route.isFirst);
       nav.push(
         MaterialPageRoute(
           settings: const RouteSettings(name: '${vaultRoutePrefix}home'),
-          builder: (_) => VaultHomeScreen(vaultType: vaultType),
+          builder: (_) => const VaultHomeScreen(),
         ),
       );
     });
