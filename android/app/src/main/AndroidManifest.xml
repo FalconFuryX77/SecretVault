@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Used only for backup, and only to the server the user enters. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Automatic backup starts when a network appears. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- Recording into the vault (in the vault, or with the hidden trigger). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- The in-vault camera (photos and video straight into the vault). -->

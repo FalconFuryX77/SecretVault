@@ -53,3 +53,6 @@ server/staging/
 
 # Built landing page (site/build.sh)
 _site/
+
+# Server secrets (server/.env)
+server/.env

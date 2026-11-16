@@ -57,6 +57,25 @@ class VaultService {
   /// Fires whenever the vault is locked (manually, by timeout or panic).
   Stream<void> get onLocked => _lockEvents.stream;
 
+  final _unlockEvents = StreamController<VaultSession>.broadcast();
+  final _commitEvents = StreamController<int>.broadcast();
+
+  /// Fires with the session whenever a vault is unlocked (or created).
+  Stream<VaultSession> get onUnlocked => _unlockEvents.stream;
+
+  /// Fires after every commit of the open vault (its new commit number).
+  Stream<int> get commits => _commitEvents.stream;
+
+  void Function(int)? _rollbackHook;
+
+  void _opened(VaultSession s) {
+    s.onCommitted = (gen) {
+      _rollbackHook?.call(gen);
+      if (!_commitEvents.isClosed) _commitEvents.add(gen);
+    };
+    if (!_unlockEvents.isClosed) _unlockEvents.add(s);
+  }
+
   Future<File> containerFile() async =>
       File(p.join((await _dirProvider()).path, containerName));
 
@@ -82,6 +101,7 @@ class VaultService {
     _session = s;
     await SecurityChannelService.setVaultOpen(true);
     await _watchRollback(s);
+    _opened(s);
     return s;
   }
 
@@ -92,6 +112,7 @@ class VaultService {
     if (s != null) {
       await SecurityChannelService.setVaultOpen(true);
       await _watchRollback(s);
+      _opened(s);
     }
     return s;
   }
@@ -114,7 +135,7 @@ class VaultService {
       // Warned once; the vault as it is now becomes the reference.
       s.rolledBack = stored != null && s.generation < stored;
       await guard.record(record, key, s.generation);
-      s.onCommitted = (gen) {
+      _rollbackHook = (gen) {
         _rollbackWrites = _rollbackWrites.then((_) => guard.record(record, key, gen)).catchError((Object _) {});
       };
     } catch (_) {
@@ -132,6 +153,7 @@ class VaultService {
       if (!_lockEvents.isClosed) _lockEvents.add(null);
       await closing;
       s.onCommitted = null;
+      _rollbackHook = null;
       await _rollbackWrites;
       final k = _rollbackKey;
       _rollbackKey = null;

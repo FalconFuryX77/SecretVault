@@ -14,6 +14,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gesture_unlock/models/vault_item.dart';
+import 'package:gesture_unlock/services/vault_service.dart';
+import 'package:gesture_unlock/sync/auto_backup.dart';
 import 'package:gesture_unlock/sync/vault_sync.dart';
 import 'package:gesture_unlock/vault/crypto_primitives.dart';
 import 'package:gesture_unlock/vault/platform_keys.dart';
@@ -225,6 +227,171 @@ void main() {
       expect(await byName['clip.mp4']!.readAsBytes(), video);
       expect(await byName['renamed.jpg']!.readAsBytes(), photo);
       api.close();
+    });
+
+    test('through Tor (Orbot\'s proxy): every request goes through it; switched off, none do', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      // A stand-in for Orbot's HTTP proxy.
+      final seen = <String>[];
+      final proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final upstream = HttpClient();
+      const hop = {'host', 'connection', 'proxy-connection', 'keep-alive', 'content-length', 'transfer-encoding'};
+      proxy.listen((req) async {
+        seen.add('${req.method} ${req.uri}');
+        final out = await upstream.openUrl(req.method, req.uri);
+        req.headers.forEach((k, v) {
+          if (!hop.contains(k)) v.forEach((x) => out.headers.add(k, x));
+        });
+        out.contentLength = req.contentLength;
+        await out.addStream(req);
+        final resp = await out.close();
+        req.response.statusCode = resp.statusCode;
+        resp.headers.forEach((k, v) {
+          if (!hop.contains(k)) v.forEach((x) => req.response.headers.add(k, x));
+        });
+        req.response.contentLength = resp.contentLength;
+        await req.response.addStream(resp);
+        await req.response.close();
+      });
+      final defaultPort = VaultSync.torProxyPort;
+      VaultSync.torProxyPort = proxy.port;
+      try {
+        expect(await VaultSync.torAvailable(), isTrue);
+        final s = await VaultContainer.create(File('${tmp.path}/c3.bin'), crypto, pin: '333444', initialChunks: 64);
+        final sync = VaultSync();
+        await sync.connect(s, server: serverUrl.toString(), recoverySecret: VaultSync.newRecoverySecret(), tor: true);
+        expect(VaultSync.usesTor(s), isTrue);
+        await s.upsertItem(fileItem('t1', 'One', 'text/plain', VaultCategory.note).copyWith(content: 'via tor'));
+        final r = await sync.backupAll(s);
+        expect(r.uploaded, 1);
+        expect(seen.where((l) => l.contains('/v1/accounts')), isNotEmpty, reason: 'account created through the proxy');
+        expect(seen.where((l) => l.contains('/v1/log')), isNotEmpty, reason: 'backup went through the proxy');
+        final before = seen.length;
+        await sync.setTor(s, false);
+        await s.upsertItem(fileItem('t2', 'Two', 'text/plain', VaultCategory.note).copyWith(content: 'direct'));
+        await sync.backupAll(s);
+        expect(seen.length, before, reason: 'switched off: straight to the server');
+        await s.close();
+      } finally {
+        VaultSync.torProxyPort = defaultPort;
+        await proxy.close(force: true);
+        upstream.close(force: true);
+      }
+      await proxy.close(force: true);
+      expect(await VaultSync.torAvailable(), isFalse, reason: 'nothing listening on Orbot\'s port here');
+    });
+
+    test('automatic backup: on unlock, after a change, not for its own journal saves, off when switched off', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      final vaults = VaultService(crypto: crypto, storageDir: () async => Directory('${tmp.path}/auto'));
+      final sync = VaultSync();
+      final auto = AutoBackup(
+        vaults: vaults,
+        sync: sync,
+        afterChange: const Duration(milliseconds: 300),
+        afterUnlock: const Duration(milliseconds: 300),
+      );
+      var s = await vaults.create(pin: '482913', initialChunks: 64);
+      await s.upsertItem(fileItem('n1', 'One', 'text/plain', VaultCategory.note).copyWith(content: 'one'));
+      await sync.connect(s, server: serverUrl.toString(), recoverySecret: VaultSync.newRecoverySecret());
+      await vaults.lock();
+
+      Future<int> backedUp() async {
+        final j = (vaults.session!.extras['sync.journal'] as Map?) ?? const {};
+        return ((j['jobs'] as Map?) ?? const {}).values.where((v) => (v as Map)['state'] == 'committed').length;
+      }
+
+      Future<void> until(Future<bool> Function() ok, String what) async {
+        for (var i = 0; i < 100; i++) {
+          if (await ok()) return;
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        fail('timed out waiting for $what');
+      }
+
+      s = (await vaults.unlockWithPin('482913'))!;
+      await until(() async => await backedUp() == 1, 'the backup after unlocking');
+      await until(() async => !auto.state.value.running, 'the run to finish');
+      await s.upsertItem(fileItem('n2', 'Two', 'text/plain', VaultCategory.note).copyWith(content: 'two'));
+      await until(() async => await backedUp() == 2, 'the backup after a change');
+      // Its own journal saves are commits too, but they don't start runs.
+      await until(() async => !auto.state.value.running, 'the run to finish');
+      await Future<void>.delayed(const Duration(seconds: 1));
+      expect(auto.state.value.running, isFalse);
+      expect(auto.state.value.nextAttempt, isNull);
+      // Switched off: changes stay local.
+      await auto.setEnabled(s, false);
+      await s.upsertItem(fileItem('n3', 'Three', 'text/plain', VaultCategory.note).copyWith(content: '3'));
+      await Future<void>.delayed(const Duration(seconds: 1));
+      expect(await backedUp(), 2);
+      await vaults.lock();
+      expect(auto.state.value.running, isFalse);
+      auto.dispose();
+    });
+
+    test('a new phone restores from the recovery code alone; missing files come back; a taken phone is cut off', () async {
+      if (server == null) {
+        markTestSkipped('python sync server not available');
+        return;
+      }
+      final a = await newVault();
+      final video = noise(1500000, 21);
+      await a.importBytes(video, fileItem('vid', 'clip.mp4', 'video/mp4', VaultCategory.video));
+      await a.upsertItem(fileItem('note', 'Notes', 'text/plain', VaultCategory.note).copyWith(content: 'meet at 6'));
+      final sync = VaultSync();
+      final rs = VaultSync.newRecoverySecret();
+      final code = await sync.connect(a, server: serverUrl.toString(), recoverySecret: rs);
+      await sync.backupAll(a);
+      expect(VaultSync.parseRecoverySecret(code), rs);
+      expect(VaultSync.parseRecoverySecret(code.toUpperCase().replaceAll(' ', '-')), rs);
+      expect(VaultSync.parseRecoverySecret('not a code'), isNull);
+
+      // New phone: a fresh vault, the server address and the code. No
+      // account id, nothing else.
+      final b = await VaultContainer.create(File('${tmp.path}/c2.bin'), crypto, pin: '111222', initialChunks: 64);
+      final summary = await sync.recoverInto(b, server: serverUrl.toString(), recoverySecret: rs);
+      expect(summary.restored, 2);
+      expect(summary.failed, isEmpty);
+      expect(await b.readAll(b.entryById('vid')!), video);
+      expect(b.entryById('note')!.item.content, 'meet at 6');
+      // It's backed up already: nothing goes up again.
+      final again = await sync.backupAll(b);
+      expect(again.uploaded, 0);
+      expect(again.unchanged, 2);
+
+      // A file deleted by mistake comes back.
+      await b.delete('vid');
+      final missing = await sync.restoreMissing(b);
+      expect(missing.restored, 1);
+      expect(await b.readAll(b.entryById('vid')!), video);
+
+      // Phone A was taken: B sees it, revokes it, and A is cut off.
+      final devices = await sync.devices(b);
+      expect(devices, hasLength(2));
+      final aDevice = devices.firstWhere((d) => !d.isThisPhone);
+      await expectLater(sync.revoke(b, VaultSync.newRecoverySecret(), [aDevice.id]), throwsA(isA<SyncSetupException>()));
+      await sync.revoke(b, rs, [aDevice.id]);
+      expect((await sync.devices(b)).firstWhere((d) => d.id == aDevice.id).revoked, isNotNull);
+      await a.upsertItem(fileItem('n2', 'More', 'text/plain', VaultCategory.note).copyWith(content: 'x'));
+      await expectLater(sync.backupAll(a), throwsA(isA<ApiException>()), reason: 'the taken phone can no longer back up');
+
+      // Start over: a new account, everything uploaded again, the old one closed.
+      final oldAccount = sync.status(b).account;
+      final fresh = await sync.startOver(b, rs);
+      expect(fresh.uploaded, 2);
+      expect(sync.status(b).account, isNot(oldAccount));
+      expect(sync.startOverPending(b), isFalse);
+      final api = SyncApi(serverUrl);
+      expect(await findAccounts(api, rs), [sync.status(b).account]);
+      api.close();
+      await a.close();
+      await b.close();
     });
   });
 

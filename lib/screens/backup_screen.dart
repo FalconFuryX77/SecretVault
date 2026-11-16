@@ -6,8 +6,10 @@ import 'package:provider/provider.dart';
 import '../providers/unlock_provider.dart';
 import '../services/device_file_service.dart';
 import '../services/vault_service.dart';
+import '../sync/auto_backup.dart';
 import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
+import '../vault/vault_container.dart';
 
 /// Backup for the vault that is currently open: connect it to a server,
 /// then back it up. Files are encrypted on the phone; the server never
@@ -25,6 +27,7 @@ class _BackupScreenState extends State<BackupScreen> {
   final TextEditingController _invite = TextEditingController();
 
   bool _busy = false;
+  bool _tor = false;
   String? _error;
   String? _progress;
   double? _progressValue;
@@ -56,6 +59,12 @@ class _BackupScreenState extends State<BackupScreen> {
     // The code comes first: shown, written down and confirmed before the
     // account exists. Nothing is created if the user backs out, and the
     // code is never stored on the phone.
+    final vault = context.read<VaultService>();
+    if (_tor && !await VaultSync.torAvailable()) {
+      if (mounted) setState(() => _error = "Orbot isn't running. Start Orbot (the Tor app), then connect again.");
+      return;
+    }
+    if (!mounted) return;
     var secret = _confirmedSecret;
     if (secret == null) {
       final fresh = VaultSync.newRecoverySecret();
@@ -66,8 +75,8 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _busy = true);
     try {
       // Busy: the inactivity lock waits for the account to be created.
-      await context.read<VaultService>().whileBusy(
-            () => _sync.connect(session, server: _server.text, invite: _invite.text, recoverySecret: secret!),
+      await vault.whileBusy(
+            () => _sync.connect(session, server: _server.text, invite: _invite.text, recoverySecret: secret!, tor: _tor),
           );
       _confirmedSecret = null;
       if (mounted) setState(() => _busy = false);
@@ -185,6 +194,290 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
+  /// Runs a long backup operation with the progress bar, keeping the vault
+  /// from auto-locking meanwhile.
+  Future<T?> _withProgress<T>(String start, Future<T> Function(void Function(int, int, String)) op) async {
+    final vault = context.read<VaultService>();
+    final unlock = context.read<UnlockProvider>();
+    setState(() {
+      _busy = true;
+      _error = null;
+      _progress = start;
+      _progressValue = null;
+    });
+    try {
+      return await vault.whileBusy(() => op((done, total, title) {
+            unlock.onUserActivity();
+            if (!mounted) return;
+            setState(() {
+              _progressValue = total == 0 ? 1 : done / total;
+              _progress = done >= total ? 'Finishing…' : '${done + 1} of $total: $title';
+            });
+          }));
+    } catch (e) {
+      if (mounted) setState(() => _error = e is SyncSetupException ? e.message : 'It stopped before it finished. ($e)');
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = null;
+        });
+      }
+    }
+  }
+
+  /// Asks for the recovery code (for revoking, starting over). Never kept.
+  Future<Uint8List?> _askRecoveryCode(String why) async {
+    final c = TextEditingController();
+    String? problem;
+    final result = await context.read<UnlockProvider>().holdingInactivityLock(
+          () => showDialog<Uint8List>(
+            context: context,
+            builder: (ctx) => StatefulBuilder(
+              builder: (ctx, setLocal) => AlertDialog(
+                backgroundColor: const Color(0xFF161B22),
+                title: Text('Recovery code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(why, style: AppFonts.outfit(fontSize: 13, color: Colors.white70)),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const Key('recovery-input'),
+                      controller: c,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      enableIMEPersonalizedLearning: false,
+                      maxLines: 3,
+                      minLines: 2,
+                      style: AppFonts.firaCode(fontSize: 13, color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'xxxx xxxx xxxx …',
+                        hintStyle: AppFonts.firaCode(fontSize: 13, color: Colors.white24),
+                        errorText: problem,
+                        filled: true,
+                        fillColor: const Color(0xFF0D1117),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                  TextButton(
+                    key: const Key('recovery-ok'),
+                    onPressed: () {
+                      final secret = VaultSync.parseRecoverySecret(c.text);
+                      if (secret == null) {
+                        setLocal(() => problem = 'That is not a recovery code (16 groups of 4).');
+                        return;
+                      }
+                      Navigator.pop(ctx, secret);
+                    },
+                    child: const Text('Continue'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+    c.dispose();
+    return result;
+  }
+
+  Future<void> _restoreMissing() async {
+    final session = context.read<VaultService>().session;
+    if (session == null || _busy) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: Text('Restore from the backup', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        children: [
+          SimpleDialogOption(
+            key: const Key('restore-latest'),
+            onPressed: () => Navigator.pop(ctx, 'latest'),
+            child: Text('Files that are missing here, as backed up now',
+                style: AppFonts.outfit(color: Colors.white70)),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'asof'),
+            child: Text('…as the backup was on a date I choose (undoes later changes and deletions)',
+                style: AppFonts.outfit(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+    DateTime? asOf;
+    if (choice == 'asof') {
+      final day = await showDatePicker(
+        context: context,
+        firstDate: DateTime(2024),
+        lastDate: DateTime.now(),
+        initialDate: DateTime.now(),
+      );
+      if (day == null || !mounted) return;
+      asOf = DateTime(day.year, day.month, day.day, 23, 59, 59);
+    }
+    final r = await _withProgress('Reading the backup…', (p) => _sync.restoreMissing(session, asOf: asOf, onProgress: p));
+    if (r != null && mounted) {
+      setState(() => _note = r.restored == 0
+          ? 'Nothing to restore: every backed-up file is already here.'
+          : 'Restored ${r.restored} ${r.restored == 1 ? 'file' : 'files'}'
+              '${r.failed.isEmpty ? '' : '; ${r.failed.length} could not be restored'}.');
+    }
+  }
+
+  List<BackupDevice>? _devices;
+
+  Future<void> _loadDevices() async {
+    final session = context.read<VaultService>().session;
+    if (session == null || _busy) return;
+    final list = await _withProgress('Asking the server…', (_) => _sync.devices(session));
+    if (list != null && mounted) setState(() => _devices = list);
+  }
+
+  Future<void> _revoke(BackupDevice d) async {
+    final session = context.read<VaultService>().session;
+    if (session == null || _busy) return;
+    final secret = await _askRecoveryCode(
+      'Revoking needs the recovery code. The server refuses that phone from then on; '
+      'anything it already uploaded stays in the backup.',
+    );
+    if (secret == null || !mounted) return;
+    final ok = await _withProgress('Revoking…', (_) async {
+      await _sync.revoke(session, secret, [d.id]);
+      return true;
+    });
+    if (ok == true) await _loadDevices();
+  }
+
+  Future<void> _startOver() async {
+    final session = context.read<VaultService>().session;
+    if (session == null || _busy) return;
+    final pending = _sync.startOverPending(session);
+    final secret = await _askRecoveryCode(pending
+        ? 'Finish starting over: the rest of the vault is uploaded to the new account, then the old one is closed.'
+        : 'If a phone with access to this backup was taken: this vault moves to a new backup account with '
+            'new keys, everything is uploaded again, and the old account (which that phone could reach) is '
+            'closed and emptied on the server. Needs the recovery code.');
+    if (secret == null || !mounted) return;
+    final r = await _withProgress('Starting over…', (p) => _sync.startOver(session, secret, onProgress: p));
+    if (r != null && mounted) {
+      setState(() {
+        _lastRun = r;
+        _devices = null;
+        _note = 'Moved to a new backup account; the old one is closed.';
+      });
+    }
+  }
+
+  String? _note;
+
+  Widget _torSwitch(bool value, ValueChanged<bool> onChanged) => SwitchListTile(
+        key: const Key('backup-tor'),
+        contentPadding: EdgeInsets.zero,
+        value: value,
+        onChanged: _busy ? null : onChanged,
+        activeThumbColor: const Color(0xFFA78BFA),
+        title: Text('Connect through Tor', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+        subtitle: Text(
+          'Through Orbot, so the server and the network in between never see this phone\'s address. '
+          'Slower. Needs Orbot running; works with .onion servers.',
+          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+        ),
+      );
+
+  bool get _startOverPending {
+    final s = context.read<VaultService>().session;
+    return s != null && _sync.startOverPending(s);
+  }
+
+  Widget _autoCard(VaultSession session) {
+    final auto = context.read<AutoBackup>();
+    final on = AutoBackup.isEnabled(session);
+    return ValueListenableBuilder<AutoBackupState>(
+      valueListenable: auto.state,
+      builder: (context, st, _) {
+        String line;
+        if (!on) {
+          line = 'Off: back up with the button.';
+        } else if (st.running) {
+          line = st.total == 0 ? 'Backing up…' : 'Backing up ${st.done + 1} of ${st.total}…';
+        } else if (st.waitingForNetwork) {
+          line = 'Waiting for a connection.';
+        } else if (st.lastError != null) {
+          line = '${st.lastError} Trying again${st.nextAttempt == null ? ' soon' : ' at ${TimeOfDay.fromDateTime(st.nextAttempt!).format(context)}'}.';
+        } else {
+          line = 'While this vault is open: when it changes, and as soon as there is a connection.';
+        }
+        return SwitchListTile(
+          key: const Key('auto-backup'),
+          contentPadding: EdgeInsets.zero,
+          value: on,
+          onChanged: _busy
+              ? null
+              : (v) async {
+                  await auto.setEnabled(session, v);
+                  if (mounted) setState(() {});
+                },
+          activeThumbColor: const Color(0xFFA78BFA),
+          title: Text('Back up automatically', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+          subtitle: Text(line, key: const Key('auto-backup-state'), style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+        );
+      },
+    );
+  }
+
+  Widget _devicesCard() {
+    final list = _devices;
+    if (list == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          key: const Key('devices-load'),
+          onPressed: _busy ? null : _loadDevices,
+          icon: const Icon(Icons.devices_rounded, size: 18, color: Colors.white54),
+          label: Text('Phones with access to this backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+        ),
+      );
+    }
+    String day(DateTime t) => '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Phones with access', style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+        for (final d in list)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            leading: Icon(
+              d.revoked != null ? Icons.block_rounded : (d.isThisPhone ? Icons.smartphone_rounded : Icons.phone_android_rounded),
+              color: d.revoked != null ? Colors.white24 : Colors.white70,
+            ),
+            title: Text(
+              d.isThisPhone ? 'This phone' : 'Another phone',
+              style: AppFonts.outfit(fontSize: 13, color: d.revoked != null ? Colors.white38 : Colors.white),
+            ),
+            subtitle: Text(
+              d.revoked != null ? 'Added ${day(d.added)} · revoked ${day(d.revoked!)}' : 'Added ${day(d.added)}',
+              style: AppFonts.outfit(fontSize: 11, color: Colors.white38),
+            ),
+            trailing: d.isThisPhone || d.revoked != null
+                ? null
+                : TextButton(
+                    key: Key('revoke-${d.id}'),
+                    onPressed: _busy ? null : () => _revoke(d),
+                    child: const Text('Revoke', style: TextStyle(color: Color(0xFFFB7185))),
+                  ),
+          ),
+      ],
+    );
+  }
+
   String _ago(DateTime t) {
     final d = DateTime.now().difference(t);
     if (d.inMinutes < 1) return 'just now';
@@ -255,6 +548,10 @@ class _BackupScreenState extends State<BackupScreen> {
                 const SizedBox(height: 20),
                 _resultCard(_lastRun!),
               ],
+              if (_note != null) ...[
+                const SizedBox(height: 12),
+                Text(_note!, key: const Key('backup-note'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFF6EE7B7))),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 20),
                 Container(
@@ -296,7 +593,8 @@ class _BackupScreenState extends State<BackupScreen> {
       '',
       TextInputType.text,
     ),
-    const SizedBox(height: 16),
+    _torSwitch(_tor, (v) => setState(() => _tor = v)),
+    const SizedBox(height: 8),
     _primaryButton('Connect', _busy ? null : _connect),
     const SizedBox(height: 10),
     Text(
@@ -340,9 +638,42 @@ class _BackupScreenState extends State<BackupScreen> {
         ],
       ),
     ),
-    const SizedBox(height: 16),
+    const SizedBox(height: 8),
+    if (context.read<VaultService>().session case final s?) _autoCard(s),
+    if (context.read<VaultService>().session case final s?)
+      _torSwitch(VaultSync.usesTor(s), (v) async {
+        if (v && !await VaultSync.torAvailable()) {
+          if (mounted) setState(() => _error = "Orbot isn't running. Start Orbot (the Tor app) first.");
+          return;
+        }
+        await _sync.setTor(s, v);
+        if (mounted) setState(() => _error = null);
+      }),
+    const SizedBox(height: 8),
     _primaryButton('Back up now', _busy ? null : _backupNow),
     const SizedBox(height: 4),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        key: const Key('restore-missing'),
+        onPressed: _busy ? null : _restoreMissing,
+        icon: const Icon(Icons.restore_rounded, size: 18, color: Colors.white54),
+        label: Text('Restore files from the backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+      ),
+    ),
+    _devicesCard(),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        key: const Key('start-over'),
+        onPressed: _busy ? null : _startOver,
+        icon: const Icon(Icons.gpp_maybe_rounded, size: 18, color: Color(0xFFFBBF24)),
+        label: Text(
+          _startOverPending ? 'Finish starting over on a new account' : 'A phone was taken? Start over on a new account',
+          style: AppFonts.outfit(color: const Color(0xFFFBBF24), fontSize: 13),
+        ),
+      ),
+    ),
     Align(
       alignment: Alignment.centerLeft,
       child: TextButton(

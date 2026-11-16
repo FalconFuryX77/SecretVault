@@ -8,6 +8,7 @@ import 'providers/unlock_provider.dart';
 import 'providers/vault_provider.dart';
 import 'models/vault_state.dart';
 import 'services/vault_clipboard.dart';
+import 'sync/auto_backup.dart';
 import 'services/vault_service.dart';
 import 'screens/normal_files_screen.dart';
 import 'screens/setup_screen.dart';
@@ -37,6 +38,7 @@ class SecretVaultApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<VaultService>.value(value: vaultService),
+        Provider<AutoBackup>(create: (_) => AutoBackup(vaults: vaultService), dispose: (_, a) => a.dispose(), lazy: false),
         ChangeNotifierProvider(
           create: (_) => UnlockProvider(vaultService: vaultService),
         ),

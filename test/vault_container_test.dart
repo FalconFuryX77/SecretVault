@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -461,8 +462,13 @@ void main() {
     test('locking during a long import stops it and leaves the vault openable', () async {
       final s = await createVault(chunks: 80);
       final src = await sourceFile('big', 65508 * 60);
-      final import = s.importFile(src, _meta('big', 'big'));
-      await Future<void>.delayed(const Duration(milliseconds: 5));
+      // Lock as soon as the first batch is written: deterministic, unlike
+      // a timer, so a busy machine can't let the import finish first.
+      final started = Completer<void>();
+      final import = s.importFile(src, _meta('big', 'big'), onProgress: (_) {
+        if (!started.isCompleted) started.complete();
+      });
+      await started.future;
       final closing = s.close();
       await expectLater(import, throwsA(anything));
       await closing;
