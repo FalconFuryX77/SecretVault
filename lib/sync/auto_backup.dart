@@ -39,6 +39,9 @@ class AutoBackup {
   static const String enabledKey = 'sync.auto';
   /// How long after a change, and after unlocking, a backup starts.
   final Duration afterChange;
+
+  /// The wait after a change when this vault keeps uploading while locked.
+  final Duration afterChangeQueued;
   final Duration afterUnlock;
   static const List<Duration> backoff = [
     Duration(seconds: 30),
@@ -70,6 +73,7 @@ class AutoBackup {
     required this.vaults,
     VaultSync? sync,
     this.afterChange = const Duration(seconds: 30),
+    this.afterChangeQueued = const Duration(seconds: 3),
     this.afterUnlock = const Duration(seconds: 5),
   }) : sync = sync ?? VaultSync() {
     _unlocks = vaults.onUnlocked.listen(attach);
@@ -89,6 +93,8 @@ class AutoBackup {
     detach();
     _session = s;
     _failures = 0;
+    // An emergency stop while it was locked: noted now, even offline.
+    unawaited(sync.noticeStop(s).catchError((Object _) => false));
     _commits = vaults.commits.listen((_) => _changed());
     if (Platform.isAndroid) {
       _net = _network.receiveBroadcastStream().listen((e) {
@@ -124,8 +130,13 @@ class AutoBackup {
     // Commits that only save backup progress (the journal) change nothing
     // a backup would send, and a manual run may have caught up already.
     if (VaultSync.isBackedUp(s)) return;
-    _schedule(afterChange);
+    _schedule(_delayAfterChange(s));
   }
+
+  /// How long to wait after a change. When the vault keeps uploading while
+  /// locked, a change must reach the server or the queue before the vault
+  /// locks (by default after 30 s idle), so the wait is short.
+  Duration _delayAfterChange(VaultSession s) => VaultSync.lockedUpload(s) ? afterChangeQueued : afterChange;
 
   void _schedule(Duration after) {
     if (!_active) return;
@@ -165,7 +176,7 @@ class AutoBackup {
       _failures = 0;
       state.value = const AutoBackupState();
       // Something changed while it ran: go again.
-      if (s.isOpen && !VaultSync.isBackedUp(s)) _schedule(afterChange);
+      if (s.isOpen && !VaultSync.isBackedUp(s)) _schedule(_delayAfterChange(s));
     } catch (e) {
       if (!s.isOpen) return; // locked mid-run: nothing to report
       final wait = backoff[_failures.clamp(0, backoff.length - 1)];
