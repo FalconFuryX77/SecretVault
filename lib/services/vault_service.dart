@@ -17,8 +17,8 @@ import '../vault/vault_container.dart';
 /// Nothing outside this class holds vault keys. Locking closes the session,
 /// which wipes every key from memory.
 class VaultService {
-  /// Neutral filename: the cover app is a file manager, so a cache-style
-  /// blob in its private storage is unremarkable.
+  /// Neutral filename: a cache-style blob in the cover app's private
+  /// storage (a video trimmer keeps thumbnails) is unremarkable.
   static const containerName = 'thumbnails.cache';
 
   /// The rollback guard's state (see RollbackGuard): sealed, meaningless

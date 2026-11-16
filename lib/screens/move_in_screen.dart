@@ -12,8 +12,7 @@ import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import '../cover/trimmer_home_screen.dart';
 import 'vault_home_screen.dart';
-
-const _accent = Color(0xFFA78BFA);
+import '../theme/ui.dart';
 
 /// First run on a new phone (or after reinstalling or renaming the app):
 /// brings in a vault moved out with "Move to another phone or app". Pick the
@@ -167,13 +166,10 @@ class _MoveInScreenState extends State<MoveInScreen> {
           minLines: lines,
           maxLines: lines,
           keyboardType: obscure ? TextInputType.visiblePassword : TextInputType.text,
-          style: AppFonts.firaCode(fontSize: 15, color: Colors.white),
+          style: AppFonts.firaCode(fontSize: 15, color: Ui.ink),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
-            filled: true,
-            fillColor: const Color(0xFF161B22),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            hintStyle: Ui.body(color: Ui.ink3, size: 15),
           ),
         ),
       );
@@ -183,44 +179,46 @@ class _MoveInScreenState extends State<MoveInScreen> {
         child: ElevatedButton(
           key: Key(key),
           onPressed: _busy ? null : onPressed,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _accent,
-            foregroundColor: const Color(0xFF090D16),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          child: Text(label, style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold)),
+          child: Text(label),
         ),
       );
 
   @override
   Widget build(BuildContext context) {
     final n = _vaults ?? 0;
+    final step = _copy == null ? 1 : (_vaults == null ? 2 : 3);
+    final title = switch (step) {
+      1 => 'Choose the moved file',
+      2 => 'Enter the transfer code',
+      _ => n == 1 ? 'Set a PIN' : 'Set a PIN for each vault',
+    };
+    final detail = switch (step) {
+      1 => 'The file made with "Move to another phone or app" on the other phone or app.',
+      2 => 'The code that was shown once, when the file was made.',
+      _ => n == 1
+          ? 'For the vault on this phone. It can be the old one.'
+          : 'This file holds $n vaults: the one it was moved from, and its decoy. They can keep their old PINs.',
+    };
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text('Move a Vault Here', style: AppFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
+          onPressed: _busy ? null : () => Navigator.pop(context),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          padding: const EdgeInsets.fromLTRB(Ui.gutter, 8, Ui.gutter, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                _copy == null
-                    ? 'Pick the file made with "Move to another phone or app" on the other phone or app.'
-                    : (_vaults == null
-                        ? 'Enter the transfer code that was shown when the file was made.'
-                        : (n == 1
-                            ? 'Choose a PIN for the vault on this phone (it can be the old one).'
-                            : 'This file holds $n vaults: the one it was moved from, and its decoy. '
-                                'Choose a PIN for each (they can be the old ones).')),
-                style: AppFonts.outfit(fontSize: 14, color: Colors.white70),
-              ),
-              const SizedBox(height: 20),
+              Text('Move a vault here  ·  $step of 3', style: Ui.data()),
+              const SizedBox(height: 14),
+              Text(title, style: Ui.title()),
+              const SizedBox(height: 10),
+              Text(detail, style: Ui.body(color: Ui.ink2, size: 15)),
+              const SizedBox(height: 28),
               if (_copy == null)
                 _button('Choose the file', 'move-in-pick', _pick)
               else if (_vaults == null) ...[
@@ -228,16 +226,20 @@ class _MoveInScreenState extends State<MoveInScreen> {
                 _button('Continue', 'move-in-code-ok', _checkCode),
               ] else ...[
                 for (var i = 0; i < n; i++)
-                  _field(_pins[i], i == 0 ? 'PIN for the vault' : (i == 1 ? 'PIN for its decoy' : 'PIN for decoy $i'), key: 'move-in-pin-$i', obscure: true),
-                _button('Move In', 'move-in-finish', _finish),
+                  _field(_pins[i], i == 0 ? 'PIN for the vault' : (i == 1 ? 'PIN for its decoy' : 'PIN for decoy $i'),
+                      key: 'move-in-pin-$i', obscure: true),
+                _button('Move in', 'move-in-finish', _finish),
               ],
               if (_busy) ...[
                 const SizedBox(height: 16),
-                LinearProgressIndicator(value: _progress, color: _accent),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(value: _progress, minHeight: 3),
+                ),
               ],
               if (_error != null) ...[
                 const SizedBox(height: 14),
-                Text(_error!, key: const Key('move-in-error'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFFFB7185))),
+                Text(_error!, key: const Key('move-in-error'), style: Ui.detail(color: Ui.alert)),
               ],
             ],
           ),

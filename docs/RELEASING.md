@@ -94,7 +94,7 @@ What people do:
    sure the vault's contents exist somewhere else.
 2. Install the update over the old app. Unlock once: the vault is upgraded
    to the new format (both vaults, if there's a decoy).
-3. Settings → **Move to Another Phone or App**. Save the file and write down
+3. Settings → **Move to another phone or app**. Save the file and write down
    the transfer code it shows.
 4. Install Undertow. On its first screen choose **Move a vault here from
    another phone or app**, pick the file, type the code, and set new PINs.

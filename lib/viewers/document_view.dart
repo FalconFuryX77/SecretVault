@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_fonts.dart';
 import 'docx_text.dart';
+import '../theme/ui.dart';
 
 /// Shows the text of a Word document (see [DocxReader]): headings,
 /// paragraphs, lists and tables. Layout, fonts and pictures are not shown.
@@ -54,13 +55,13 @@ class _DocumentViewState extends State<DocumentView> {
             _error!,
             key: const Key('doc-error'),
             textAlign: TextAlign.center,
-            style: AppFonts.outfit(color: const Color(0xFFFB7185), fontSize: 14),
+            style: AppFonts.ui(color: Ui.alert, fontSize: 14),
           ),
         ),
       );
     }
     final blocks = _blocks;
-    if (blocks == null) return const Center(child: CircularProgressIndicator(color: Color(0xFFA78BFA)));
+    if (blocks == null) return const Center(child: CircularProgressIndicator(color: Ui.signal));
     final words = blocks.whereType<DocxParagraph>().fold<int>(
           0,
           (n, p) => n + p.text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length,
@@ -68,14 +69,14 @@ class _DocumentViewState extends State<DocumentView> {
     return Column(
       children: [
         Container(
-          color: const Color(0xFF161B22),
+          color: Ui.surface,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Row(
             children: [
               Text(
                 'Word document · $words words',
                 key: const Key('doc-summary'),
-                style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+                style: AppFonts.ui(fontSize: 12, color: Colors.white54),
               ),
               const Spacer(),
               IconButton(
@@ -112,7 +113,7 @@ class _DocumentViewState extends State<DocumentView> {
       };
 
   Widget _paragraph(DocxParagraph p) {
-    const ink = Color(0xFF1F2328);
+    const ink = Ui.raised;
     final size = switch (p.heading) {
           1 => 24.0,
           2 => 20.0,
@@ -121,11 +122,11 @@ class _DocumentViewState extends State<DocumentView> {
           _ => 15.5,
         } *
         _scale;
-    final base = AppFonts.outfit(
+    final base = AppFonts.ui(
       fontSize: size,
       color: ink,
       height: 1.45,
-      fontWeight: p.heading > 0 ? FontWeight.w700 : FontWeight.w400,
+      fontWeight: p.heading > 0 ? FontWeight.w500 : FontWeight.w400,
     );
     final text = Text.rich(
       TextSpan(
@@ -134,7 +135,7 @@ class _DocumentViewState extends State<DocumentView> {
             TextSpan(
               text: r.text,
               style: base.copyWith(
-                fontWeight: r.bold || p.heading > 0 ? FontWeight.w700 : FontWeight.w400,
+                fontWeight: r.bold || p.heading > 0 ? FontWeight.w500 : FontWeight.w400,
                 fontStyle: r.italic ? FontStyle.italic : FontStyle.normal,
                 decoration: r.underline ? TextDecoration.underline : TextDecoration.none,
                 color: r.text == '[picture]' ? Colors.black38 : ink,
@@ -177,7 +178,7 @@ class _DocumentViewState extends State<DocumentView> {
                       constraints: const BoxConstraints(maxWidth: 260),
                       child: Text(
                         c < row.length ? row[c] : '',
-                        style: AppFonts.outfit(fontSize: 13.5 * _scale, color: const Color(0xFF1F2328)),
+                        style: AppFonts.ui(fontSize: 13.5 * _scale, color: Ui.raised),
                       ),
                     ),
                   ),

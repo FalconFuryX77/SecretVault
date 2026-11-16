@@ -6,11 +6,10 @@ import 'package:provider/provider.dart';
 import '../providers/unlock_provider.dart';
 import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
-import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import 'recorder_screen.dart';
+import '../theme/ui.dart';
 
-const _accent = Color(0xFFA78BFA);
 
 /// Arms the hidden trigger for the open vault: a volume button pressed a few
 /// times quickly with the screen off (volume-down three times by default),
@@ -178,73 +177,36 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
     await _refreshAssist();
   }
 
-  Widget _card(List<Widget> children) => Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF161B22),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
-      );
+  /// One note under "How it works".
+  Widget _point(String title, String text) => UiRow(title: title, detail: text, chevron: false);
 
-  Widget _point(String bold, String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Text.rich(
-          TextSpan(children: [
-            TextSpan(text: '$bold ', style: AppFonts.outfit(fontWeight: FontWeight.w700, color: Colors.white)),
-            TextSpan(text: text),
-          ]),
-          style: AppFonts.outfit(fontSize: 13, color: Colors.white70, height: 1.4),
-        ),
-      );
-
-  Widget _label(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-        child: Text(text, style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
+  /// A labelled control inside a group.
+  Widget _setting(String label, Widget control) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: Ui.body()),
+          const SizedBox(height: 10),
+          control,
+        ]),
       );
 
   String _capitalised(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
-  Widget _volumeChoice() {
-    const options = [(-1, 'Down'), (1, 'Up'), (0, 'Off')];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Wrap(
-        spacing: 8,
-        children: [
-          for (final (value, label) in options)
-            ChoiceChip(
-              key: Key('trigger-button-$label'.toLowerCase()),
-              label: Text(label, style: AppFonts.outfit(fontSize: 13)),
-              selected: _trigger.button == value,
-              selectedColor: _accent.withValues(alpha: 0.35),
-              onSelected: _busy ? null : (_) => _setTrigger(_trigger.copyWith(button: value)),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget _volumeChoice() => UiSegmented<int>(
+        options: const [(-1, 'Down'), (1, 'Up'), (0, 'Off')],
+        selected: _trigger.button,
+        keyOf: (v) => 'trigger-button-${v == -1 ? 'down' : v == 1 ? 'up' : 'off'}',
+        onChanged: _busy ? null : (v) => _setTrigger(_trigger.copyWith(button: v)),
+      );
 
-  Widget _pressesChoice() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Wrap(
-        spacing: 8,
-        children: [
-          for (var n = TriggerSettings.minPresses; n <= TriggerSettings.maxPresses; n++)
-            ChoiceChip(
-              key: Key('trigger-presses-$n'),
-              label: Text('$n', style: AppFonts.outfit(fontSize: 13)),
-              selected: _trigger.presses == n,
-              selectedColor: _accent.withValues(alpha: 0.35),
-              onSelected: _busy || !_trigger.usesVolume ? null : (_) => _setTrigger(_trigger.copyWith(presses: n)),
-            ),
+  Widget _pressesChoice() => UiSegmented<int>(
+        options: [
+          for (var n = TriggerSettings.minPresses; n <= TriggerSettings.maxPresses; n++) (n, '$n'),
         ],
-      ),
-    );
-  }
+        selected: _trigger.presses,
+        keyOf: (n) => 'trigger-presses-$n',
+        onChanged: _busy || !_trigger.usesVolume ? null : (n) => _setTrigger(_trigger.copyWith(presses: n)),
+      );
 
   String get _assistSubtitle {
     if (!_trigger.assist) {
@@ -253,114 +215,90 @@ class _HiddenRecorderScreenState extends State<HiddenRecorderScreen> {
           : 'Uses the phone\'s assistant button (on many phones, a long press on power).';
     }
     return _assist.holder
-        ? 'Ready: Files is your digital assistant app.'
-        : 'Choose Files as the digital assistant app in Android\'s settings.';
+        ? 'Ready: Video Trimmer is your digital assistant app.'
+        : 'Choose Video Trimmer as the digital assistant app in Android\'s settings.';
   }
 
   @override
   Widget build(BuildContext context) {
     final what = _trigger.describe();
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Hidden recorder', style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+        title: const Text('Hidden recorder'),
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          padding: const EdgeInsets.only(top: 8, bottom: 24),
           children: [
-            _card([
-              SwitchListTile(
-                key: const Key('hidden-armed'),
+            UiGroup(children: [
+              UiSwitchRow(
+                switchKey: const Key('hidden-armed'),
+                detailKey: const Key('hidden-state'),
+                icon: _recordingHere ? Icons.fiber_manual_record_rounded : Icons.screen_lock_portrait_outlined,
+                title: '${_capitalised(what)} records',
+                detail: _recordingHere
+                    ? 'Recording now. ${_capitalised(what)} to stop.'
+                    : _armedHere
+                        ? 'Armed. Works with the screen off.'
+                        : 'Off',
                 value: _armedHere,
                 onChanged: _busy ? null : _setArmed,
-                activeThumbColor: _accent,
-                title: Text(
-                  '${_capitalised(what)} records',
-                  style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
-                ),
-                subtitle: Text(
-                  _recordingHere
-                      ? 'Recording now. ${_capitalised(what)} to stop.'
-                      : _armedHere
-                          ? 'Armed. Works with the screen off.'
-                          : 'Off',
-                  key: const Key('hidden-state'),
-                  style: AppFonts.outfit(fontSize: 12, color: _recordingHere ? const Color(0xFFF43F5E) : Colors.white54),
-                ),
               ),
-              SwitchListTile(
+              UiSwitchRow(
+                icon: Icons.vibration_rounded,
+                title: 'Buzz to confirm',
+                detail: 'One buzz when it starts, two when it stops.',
                 value: _vibrate,
                 onChanged: _busy ? null : _setVibrate,
-                activeThumbColor: _accent,
-                title: Text('Buzz to confirm', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-                subtitle: Text(
-                  'One short buzz when recording starts, two when it stops.',
-                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
-                ),
               ),
             ]),
-            _card([
-              _label('Volume button'),
-              _volumeChoice(),
-              _label('Presses'),
-              _pressesChoice(),
-              const SizedBox(height: 4),
-              SwitchListTile(
-                key: const Key('trigger-assist'),
+            UiGroup(label: 'Trigger', dividerIndent: 16, children: [
+              _setting('Volume button', _volumeChoice()),
+              _setting('Presses', _pressesChoice()),
+              UiSwitchRow(
+                switchKey: const Key('trigger-assist'),
+                title: 'Assistant button',
+                detail: _assistSubtitle,
                 value: _trigger.assist,
                 onChanged: _busy ? null : _setAssist,
-                activeThumbColor: _accent,
-                title: Text('Assistant button', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-                subtitle: Text(_assistSubtitle, style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
               ),
               if (_trigger.assist && !_assist.holder || !_trigger.assist && _assist.holder)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-                  child: TextButton(
-                    key: const Key('trigger-assist-settings'),
-                    onPressed: _openAssistSettings,
-                    child: Text('Open assistant settings', style: AppFonts.outfit(color: _accent)),
-                  ),
+                UiRow(
+                  key: const Key('trigger-assist-settings'),
+                  title: 'Open assistant settings',
+                  onTap: _openAssistSettings,
                 ),
             ]),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: Text(_error!, key: const Key('hidden-error'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFFFB7185))),
+                padding: const EdgeInsets.fromLTRB(Ui.gutter, 0, Ui.gutter, 18),
+                child: Text(_error!, key: const Key('hidden-error'), style: Ui.detail(color: Ui.alert)),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_trigger.usesVolume)
-                    _point('Volume:', 'with the screen off, press ${_trigger.volumeLabel.toLowerCase()} '
-                        '${_trigger.presses} times quickly (about half a second per press). Do it again to stop. '
-                        'Pressing the other volume button starts the count again. No need to unlock or look at the phone.'),
-                  if (_trigger.assist)
-                    _point('Assistant button:', 'press whatever opens the assistant on this phone (an assistant key, '
-                        'or holding power or home on many phones) once to start and once to stop. Android shows '
-                        'Files as the assistant app in Settings, and the button no longer opens your usual assistant. '
-                        'Volume presses are harder to notice.'),
-                  _point('Where it goes:', 'the audio is encrypted to this vault as it\'s recorded. The phone can\'t '
-                      'play it back; it moves into this vault the next time you unlock it. The other vault never sees it.'),
-                  _point('Stays armed', 'until you turn it off, the phone restarts, or Android stops the app. On '
-                      'Samsung phones, set the app\'s battery use to Unrestricted so it isn\'t stopped.'),
-                  _point('Unlock soon after:', 'until you unlock this vault, its recordings wait, encrypted, '
-                      'in the app\'s storage. Nobody can play them, but a forensic examination of the phone could '
-                      'show that recordings exist that the vault you opened can\'t read.'),
-                  _point('Android shows it:', 'the green microphone dot appears while recording, and the system '
-                      'lists the app as running. If music or a video is playing, the volume keys control that instead.'),
-                ],
-              ),
-            ),
+            UiGroup(label: 'How it works', dividerIndent: 16, children: [
+              if (_trigger.usesVolume)
+                _point('Volume', 'With the screen off, press ${_trigger.volumeLabel.toLowerCase()} '
+                    '${_trigger.presses} times quickly (about half a second per press). Do it again to stop. '
+                    'Pressing the other volume button starts the count again. No need to unlock or look at the phone.'),
+              if (_trigger.assist)
+                _point('Assistant button', 'Press whatever opens the assistant on this phone (an assistant key, '
+                    'or holding power or home on many phones) once to start and once to stop. Android shows '
+                    'Video Trimmer as the assistant app in Settings, and the button no longer opens your usual '
+                    'assistant. Volume presses are harder to notice.'),
+              _point('Where it goes', "The audio is encrypted to this vault as it's recorded. The phone can't "
+                  'play it back; it moves into this vault the next time you unlock it. The other vault never sees it.'),
+              _point('Stays armed', 'Until you turn it off, the phone restarts, or Android stops the app. On '
+                  "Samsung phones, set the app's battery use to Unrestricted so it isn't stopped."),
+              _point('Unlock soon after', 'Until you unlock this vault, its recordings wait, encrypted, '
+                  "in the app's storage. Nobody can play them, but a forensic examination of the phone could "
+                  "show that recordings exist that the vault you opened can't read."),
+              _point('Android shows it', 'The green microphone dot appears while recording, and the system '
+                  'lists the app as running. If music or a video is playing, the volume keys control that instead.'),
+            ]),
           ],
         ),
       ),

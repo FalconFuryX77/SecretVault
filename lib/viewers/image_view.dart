@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../theme/app_fonts.dart';
 import 'pdf_sandbox.dart';
+import '../theme/ui.dart';
 
 /// Decodes vault images in the isolated renderer process (the one that
 /// draws PDFs, see PdfRenderService.kt) rather than in the app, which holds
@@ -104,7 +105,7 @@ class _VaultImageViewState extends State<VaultImageView> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(_error!, key: const Key('image-error'), textAlign: TextAlign.center,
-              style: AppFonts.outfit(color: Colors.white54)),
+              style: AppFonts.ui(color: Colors.white54)),
         ),
       );
     }
@@ -114,13 +115,13 @@ class _VaultImageViewState extends State<VaultImageView> {
         widget.bytes,
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) => Center(
-          child: Text('Failed to render image format.', style: AppFonts.outfit(color: Colors.white54)),
+          child: Text('Failed to render image format.', style: AppFonts.ui(color: Colors.white54)),
         ),
       );
     } else if (_image != null) {
       picture = RawImage(key: const Key('image-sandboxed'), image: _image, fit: BoxFit.contain);
     } else {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFFA78BFA)));
+      return const Center(child: CircularProgressIndicator(color: Ui.signal));
     }
     return Center(
       child: InteractiveViewer(panEnabled: true, minScale: 0.5, maxScale: 6.0, child: picture),

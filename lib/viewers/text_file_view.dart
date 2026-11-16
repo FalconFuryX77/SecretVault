@@ -10,6 +10,7 @@ import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
 import '../services/vault_clipboard.dart';
 import '../theme/app_fonts.dart';
+import '../theme/ui.dart';
 
 /// Reads and edits a plain-text file stored in the vault. Saving writes a
 /// new encrypted copy and shreds the old one; nothing goes to storage in
@@ -90,16 +91,14 @@ class _TextFileViewState extends State<TextFileView> {
       widget.onSaved(item);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: const Color(0xFF059669),
-          content: Text('Saved', style: AppFonts.outfit(color: Colors.white)),
+          content: Text('Saved', style: AppFonts.ui(color: Colors.white)),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: const Color(0xFFE11D48),
-          content: Text('Could not save: $e', style: AppFonts.outfit(color: Colors.white)),
+          content: Text('Could not save: $e', style: AppFonts.ui(color: Colors.white)),
         ),
       );
     } finally {
@@ -111,18 +110,17 @@ class _TextFileViewState extends State<TextFileView> {
     final discard = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Discard changes?', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text('Discard changes?'),
         content: Text('Your edits to this file have not been saved.',
-            style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+            style: AppFonts.ui(color: Colors.white70, fontSize: 13)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Keep editing', style: AppFonts.outfit(color: Colors.white54)),
+            child: Text('Keep editing', style: AppFonts.ui(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Discard', style: AppFonts.outfit(color: const Color(0xFFFB7185))),
+            child: Text('Discard', style: AppFonts.ui(color: Ui.alert)),
           ),
         ],
       ),
@@ -156,7 +154,7 @@ class _TextFileViewState extends State<TextFileView> {
   Widget _toolbar() {
     final lines = '\n'.allMatches(_editing ? _edit.text : _saved).length + 1;
     return Container(
-      color: const Color(0xFF161B22),
+      color: Ui.surface,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Row(
         children: [
@@ -181,8 +179,8 @@ class _TextFileViewState extends State<TextFileView> {
             TextButton.icon(
               key: const Key('text-edit'),
               onPressed: () => setState(() => _editing = true),
-              icon: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFFA78BFA)),
-              label: Text('Edit', style: AppFonts.outfit(color: const Color(0xFFA78BFA), fontWeight: FontWeight.w600)),
+              icon: const Icon(Icons.edit_rounded, size: 16, color: Ui.signal),
+              label: Text('Edit', style: AppFonts.ui(color: Ui.signal, fontWeight: FontWeight.w500)),
             ),
           ] else ...[
             TextButton(
@@ -196,17 +194,17 @@ class _TextFileViewState extends State<TextFileView> {
                         });
                       }
                     },
-              child: Text('Cancel', style: AppFonts.outfit(color: Colors.white54)),
+              child: Text('Cancel', style: AppFonts.ui(color: Colors.white54)),
             ),
             const SizedBox(width: 4),
             FilledButton(
               key: const Key('text-save'),
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFA78BFA),
-                foregroundColor: const Color(0xFF090D16),
+                backgroundColor: Ui.signal,
+                foregroundColor: Ui.canvas,
               ),
               onPressed: _saving || !_dirty ? null : _save,
-              child: Text(_saving ? 'Saving…' : 'Save', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+              child: Text(_saving ? 'Saving…' : 'Save', style: AppFonts.ui(fontWeight: FontWeight.w500)),
             ),
           ],
         ],
@@ -216,7 +214,7 @@ class _TextFileViewState extends State<TextFileView> {
 
   Widget _editor() {
     return Container(
-      color: const Color(0xFF0F141C),
+      color: Ui.surface,
       padding: const EdgeInsets.all(12),
       child: TextField(
         key: const Key('text-editor'),
@@ -267,7 +265,7 @@ class _TextFileViewState extends State<TextFileView> {
       ),
     );
     return Container(
-      color: const Color(0xFF0F141C),
+      color: Ui.surface,
       child: SelectionArea(
         child: _wrap
             ? body

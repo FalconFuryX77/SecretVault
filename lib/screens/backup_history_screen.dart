@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/unlock_provider.dart';
 import '../services/vault_service.dart';
 import '../sync/vault_sync.dart';
-import '../theme/app_fonts.dart';
+import '../theme/ui.dart';
 
 /// Every file this vault's backup has seen, with its versions: a deleted
 /// file or an older version can be brought back as a copy.
@@ -85,21 +85,23 @@ class _BackupHistoryScreenState extends State<BackupHistoryScreen> {
         : v.deleted
             ? 'deleted ${_when(v.retired!)}'
             : 'replaced ${_when(v.retired!)}';
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.only(left: 16, right: 4),
-      title: Text(_when(v.time), style: AppFonts.outfit(fontSize: 13, color: v.available ? Colors.white : Colors.white38)),
-      subtitle: Text(
-        v.available ? state : '$state · removed from the server',
-        style: AppFonts.outfit(fontSize: 11, color: Colors.white38),
-      ),
-      trailing: v.available && !(v.current && f.inVault)
-          ? TextButton(
-              key: Key('restore-version-${f.fileId}-$i'),
-              onPressed: _busy ? null : () => _restore(f, v),
-              child: const Text('Restore a copy'),
-            )
-          : null,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Ui.gutter + 16, 6, 8, 6),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_when(v.time), style: Ui.data(size: 13, color: v.available ? Ui.ink : Ui.ink3)),
+            const SizedBox(height: 2),
+            Text(v.available ? state : '$state · removed from the server', style: Ui.detail(color: Ui.ink3)),
+          ]),
+        ),
+        if (v.available && !(v.current && f.inVault))
+          TextButton(
+            key: Key('restore-version-${f.fileId}-$i'),
+            onPressed: _busy ? null : () => _restore(f, v),
+            child: const Text('Restore a copy'),
+          ),
+      ]),
     );
   }
 
@@ -107,58 +109,67 @@ class _BackupHistoryScreenState extends State<BackupHistoryScreen> {
   Widget build(BuildContext context) {
     final files = _files;
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF161B22),
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white70, size: 18),
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
           onPressed: _busy ? null : () => Navigator.pop(context),
         ),
-        title: Text('Version history', style: AppFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+        title: const Text('Version history'),
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_progress != null) ...[
-            const LinearProgressIndicator(),
+            const LinearProgressIndicator(minHeight: 2),
             Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(_progress!, style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
+              padding: const EdgeInsets.fromLTRB(Ui.gutter, 10, Ui.gutter, 4),
+              child: Text(_progress!, style: Ui.data()),
             ),
           ],
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(_error!, style: AppFonts.outfit(fontSize: 13, color: const Color(0xFFFB7185))),
+              padding: const EdgeInsets.all(Ui.gutter),
+              child: Text(_error!, style: Ui.detail(color: Ui.alert)),
             ),
           Expanded(
             child: files == null
                 ? const SizedBox.shrink()
                 : files.isEmpty
-                    ? Center(
-                        child: Text('Nothing has been backed up yet.',
-                            style: AppFonts.outfit(fontSize: 14, color: Colors.white54)),
+                    ? Padding(
+                        padding: const EdgeInsets.fromLTRB(Ui.gutter, 32, Ui.gutter, 0),
+                        child: Text('Nothing has been backed up yet.', style: Ui.heading()),
                       )
-                    : ListView(
+                    : ListView.separated(
                         key: const Key('history-list'),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        children: [
-                          for (final f in files)
-                            ExpansionTile(
-                              key: Key('history-${f.fileId}'),
-                              iconColor: Colors.white54,
-                              collapsedIconColor: Colors.white38,
-                              title: Text(f.title, style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-                              subtitle: Text(
-                                '${f.versions.length} ${f.versions.length == 1 ? 'version' : 'versions'}'
-                                '${f.deleted ? ' · deleted' : ''}',
-                                style: AppFonts.outfit(fontSize: 12, color: f.deleted ? const Color(0xFFFBBF24) : Colors.white38),
+                        padding: const EdgeInsets.only(bottom: 24),
+                        itemCount: files.length,
+                        separatorBuilder: (_, _) => const Divider(indent: Ui.gutter),
+                        itemBuilder: (_, k) {
+                          final f = files[k];
+                          return UiEnter(
+                            index: k,
+                            child: Theme(
+                              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                              child: ExpansionTile(
+                                key: Key('history-${f.fileId}'),
+                                tilePadding: const EdgeInsets.symmetric(horizontal: Ui.gutter),
+                                iconColor: Ui.ink2,
+                                collapsedIconColor: Ui.ink3,
+                                title: Text(f.title, style: Ui.body()),
+                                subtitle: Text(
+                                  '${f.versions.length} ${f.versions.length == 1 ? 'version' : 'versions'}'
+                                  '${f.deleted ? ' · deleted' : ''}',
+                                  style: Ui.data(color: f.deleted ? Ui.signal : Ui.ink3),
+                                ),
+                                children: [
+                                  for (var i = 0; i < f.versions.length; i++) _version(f, f.versions[i], i),
+                                  const SizedBox(height: 8),
+                                ],
                               ),
-                              children: [
-                                for (var i = 0; i < f.versions.length; i++) _version(f, f.versions[i], i),
-                              ],
                             ),
-                        ],
+                          );
+                        },
                       ),
           ),
         ],

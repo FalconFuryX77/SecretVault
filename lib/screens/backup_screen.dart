@@ -12,6 +12,7 @@ import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import 'backup_history_screen.dart';
+import '../theme/ui.dart';
 
 /// Backup for the vault that is currently open: connect it to a server,
 /// then back it up. Files are encrypted on the phone; the server never
@@ -161,15 +162,14 @@ class _BackupScreenState extends State<BackupScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
         title: Text(
           'Disconnect backup?',
-          style: AppFonts.outfit(color: Colors.white),
+          style: AppFonts.ui(color: Ui.ink),
         ),
         content: Text(
           'This phone forgets the backup account. Nothing already on the server is deleted, '
           'and you can still restore it with your recovery code.',
-          style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
+          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
         ),
         actions: [
           TextButton(
@@ -180,7 +180,7 @@ class _BackupScreenState extends State<BackupScreen> {
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               'Disconnect',
-              style: TextStyle(color: Color(0xFFFB7185)),
+              style: TextStyle(color: Ui.alert),
             ),
           ),
         ],
@@ -238,13 +238,12 @@ class _BackupScreenState extends State<BackupScreen> {
             context: context,
             builder: (ctx) => StatefulBuilder(
               builder: (ctx, setLocal) => AlertDialog(
-                backgroundColor: const Color(0xFF161B22),
-                title: Text('Recovery code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+                title: Text('Recovery code'),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(why, style: AppFonts.outfit(fontSize: 13, color: Colors.white70)),
+                    Text(why, style: AppFonts.ui(fontSize: 13, color: Ui.ink2)),
                     const SizedBox(height: 12),
                     TextField(
                       key: const Key('recovery-input'),
@@ -254,13 +253,13 @@ class _BackupScreenState extends State<BackupScreen> {
                       enableIMEPersonalizedLearning: false,
                       maxLines: 3,
                       minLines: 2,
-                      style: AppFonts.firaCode(fontSize: 13, color: Colors.white),
+                      style: AppFonts.firaCode(fontSize: 13, color: Ui.ink),
                       decoration: InputDecoration(
                         hintText: 'xxxx xxxx xxxx …',
-                        hintStyle: AppFonts.firaCode(fontSize: 13, color: Colors.white24),
+                        hintStyle: AppFonts.firaCode(fontSize: 13, color: Ui.ink3),
                         errorText: problem,
                         filled: true,
-                        fillColor: const Color(0xFF0D1117),
+                        fillColor: Ui.canvas,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                       ),
                     ),
@@ -295,19 +294,19 @@ class _BackupScreenState extends State<BackupScreen> {
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Restore from the backup', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Ui.surface,
+        title: Text('Restore from the backup'),
         children: [
           SimpleDialogOption(
             key: const Key('restore-latest'),
             onPressed: () => Navigator.pop(ctx, 'latest'),
             child: Text('Files that are missing here, as backed up now',
-                style: AppFonts.outfit(color: Colors.white70)),
+                style: AppFonts.ui(color: Ui.ink2)),
           ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, 'asof'),
             child: Text('…as the backup was on a date I choose (undoes later changes and deletions)',
-                style: AppFonts.outfit(color: Colors.white70)),
+                style: AppFonts.ui(color: Ui.ink2)),
           ),
         ],
       ),
@@ -343,8 +342,7 @@ class _BackupScreenState extends State<BackupScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
-          backgroundColor: const Color(0xFF161B22),
-          title: Text('Free up server space', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+          title: Text('Free up server space'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -352,19 +350,19 @@ class _BackupScreenState extends State<BackupScreen> {
               Text(
                 'Removes versions of files that were replaced or deleted longer ago than this. '
                 'Current files are never touched. Removed versions are gone for good.',
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
               ),
               const SizedBox(height: 12),
               DropdownButton<int>(
                 key: const Key('retention-days'),
                 value: days,
-                dropdownColor: const Color(0xFF161B22),
+                dropdownColor: Ui.surface,
                 items: [
                   for (final d in const [7, 30, 90, 365])
                     DropdownMenuItem(
                       value: d,
                       child: Text(d == 365 ? 'Keep for a year' : 'Keep for $d days',
-                          style: AppFonts.outfit(color: Colors.white)),
+                          style: AppFonts.ui(color: Ui.ink)),
                     ),
                 ],
                 onChanged: (v) => setLocal(() => days = v ?? days),
@@ -444,18 +442,13 @@ class _BackupScreenState extends State<BackupScreen> {
 
   String? _note;
 
-  Widget _torSwitch(bool value, ValueChanged<bool> onChanged) => SwitchListTile(
-        key: const Key('backup-tor'),
-        contentPadding: EdgeInsets.zero,
+  Widget _torSwitch(bool value, ValueChanged<bool> onChanged) => UiSwitchRow(
+        switchKey: const Key('backup-tor'),
+        icon: Icons.vpn_lock_outlined,
+        title: 'Connect through Tor',
+        detail: "Through Orbot: the server and the network never see this phone's address. Slower.",
         value: value,
         onChanged: _busy ? null : onChanged,
-        activeThumbColor: const Color(0xFFA78BFA),
-        title: Text('Connect through Tor', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-        subtitle: Text(
-          'Through Orbot, so the server and the network in between never see this phone\'s address. '
-          'Slower. Needs Orbot running; works with .onion servers.',
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
-        ),
       );
 
   bool get _startOverPending {
@@ -479,11 +472,14 @@ class _BackupScreenState extends State<BackupScreen> {
         } else if (st.lastError != null) {
           line = '${st.lastError} Trying again${st.nextAttempt == null ? ' soon' : ' at ${TimeOfDay.fromDateTime(st.nextAttempt!).format(context)}'}.';
         } else {
-          line = 'While this vault is open: when it changes, and as soon as there is a connection.';
+          line = 'When something changes, and as soon as there is a connection.';
         }
-        return SwitchListTile(
-          key: const Key('auto-backup'),
-          contentPadding: EdgeInsets.zero,
+        return UiSwitchRow(
+          switchKey: const Key('auto-backup'),
+          detailKey: const Key('auto-backup-state'),
+          icon: Icons.autorenew_rounded,
+          title: 'Back up automatically',
+          detail: line,
           value: on,
           onChanged: _busy
               ? null
@@ -491,58 +487,43 @@ class _BackupScreenState extends State<BackupScreen> {
                   await auto.setEnabled(session, v);
                   if (mounted) setState(() {});
                 },
-          activeThumbColor: const Color(0xFFA78BFA),
-          title: Text('Back up automatically', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-          subtitle: Text(line, key: const Key('auto-backup-state'), style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
         );
       },
     );
   }
 
-  Widget _devicesCard() {
+  /// The phones that can reach this backup, or the row that loads them.
+  List<Widget> _deviceRows() {
     final list = _devices;
     if (list == null) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
+      return [
+        UiRow(
           key: const Key('devices-load'),
-          onPressed: _busy ? null : _loadDevices,
-          icon: const Icon(Icons.devices_rounded, size: 18, color: Colors.white54),
-          label: Text('Phones with access to this backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
+          icon: Icons.devices_outlined,
+          title: 'Phones with access',
+          onTap: _busy ? null : _loadDevices,
         ),
-      );
+      ];
     }
     String day(DateTime t) => '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Phones with access', style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
-        for (final d in list)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            leading: Icon(
-              d.revoked != null ? Icons.block_rounded : (d.isThisPhone ? Icons.smartphone_rounded : Icons.phone_android_rounded),
-              color: d.revoked != null ? Colors.white24 : Colors.white70,
-            ),
-            title: Text(
-              d.isThisPhone ? 'This phone' : 'Another phone',
-              style: AppFonts.outfit(fontSize: 13, color: d.revoked != null ? Colors.white38 : Colors.white),
-            ),
-            subtitle: Text(
-              d.revoked != null ? 'Added ${day(d.added)} · revoked ${day(d.revoked!)}' : 'Added ${day(d.added)}',
-              style: AppFonts.outfit(fontSize: 11, color: Colors.white38),
-            ),
-            trailing: d.isThisPhone || d.revoked != null
-                ? null
-                : TextButton(
-                    key: Key('revoke-${d.id}'),
-                    onPressed: _busy ? null : () => _revoke(d),
-                    child: const Text('Revoke', style: TextStyle(color: Color(0xFFFB7185))),
-                  ),
-          ),
-      ],
-    );
+    return [
+      for (final d in list)
+        UiRow(
+          icon: d.revoked != null
+              ? Icons.block_rounded
+              : (d.isThisPhone ? Icons.smartphone_outlined : Icons.phone_android_outlined),
+          title: d.isThisPhone ? 'This phone' : 'Another phone',
+          detail: d.revoked != null ? 'Added ${day(d.added)} · revoked ${day(d.revoked!)}' : 'Added ${day(d.added)}',
+          chevron: false,
+          trailing: d.isThisPhone || d.revoked != null
+              ? null
+              : TextButton(
+                  key: Key('revoke-${d.id}'),
+                  onPressed: _busy ? null : () => _revoke(d),
+                  child: const Text('Revoke', style: TextStyle(color: Ui.alert)),
+                ),
+        ),
+    ];
   }
 
   String _ago(DateTime t) {
@@ -562,83 +543,19 @@ class _BackupScreenState extends State<BackupScreen> {
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-        backgroundColor: const Color(0xFF090D16),
         appBar: AppBar(
-          backgroundColor: const Color(0xFF161B22),
-          elevation: 0,
           leading: IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios_new_rounded,
-              color: Colors.white70,
-              size: 18,
-            ),
+            icon: const Icon(Icons.arrow_back_rounded, size: 22),
+            tooltip: 'Back',
             onPressed: _busy ? null : () => Navigator.pop(context),
           ),
-          title: Text(
-            'Backup',
-            style: AppFonts.outfit(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          title: const Text('Backup'),
         ),
         body: SafeArea(
           child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            padding: const EdgeInsets.only(top: 8, bottom: 24),
             children: [
-              Text(
-                'Files are encrypted on this phone before they leave it. The server stores '
-                'scrambled pieces and never receives a key, a file name or anything readable.',
-                style: AppFonts.outfit(fontSize: 13, color: Colors.white60),
-              ),
-              const SizedBox(height: 20),
-              if (!status.isConnected)
-                ..._buildConnectForm()
-              else
-                ..._buildConnected(status),
-              if (_progress != null) ...[
-                const SizedBox(height: 20),
-                LinearProgressIndicator(
-                  value: _progressValue,
-                  color: const Color(0xFFA78BFA),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _progress!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
-                ),
-              ],
-              if (_lastRun != null) ...[
-                const SizedBox(height: 20),
-                _resultCard(_lastRun!),
-              ],
-              if (_note != null) ...[
-                const SizedBox(height: 12),
-                Text(_note!, key: const Key('backup-note'), style: AppFonts.outfit(fontSize: 13, color: const Color(0xFF6EE7B7))),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE11D48).withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: const Color(0xFFE11D48).withValues(alpha: 0.4),
-                    ),
-                  ),
-                  child: Text(
-                    _error!,
-                    style: AppFonts.outfit(
-                      color: const Color(0xFFFB7185),
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ],
+              if (!status.isConnected) ..._buildConnectForm() else ..._buildConnected(status),
             ],
           ),
         ),
@@ -646,170 +563,172 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
-  List<Widget> _buildConnectForm() => [
-    _field(
-      _server,
-      'Server address',
-      'https://backup.example.org',
-      TextInputType.url,
-    ),
-    const SizedBox(height: 12),
-    _field(
-      _invite,
-      'Invite code (if the server needs one)',
-      '',
-      TextInputType.text,
-    ),
-    _torSwitch(_tor, (v) => setState(() => _tor = v)),
-    const SizedBox(height: 8),
-    _primaryButton('Connect', _busy ? null : _connect),
-    const SizedBox(height: 10),
-    Text(
-      'Use a server run by someone you trust, such as your newsroom or organisation.',
-      style: AppFonts.outfit(fontSize: 12, color: Colors.white38),
-    ),
-  ];
-
-  List<Widget> _buildConnected(SyncStatus status) => [
-    Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Connected to',
-            style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+  /// Progress, the last result, a note or an error, right under the button.
+  List<Widget> _feedback() => [
+        if (_progress != null) ...[
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(value: _progressValue, minHeight: 3),
           ),
-          const SizedBox(height: 2),
-          Text(
-            status.server ?? '',
-            style: AppFonts.outfit(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+          const SizedBox(height: 8),
+          Text(_progress!, maxLines: 2, overflow: TextOverflow.ellipsis, style: Ui.data()),
+        ],
+        if (_lastRun != null) ...[
+          const SizedBox(height: 14),
+          _resultCard(_lastRun!),
+        ],
+        if (_note != null) ...[
+          const SizedBox(height: 12),
+          _okCard(_note!, key: const Key('backup-note')),
+        ],
+        if (_error != null) ...[
+          const SizedBox(height: 14),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 1),
+              child: Icon(Icons.error_outline_rounded, color: Ui.alert, size: 18),
             ),
-          ),
-          const SizedBox(height: 10),
+            const SizedBox(width: 8),
+            Expanded(child: Text(_error!, style: Ui.detail(color: Ui.alert))),
+          ]),
+        ],
+      ];
+
+  List<Widget> _buildConnectForm() => [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Ui.gutter, 8, Ui.gutter, 0),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Back up to a server you trust', style: Ui.title()),
+            const SizedBox(height: 10),
+            Text(
+              'Files are encrypted on this phone before they leave it. The server stores scrambled pieces '
+              'and never receives a key, a file name or anything readable.',
+              style: Ui.body(color: Ui.ink2, size: 15),
+            ),
+            const SizedBox(height: 28),
+            _field(_server, 'Server address', 'https://backup.example.org', TextInputType.url),
+            const SizedBox(height: 12),
+            _field(_invite, 'Invite code (if the server needs one)', '', TextInputType.text),
+            const SizedBox(height: 8),
+          ]),
+        ),
+        UiGroup(margin: const EdgeInsets.fromLTRB(Ui.gutter, 8, Ui.gutter, 16), children: [
+          _torSwitch(_tor, (v) => setState(() => _tor = v)),
+        ]),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Ui.gutter),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _primaryButton('Connect', _busy ? null : _connect),
+            ..._feedback(),
+            const SizedBox(height: 16),
+            Text(
+              'Use a server run by someone you trust, such as your newsroom or organisation.',
+              style: Ui.detail(color: Ui.ink3),
+            ),
+          ]),
+        ),
+      ];
+
+  List<Widget> _buildConnected(SyncStatus status) {
+    final s = context.read<VaultService>().session;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Ui.gutter, 4, Ui.gutter, 20),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(status.server ?? '', style: Ui.data(), maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 8),
           Text(
             status.lastBackup == null
                 ? 'Not backed up yet'
                 : 'Last backup ${_ago(status.lastBackup!)} · ${status.lastItemCount} '
-                      '${status.lastItemCount == 1 ? 'item' : 'items'}',
-            style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                    '${status.lastItemCount == 1 ? 'item' : 'items'}',
+            style: Ui.heading(),
           ),
-        ],
+          const SizedBox(height: 18),
+          _primaryButton('Back up now', _busy ? null : _backupNow),
+          ..._feedback(),
+        ]),
       ),
-    ),
-    const SizedBox(height: 8),
-    if (context.read<VaultService>().session case final s?) _autoCard(s),
-    if (context.read<VaultService>().session case final s?) ...[
-      SwitchListTile(
-        key: const Key('previews-first'),
-        contentPadding: EdgeInsets.zero,
-        value: VaultSync.previewsFirst(s),
-        onChanged: _busy
-            ? null
-            : (v) async {
-                await _sync.setPreviewsFirst(s, v);
-                if (mounted) setState(() {});
-              },
-        activeThumbColor: const Color(0xFFA78BFA),
-        title: Text('Small previews first', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-        subtitle: Text(
-          'New photos, videos and recordings go up as a small copy, then in full. '
-          'On a bad connection the copy is what gets through.',
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+      if (s != null)
+        UiGroup(label: 'Automatic', children: [
+          _autoCard(s),
+          UiSwitchRow(
+            switchKey: const Key('previews-first'),
+            icon: Icons.photo_size_select_small_outlined,
+            title: 'Small previews first',
+            detail: 'New photos, videos and recordings go up small first, then in full.',
+            value: VaultSync.previewsFirst(s),
+            onChanged: _busy
+                ? null
+                : (v) async {
+                    await _sync.setPreviewsFirst(s, v);
+                    if (mounted) setState(() {});
+                  },
+          ),
+          UiSwitchRow(
+            switchKey: const Key('originals-wifi'),
+            icon: Icons.wifi_rounded,
+            title: 'Full size only on Wi-Fi',
+            detail: 'Large originals wait for Wi-Fi.',
+            value: VaultSync.originalsOnWifiOnly(s),
+            onChanged: _busy
+                ? null
+                : (v) async {
+                    await _sync.setOriginalsOnWifiOnly(s, v);
+                    if (mounted) setState(() {});
+                  },
+          ),
+          _lockedCard(s),
+          _torSwitch(VaultSync.usesTor(s), (v) async {
+            if (v && !await VaultSync.torAvailable()) {
+              if (mounted) setState(() => _error = "Orbot isn't running. Start Orbot (the Tor app) first.");
+              return;
+            }
+            await _sync.setTor(s, v);
+            if (mounted) setState(() => _error = null);
+          }),
+        ]),
+      UiGroup(label: 'Restore', children: [
+        UiRow(
+          key: const Key('restore-missing'),
+          icon: Icons.download_for_offline_outlined,
+          title: 'Restore files from the backup',
+          onTap: _busy ? null : _restoreMissing,
         ),
-      ),
-      SwitchListTile(
-        key: const Key('originals-wifi'),
-        contentPadding: EdgeInsets.zero,
-        value: VaultSync.originalsOnWifiOnly(s),
-        onChanged: _busy
-            ? null
-            : (v) async {
-                await _sync.setOriginalsOnWifiOnly(s, v);
-                if (mounted) setState(() {});
-              },
-        activeThumbColor: const Color(0xFFA78BFA),
-        title: Text('Full size only on Wi-Fi', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-        subtitle: Text(
-          'Large originals wait for Wi-Fi; everything else still goes on mobile data.',
-          style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
+        UiRow(
+          key: const Key('history-open'),
+          icon: Icons.history_rounded,
+          title: 'Version history',
+          onTap: _busy
+              ? null
+              : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupHistoryScreen())),
         ),
-      ),
-    ],
-    if (context.read<VaultService>().session case final s?) _lockedCard(s),
-    if (context.read<VaultService>().session case final s?)
-      _torSwitch(VaultSync.usesTor(s), (v) async {
-        if (v && !await VaultSync.torAvailable()) {
-          if (mounted) setState(() => _error = "Orbot isn't running. Start Orbot (the Tor app) first.");
-          return;
-        }
-        await _sync.setTor(s, v);
-        if (mounted) setState(() => _error = null);
-      }),
-    const SizedBox(height: 8),
-    _primaryButton('Back up now', _busy ? null : _backupNow),
-    const SizedBox(height: 4),
-    Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        key: const Key('restore-missing'),
-        onPressed: _busy ? null : _restoreMissing,
-        icon: const Icon(Icons.restore_rounded, size: 18, color: Colors.white54),
-        label: Text('Restore files from the backup', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
-      ),
-    ),
-    Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        key: const Key('history-open'),
-        onPressed: _busy
-            ? null
-            : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupHistoryScreen())),
-        icon: const Icon(Icons.history_rounded, size: 18, color: Colors.white54),
-        label: Text('Version history', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
-      ),
-    ),
-    Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        key: const Key('free-space'),
-        onPressed: _busy ? null : _freeUpSpace,
-        icon: const Icon(Icons.cleaning_services_rounded, size: 18, color: Colors.white54),
-        label: Text('Free up server space', style: AppFonts.outfit(color: Colors.white70, fontSize: 13)),
-      ),
-    ),
-    _devicesCard(),
-    Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        key: const Key('start-over'),
-        onPressed: _busy ? null : _startOver,
-        icon: const Icon(Icons.gpp_maybe_rounded, size: 18, color: Color(0xFFFBBF24)),
-        label: Text(
-          _startOverPending ? 'Finish starting over on a new account' : 'A phone was taken? Start over on a new account',
-          style: AppFonts.outfit(color: const Color(0xFFFBBF24), fontSize: 13),
+        UiRow(
+          key: const Key('free-space'),
+          icon: Icons.cleaning_services_outlined,
+          title: 'Free up server space',
+          onTap: _busy ? null : _freeUpSpace,
         ),
-      ),
-    ),
-    Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton(
-        onPressed: _busy ? null : _disconnect,
-        child: Text(
-          'Disconnect',
-          style: AppFonts.outfit(color: Colors.white54, fontSize: 13),
+      ]),
+      UiGroup(label: 'Phones', children: _deviceRows()),
+      UiGroup(label: 'If a phone is taken', children: [
+        UiRow(
+          key: const Key('start-over'),
+          icon: Icons.gpp_maybe_outlined,
+          title: _startOverPending ? 'Finish starting over' : 'Start over on a new account',
+          detail: 'New keys; the old account is closed. Needs the recovery code.',
+          onTap: _busy ? null : _startOver,
         ),
-      ),
-    ),
-  ];
+        UiRow(
+          icon: Icons.link_off_rounded,
+          title: 'Disconnect',
+          detail: 'This phone forgets the account. Nothing on the server is deleted.',
+          onTap: _busy ? null : _disconnect,
+        ),
+      ]),
+    ];
+  }
 
   Widget _resultCard(BackupSummary s) {
     if (s.queued > 0 && s.uploaded == 0) {
@@ -823,32 +742,20 @@ class _BackupScreenState extends State<BackupScreen> {
       if (s.removed > 0) '${s.removed} removed',
       if (s.waitingForWifi > 0) '${s.waitingForWifi} full-size ${s.waitingForWifi == 1 ? 'original waits' : 'originals wait'} for Wi-Fi',
     ];
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF059669).withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: const Color(0xFF059669).withValues(alpha: 0.4),
-        ),
-      ),
-      child: Text(
-        'Backup finished: ${parts.join(', ')}. '
-        '${formatBytes(s.wireBytes)} sent in ${s.elapsed.inSeconds} s.',
-        style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13),
-      ),
+    return _okCard(
+      'Backup finished: ${parts.join(', ')}. '
+      '${formatBytes(s.wireBytes)} sent in ${s.elapsed.inSeconds} s.',
     );
   }
 
-  Widget _okCard(String text) => Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: const Color(0xFF059669).withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.4)),
+  Widget _okCard(String text, {Key? key}) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 1),
+          child: Icon(Icons.check_rounded, color: Ui.ink2, size: 18),
         ),
-        child: Text(text, style: AppFonts.outfit(color: const Color(0xFF6EE7B7), fontSize: 13)),
-      );
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, key: key, style: Ui.detail(color: Ui.ink))),
+      ]);
 
   /// Locked upload: the switch, what the queue holds, and the stop code.
   Widget _lockedCard(VaultSession s) {
@@ -868,15 +775,17 @@ class _BackupScreenState extends State<BackupScreen> {
         } else if (q != null && q.count > 0) {
           line = 'On: ${formatBytes(q.bytes)} waiting for a signal.';
         } else {
-          line = 'On: with no connection, what\'s left waits in a queue that the phone sends when a network '
-              'appears, even locked. The phone keeps only a login that can add to the backup, never read it.';
+          line = 'On. With no signal, new things wait in a sealed queue and go up as soon as there is one, even locked.';
         }
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SwitchListTile(
-              key: const Key('locked-upload'),
-              contentPadding: EdgeInsets.zero,
+            UiSwitchRow(
+              switchKey: const Key('locked-upload'),
+              detailKey: const Key('locked-upload-state'),
+              icon: Icons.lock_clock_outlined,
+              title: 'Keep uploading while locked',
+              detail: line,
               value: on,
               onChanged: _busy
                   ? null
@@ -884,23 +793,16 @@ class _BackupScreenState extends State<BackupScreen> {
                       await _sync.setLockedUpload(s, v);
                       if (mounted) setState(() {});
                     },
-              activeThumbColor: const Color(0xFFA78BFA),
-              title: Text('Keep uploading while locked', style: AppFonts.outfit(fontSize: 14, color: Colors.white)),
-              subtitle: Text(line, key: const Key('locked-upload-state'), style: AppFonts.outfit(fontSize: 12, color: Colors.white54)),
             ),
-            if (on)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  key: const Key('stop-code'),
-                  onPressed: _busy ? null : () => _setStopCode(s),
-                  icon: const Icon(Icons.front_hand_rounded, size: 18, color: Colors.white54),
-                  label: Text(
-                    VaultSync.hasStopCode(s) ? 'Change the stop code' : 'Set a stop code',
-                    style: AppFonts.outfit(color: Colors.white70, fontSize: 13),
-                  ),
-                ),
+            if (on) ...[
+              const Divider(height: 0.6, thickness: 0.6, indent: 52),
+              UiRow(
+                key: const Key('stop-code'),
+                icon: Icons.front_hand_outlined,
+                title: VaultSync.hasStopCode(s) ? 'Change the stop code' : 'Set a stop code',
+                onTap: _busy ? null : () => _setStopCode(s),
               ),
+            ],
           ],
         );
       },
@@ -915,8 +817,7 @@ class _BackupScreenState extends State<BackupScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161B22),
-        title: Text('Stop code', style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text('Stop code'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -924,7 +825,7 @@ class _BackupScreenState extends State<BackupScreen> {
               'If you type this code on the lock screen, it looks like a wrong PIN, and the upload queue and its '
               'login are wiped. Your vault and your backup stay as they are. "Clear cache" in Video Trimmer\'s menu '
               'does the same. Uploading while locked then stays off until you turn it on here.',
-              style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+              style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -933,7 +834,7 @@ class _BackupScreenState extends State<BackupScreen> {
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
-              style: AppFonts.outfit(color: Colors.white),
+              style: AppFonts.ui(color: Ui.ink),
               decoration: const InputDecoration(labelText: 'New stop code'),
             ),
             TextField(
@@ -942,7 +843,7 @@ class _BackupScreenState extends State<BackupScreen> {
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
-              style: AppFonts.outfit(color: Colors.white),
+              style: AppFonts.ui(color: Ui.ink),
               decoration: const InputDecoration(labelText: 'Confirm'),
             ),
           ],
@@ -989,40 +890,17 @@ class _BackupScreenState extends State<BackupScreen> {
     autocorrect: false,
     enableSuggestions: false,
     inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'\s'))],
-    style: AppFonts.outfit(fontSize: 15, color: Colors.white),
+    style: Ui.body(size: 15),
     decoration: InputDecoration(
       labelText: label,
-      labelStyle: AppFonts.outfit(fontSize: 13, color: Colors.white54),
       hintText: hint,
-      hintStyle: AppFonts.outfit(fontSize: 14, color: Colors.white24),
-      filled: true,
-      fillColor: const Color(0xFF161B22),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
-      ),
     ),
   );
 
   Widget _primaryButton(String label, VoidCallback? onPressed) => SizedBox(
-    width: double.infinity,
-    child: ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFA78BFA),
-        foregroundColor: const Color(0xFF090D16),
-        disabledBackgroundColor: const Color(0xFF21262D),
-        disabledForegroundColor: Colors.white38,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        padding: const EdgeInsets.symmetric(vertical: 14),
-      ),
-      child: Text(
-        label,
-        style: AppFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold),
-      ),
-    ),
-  );
+        width: double.infinity,
+        child: ElevatedButton(onPressed: onPressed, child: Text(label)),
+      );
 }
 
 /// Shows the recovery code, then hides it and asks for two of its groups,
@@ -1062,8 +940,8 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
       ].every((ok) => ok);
 
   ButtonStyle get _primary => ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFA78BFA),
-        foregroundColor: const Color(0xFF090D16),
+        backgroundColor: Ui.signal,
+        foregroundColor: Ui.canvas,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       );
 
@@ -1076,12 +954,12 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
           enableSuggestions: false,
           enableIMEPersonalizedLearning: false,
           onChanged: (_) => setState(() {}),
-          style: AppFonts.firaCode(color: Colors.white),
+          style: AppFonts.firaCode(color: Ui.ink),
           decoration: InputDecoration(
             labelText: 'Group ${_asked[i] + 1} of ${_groups.length}',
-            labelStyle: AppFonts.outfit(color: Colors.white54),
+            labelStyle: AppFonts.ui(color: Ui.ink2),
             filled: true,
-            fillColor: const Color(0xFF0D1117),
+            fillColor: Ui.canvas,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
           ),
         ),
@@ -1091,11 +969,9 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
   Widget build(BuildContext context) {
     final showCode = !_checking;
     return AlertDialog(
-      backgroundColor: const Color(0xFF161B22),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Text(
         showCode ? 'Write this down first' : 'Check what you wrote',
-        style: AppFonts.outfit(color: Colors.white, fontWeight: FontWeight.bold),
+        style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.w500),
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -1107,30 +983,30 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
                     'This recovery code is the only way to get your backup onto a new phone, '
                     'or to cut off a phone that was taken. It is never stored on this phone. '
                     'Write it on paper and keep it away from the phone.',
-                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                    style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
                   ),
                   const SizedBox(height: 16),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D1117),
+                      color: Ui.canvas,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFA78BFA).withValues(alpha: 0.4)),
+                      border: Border.all(color: Ui.signal.withValues(alpha: 0.4)),
                     ),
                     // Not selectable: the clipboard (and keyboard clipboard
                     // history) is the last place this code should end up.
                     child: Text(
                       widget.code,
                       key: const Key('recovery-code'),
-                      style: AppFonts.firaCode(fontSize: 15, color: Colors.white, height: 1.7),
+                      style: AppFonts.firaCode(fontSize: 15, color: Ui.ink, height: 1.7),
                     ),
                   ),
                 ]
               : [
                   Text(
                     'Type these two groups from your paper copy. The groups are counted from 1, left to right.',
-                    style: AppFonts.outfit(fontSize: 13, color: Colors.white70),
+                    style: AppFonts.ui(fontSize: 13, color: Ui.ink2),
                   ),
                   const SizedBox(height: 14),
                   _field(0),
@@ -1142,25 +1018,25 @@ class _RecoveryCodeDialogState extends State<_RecoveryCodeDialog> {
           ? [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: Text('Cancel', style: AppFonts.outfit(color: Colors.white54)),
+                child: Text('Cancel', style: AppFonts.ui(color: Ui.ink2)),
               ),
               ElevatedButton(
                 key: const Key('recovery-written'),
                 style: _primary,
                 onPressed: () => setState(() => _checking = true),
-                child: Text('I wrote it down', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+                child: Text('I wrote it down', style: AppFonts.ui(fontWeight: FontWeight.w500)),
               ),
             ]
           : [
               TextButton(
                 onPressed: () => setState(() => _checking = false),
-                child: Text('Show the code again', style: AppFonts.outfit(color: Colors.white54)),
+                child: Text('Show the code again', style: AppFonts.ui(color: Ui.ink2)),
               ),
               ElevatedButton(
                 key: const Key('recovery-confirm'),
                 style: _primary,
                 onPressed: _matches ? () => Navigator.pop(context, true) : null,
-                child: Text('Confirm', style: AppFonts.outfit(fontWeight: FontWeight.bold)),
+                child: Text('Confirm', style: AppFonts.ui(fontWeight: FontWeight.w500)),
               ),
             ],
     );
