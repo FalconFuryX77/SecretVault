@@ -216,7 +216,7 @@ class RecorderService : Service() {
         // list of running apps unless notifications are allowed for the app.
         val n = builder
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
-            .setContentTitle("Files")
+            .setContentTitle("Video Trimmer")
             .setContentText("Running in the background")
             .setOngoing(true)
             .build()

@@ -7,7 +7,7 @@ import '../sync/vault_sync.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
 import 'move_in_screen.dart';
-import 'normal_files_screen.dart';
+import '../cover/trimmer_home_screen.dart';
 import 'vault_home_screen.dart';
 
 /// First-run setup: choose the PIN that encrypts the vault, or restore a
@@ -175,7 +175,7 @@ class _SetupScreenState extends State<SetupScreen> {
     if (!mounted) return;
     try {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const NormalFilesScreen()),
+        MaterialPageRoute(builder: (_) => const TrimmerHomeScreen()),
         (_) => false,
       );
       rootNavigatorKey.currentState?.push(

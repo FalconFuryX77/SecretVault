@@ -10,7 +10,7 @@ import '../services/vault_mover.dart';
 import '../services/vault_service.dart';
 import '../theme/app_fonts.dart';
 import '../vault/vault_container.dart';
-import 'normal_files_screen.dart';
+import '../cover/trimmer_home_screen.dart';
 import 'vault_home_screen.dart';
 
 const _accent = Color(0xFFA78BFA);
@@ -130,7 +130,7 @@ class _MoveInScreenState extends State<MoveInScreen> {
       await unlock.onSetupComplete();
       if (!mounted || session == null) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const NormalFilesScreen()),
+        MaterialPageRoute(builder: (_) => const TrimmerHomeScreen()),
         (_) => false,
       );
       rootNavigatorKey.currentState?.push(

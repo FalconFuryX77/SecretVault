@@ -20,7 +20,7 @@ set -uo pipefail
 
 DEVICE="${1:?device id}"
 ADB="${ADB:-adb}"
-PKG="com.example.gesture_unlock"
+PKG="${PKG:-com.videotrimmer.local}"
 LOG="$(mktemp)"
 
 source "$(dirname "$0")/phone_guard.sh"

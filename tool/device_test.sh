@@ -9,7 +9,7 @@ set -euo pipefail
 
 TEST="${1:?test file}"
 DEVICE="${2:-emulator-5554}"
-PKG="com.example.gesture_unlock"
+PKG="${PKG:-com.videotrimmer.local}"
 ADB="${ADB:-adb}"
 
 source "$(dirname "$0")/phone_guard.sh"

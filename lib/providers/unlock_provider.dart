@@ -119,7 +119,7 @@ class UnlockProvider extends ChangeNotifier {
 
   void onAppResumed() {
     // The app never prompts on resume: an unprompted dialog would give away
-    // that this is not a regular Files app.
+    // that this is not a regular app.
     _backgrounded = false;
     _suppressedPauseTimer?.cancel();
     if (state == UnlockState.unlocked) _resetInactivityTimer();

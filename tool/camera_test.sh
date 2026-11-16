@@ -8,7 +8,7 @@ set -uo pipefail
 
 DEVICE="${1:?device id}"
 ADB="${ADB:-adb}"
-PKG="com.example.gesture_unlock"
+PKG="${PKG:-com.videotrimmer.local}"
 LOG="$(mktemp)"
 SHOTS="${SHOTS:-$(mktemp -d)}"
 

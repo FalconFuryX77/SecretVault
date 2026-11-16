@@ -104,7 +104,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
-        // FLAG_SECURE is applied only inside the vault; the cover Files app
+        // FLAG_SECURE is applied only inside the vault; the cover app
         // must behave normally (screenshots allowed).
         MethodChannel(messenger, SECURITY_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {

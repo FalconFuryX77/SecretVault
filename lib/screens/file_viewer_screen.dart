@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../models/vault_item.dart';
 import '../providers/vault_provider.dart';
-import '../services/device_file_service.dart';
+import '../util/format.dart';
 import '../theme/app_fonts.dart';
 import '../vault/crypto_primitives.dart';
 import '../viewers/document_view.dart';
@@ -80,7 +80,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
       if (mounted) {
         setState(() {
           _errorMessage =
-              'This file is ${DeviceFileService.formatBytes(e.bytes)}, too large to open '
+              'This file is ${formatBytes(e.bytes)}, too large to open '
               'in memory on this phone.';
           _isLoading = false;
         });
@@ -331,7 +331,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              '${DeviceFileService.formatBytes(bytes.length)} · stored encrypted',
+              '${formatBytes(bytes.length)} · stored encrypted',
               style: AppFonts.outfit(fontSize: 12, color: Colors.white54),
             ),
             const SizedBox(height: 16),
