@@ -27,6 +27,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import 'fixtures/media_fixtures.dart';
+import 'fixtures/office_fixtures.dart';
 
 /// A 16 kHz mono 16-bit WAV: [seconds] of a tone, about 32 KB per second,
 /// so a 20 s file spans ten vault chunks.
@@ -152,6 +153,7 @@ void main() {
       'report.pdf': makePdf(),
       'meeting.docx': makeDocx(),
       'contacts.txt': Uint8List.fromList(utf8.encode('Line one\nLine two')),
+      for (final e in officeFixtures.entries) e.key: base64.decode(e.value),
     };
     for (final MapEntry(key: name, value: data) in files.entries) {
       await session.importBytes(Uint8List.fromList(data), meta(name));
@@ -215,6 +217,21 @@ void main() {
     expect(find.byType(AspectRatio), findsOneWidget, reason: 'a video surface is shown');
     await t.tap(find.byKey(const Key('media-play'))); // pause on a frame
     await hold('video');
+    // Full screen: landscape for this landscape clip, same player.
+    await t.tap(find.byKey(const Key('media-fullscreen')));
+    await until(() => find.byKey(const Key('media-fullscreen-view')).evaluate().isNotEmpty, 'full screen');
+    await until(() {
+      final size = t.view.physicalSize;
+      return size.width > size.height;
+    }, 'the turn to landscape');
+    // ignore: avoid_print
+    print('[viewer] full screen: ${t.view.physicalSize}');
+    await t.tap(find.byKey(const Key('media-fullscreen-exit')));
+    await until(() => find.byKey(const Key('media-fullscreen-view')).evaluate().isEmpty, 'leaving full screen');
+    await until(() {
+      final size = t.view.physicalSize;
+      return size.width < size.height;
+    }, 'the turn back to portrait');
     await checkPlays('voice memo.m4a', duration: 3);
     await checkPlays('interview.wav', duration: 20);
     // Skip forward: a range read from the middle of a ten-chunk file.
@@ -266,6 +283,48 @@ void main() {
     expect(find.textContaining('Source meeting', findRichText: true), findsOneWidget);
     expect(find.text('14:10'), findsOneWidget);
     await hold('docx');
+
+    // ── A password-protected PDF, and search (Android 15+) ──
+    await open('locked.pdf');
+    await until(() => find.byKey(const Key('pdf-password')).evaluate().isNotEmpty, 'the password prompt');
+    await t.enterText(find.byKey(const Key('pdf-password')), 'wrong');
+    await t.tap(find.byKey(const Key('pdf-password-open')));
+    await until(() => find.text('That password is not right.').evaluate().isNotEmpty, 'the wrong-password message');
+    await t.enterText(find.byKey(const Key('pdf-password')), 'open-sesame');
+    await t.tap(find.byKey(const Key('pdf-password-open')));
+    await until(() => find.byKey(const Key('pdf-image-0')).evaluate().isNotEmpty, 'the unlocked PDF');
+    await t.tap(find.byKey(const Key('pdf-search-toggle')));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.enterText(find.byKey(const Key('pdf-search-field')), '7731');
+    await t.testTextInput.receiveAction(TextInputAction.search);
+    await until(() => (t.widget<Text>(find.byKey(const Key('pdf-search-count'))).data ?? '').contains('1 of 1'), 'the search result');
+    await until(() => find.byKey(const Key('pdf-match')).evaluate().isNotEmpty, 'the match highlighted on page 2');
+    // (The match is on page 2: it's drawn there, highlighted.)
+    expect(find.descendant(of: find.byKey(const Key('pdf-page-1')), matching: find.byKey(const Key('pdf-match'))), findsOneWidget);
+    // ignore: avoid_print
+    print('[viewer] locked.pdf opened with its password; "7731" found on page 2');
+
+    // ── Office documents (made by Microsoft Office) ──
+    Future<void> office(String title, String key, String expected) async {
+      await open(title);
+      await until(() => find.byKey(Key(key)).evaluate().isNotEmpty || find.byKey(const Key('office-error')).evaluate().isNotEmpty,
+          title);
+      expect(find.byKey(const Key('office-error')), findsNothing, reason: title);
+      await until(() => find.textContaining(expected).evaluate().isNotEmpty, '"$expected" in $title');
+      // ignore: avoid_print
+      print('[viewer] $title shows "$expected"');
+    }
+
+    await office('expenses.xlsx', 'office-sheet', 'Taxi to café');
+    await t.tap(find.byKey(const Key('office-sheet-1')));
+    await until(() => find.text('+380 44 000 0000').evaluate().isNotEmpty, 'the second sheet');
+    await office('expenses.ods', 'office-sheet', 'Hotel');
+    await office('update.pptx', 'office-slides', 'Payments routed via a shell company');
+    await office('update.odp', 'office-slides', 'Three witnesses');
+    await office('western.doc', 'office-lines', 'Rue de la Paix');
+    await office('unicode.doc', 'office-lines', 'Київ');
+    await office('western.odt', 'office-lines', 'Interview notes');
+    await hold('office');
 
     // ── Text file: edit and save ──
     await open('contacts.txt');

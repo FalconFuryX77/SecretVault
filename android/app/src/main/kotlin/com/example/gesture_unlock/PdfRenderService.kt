@@ -32,7 +32,8 @@ import kotlin.math.sqrt
  * so vault images are decoded here too.
  *
  * The protocol is plain Binder calls (no AIDL), see [PdfSandbox]:
- *  - OPEN(fd)                  -> status, page count, page sizes in points
+ *  - OPEN(fd, password?)       -> status, page count, page sizes in points
+ *  - SEARCH(query)             -> status, matches (page, rectangles in points)
  *  - RENDER(page, w, h, shmem) -> status; RGBA pixels written into shmem
  *  - CLOSE
  *  - DECODE(fd, maxSide, maxPixels) -> status, width, height (image kept)
@@ -46,6 +47,12 @@ class PdfRenderService : Service() {
         const val CLOSE = IBinder.FIRST_CALL_TRANSACTION + 2
         const val DECODE = IBinder.FIRST_CALL_TRANSACTION + 3
         const val PIXELS = IBinder.FIRST_CALL_TRANSACTION + 4
+        const val SEARCH = IBinder.FIRST_CALL_TRANSACTION + 5
+
+        /** Not on this Android version (passwords and search: Android 15). */
+        const val UNSUPPORTED = 3
+
+        const val MAX_MATCHES = 1000
 
         /** Largest encoded image accepted. */
         const val MAX_IMAGE_BYTES = 128L * 1024 * 1024
@@ -69,7 +76,7 @@ class PdfRenderService : Service() {
                 reply?.writeString(DESCRIPTOR)
                 return true
             }
-            if (code !in OPEN..PIXELS) return super.onTransact(code, data, reply, flags)
+            if (code !in OPEN..SEARCH) return super.onTransact(code, data, reply, flags)
             data.enforceInterface(DESCRIPTOR)
             // The main process never binds on older versions (see PdfSandbox).
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
@@ -80,7 +87,13 @@ class PdfRenderService : Service() {
                 when (code) {
                     OPEN -> {
                         val pfd = data.readFileDescriptor() ?: throw IllegalArgumentException("no document")
-                        val sizes = open(pfd)
+                        val password = data.readString()
+                        if (password != null && Build.VERSION.SDK_INT < 35) {
+                            pfd.close()
+                            reply?.writeInt(UNSUPPORTED)
+                            return true
+                        }
+                        val sizes = open(pfd, password)
                         reply?.writeInt(OK)
                         reply?.writeInt(sizes.size / 2)
                         reply?.writeFloatArray(sizes)
@@ -100,6 +113,19 @@ class PdfRenderService : Service() {
                     CLOSE -> {
                         closeDocument()
                         reply?.writeInt(OK)
+                    }
+                    SEARCH -> {
+                        if (Build.VERSION.SDK_INT < 35) {
+                            reply?.writeInt(UNSUPPORTED)
+                            return true
+                        }
+                        val matches = search(data.readString() ?: "")
+                        reply?.writeInt(OK)
+                        reply?.writeInt(matches.size)
+                        for ((page, rects) in matches) {
+                            reply?.writeInt(page)
+                            reply?.writeFloatArray(rects)
+                        }
                     }
                     DECODE -> {
                         val pfd = data.readFileDescriptor() ?: throw IllegalArgumentException("no image")
@@ -142,10 +168,14 @@ class PdfRenderService : Service() {
         super.onDestroy()
     }
 
-    private fun open(pfd: ParcelFileDescriptor): FloatArray = synchronized(lock) {
+    private fun open(pfd: ParcelFileDescriptor, password: String?): FloatArray = synchronized(lock) {
         closeDocument()
         input = pfd
-        val r = PdfRenderer(pfd)
+        val r = if (password != null && Build.VERSION.SDK_INT >= 35) {
+            PdfRenderer(pfd, android.graphics.pdf.LoadParams.Builder().setPassword(password).build())
+        } else {
+            PdfRenderer(pfd)
+        }
         renderer = r
         val sizes = FloatArray(r.pageCount * 2)
         for (i in 0 until r.pageCount) {
@@ -182,6 +212,31 @@ class PdfRenderService : Service() {
         } finally {
             bitmap.recycle()
         }
+    }
+
+    /** Every match of [query]: (page, [left, top, right, bottom]… in points). */
+    @androidx.annotation.RequiresApi(35)
+    private fun search(query: String): List<Pair<Int, FloatArray>> = synchronized(lock) {
+        val r = renderer ?: throw IllegalStateException("no document open")
+        val out = ArrayList<Pair<Int, FloatArray>>()
+        if (query.isBlank() || query.length > 200) return out
+        for (i in 0 until r.pageCount) {
+            r.openPage(i).use { p ->
+                for (m in p.searchText(query)) {
+                    val rects = m.bounds
+                    val f = FloatArray(rects.size * 4)
+                    rects.forEachIndexed { k, rc ->
+                        f[4 * k] = rc.left
+                        f[4 * k + 1] = rc.top
+                        f[4 * k + 2] = rc.right
+                        f[4 * k + 3] = rc.bottom
+                    }
+                    out.add(i to f)
+                    if (out.size >= MAX_MATCHES) return out
+                }
+            }
+        }
+        out
     }
 
     private fun decodeImage(pfd: ParcelFileDescriptor, maxSide: Int, maxPixels: Long): Bitmap = synchronized(lock) {
