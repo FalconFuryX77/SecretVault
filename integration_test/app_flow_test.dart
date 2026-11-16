@@ -110,12 +110,12 @@ void main() {
     app.main();
 
     // ── Setup (PIN only in this build) ──
-    await waitFor(t, find.text('Set Your Vault PIN'));
+    await waitFor(t, find.text('Set your vault PIN'));
     final fields = find.byType(TextField);
     await t.enterText(fields.at(0), realPin);
     await t.enterText(fields.at(1), realPin);
     final setupClock = Stopwatch()..start();
-    await tapWhenReady(t, find.text('Create Vault'));
+    await tapWhenReady(t, find.text('Create vault'));
     await waitFor(t, find.text('Add'), timeout: const Duration(seconds: 90));
     // ignore: avoid_print
     print('[timing] setup → inside vault: ${setupClock.elapsedMilliseconds} ms');
@@ -125,13 +125,13 @@ void main() {
     await tapWhenReady(t, find.text('Add'));
     await waitFor(t, find.text('Note'));
     await tapWhenReady(t, find.text('Note'));
-    await waitFor(t, find.text('Encrypted Note'));
+    await waitFor(t, find.text('Note').last);
     // Let the editor finish sliding in: until then the vault list (with its
     // own search field) is still on screen underneath.
     await settle(t, 800);
-    await t.enterText(find.widgetWithText(TextField, 'Note Title...'), noteTitle);
+    await t.enterText(find.widgetWithText(TextField, 'Title'), noteTitle);
     await t.enterText(
-      find.widgetWithText(TextField, 'Type confidential note here...'),
+      find.widgetWithText(TextField, 'Write something'),
       'Met source at 14:00. Do not record names.',
     );
     await tapWhenReady(t, find.byIcon(Icons.check_rounded));
@@ -259,7 +259,7 @@ void main() {
       await waitFor(t, find.textContaining('Backup finished: 0 sent, 2 already up to date'),
           timeout: const Duration(seconds: 60));
       // Automatic backup is on by default once connected.
-      expect(t.widget<SwitchListTile>(find.byKey(const Key('auto-backup'))).value, isTrue);
+      expect(t.widget<Switch>(find.byKey(const Key('auto-backup'))).value, isTrue);
       // Restoring finds nothing missing.
       await tapWhenReady(t, find.byKey(const Key('restore-missing')));
       await tapWhenReady(t, find.byKey(const Key('restore-latest')));

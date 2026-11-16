@@ -126,7 +126,7 @@ class _DocumentViewState extends State<DocumentView> {
       fontSize: size,
       color: ink,
       height: 1.45,
-      fontWeight: p.heading > 0 ? FontWeight.w700 : FontWeight.w400,
+      fontWeight: p.heading > 0 ? FontWeight.w500 : FontWeight.w400,
     );
     final text = Text.rich(
       TextSpan(
@@ -135,7 +135,7 @@ class _DocumentViewState extends State<DocumentView> {
             TextSpan(
               text: r.text,
               style: base.copyWith(
-                fontWeight: r.bold || p.heading > 0 ? FontWeight.w700 : FontWeight.w400,
+                fontWeight: r.bold || p.heading > 0 ? FontWeight.w500 : FontWeight.w400,
                 fontStyle: r.italic ? FontStyle.italic : FontStyle.normal,
                 decoration: r.underline ? TextDecoration.underline : TextDecoration.none,
                 color: r.text == '[picture]' ? Colors.black38 : ink,

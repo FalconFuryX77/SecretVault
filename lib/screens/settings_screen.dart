@@ -56,7 +56,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: error
             ? Ui.alert
             : Ui.raised,
-        content: Text(msg, style: AppFonts.ui(color: Ui.ink)),
+        content: Text(msg),
       ),
     );
   }
@@ -124,7 +124,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (_) => PopScope(
           canPop: false,
           child: AlertDialog(
-            backgroundColor: Ui.surface,
             content: ValueListenableBuilder<double>(
               valueListenable: progress,
               builder: (_, v, _) => Column(
@@ -166,8 +165,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Ui.surface,
-        title: Text('Duress PIN', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
+        title: Text('Duress PIN'),
         content: Text(
           'If this PIN is ever entered on the lock screen, this vault and everything in it '
           'is erased for good, and your decoy vault opens instead, as if it were the only one.\n\n'
@@ -220,8 +218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Ui.surface,
-        title: Text('Move to another phone or app', style: AppFonts.ui(color: Ui.ink)),
+        title: Text('Move to another phone or app'),
         content: Text(
           'This copies the vault file, still encrypted, to a place you choose (a memory card, a USB drive, '
           'your computer). You then get a one-time transfer code.\n\n'
@@ -248,7 +245,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => PopScope(
         canPop: false,
         child: AlertDialog(
-          backgroundColor: Ui.surface,
           content: ValueListenableBuilder<double?>(
             valueListenable: progress,
             builder: (_, v, _) => Column(
@@ -298,8 +294,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           context: context,
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
-            backgroundColor: Ui.surface,
-            title: Text('Transfer code', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
+            title: Text('Transfer code'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -318,32 +313,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _removeDecoy() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Ui.surface,
-        title: Text(
-          'Remove decoy vault?',
-          style: AppFonts.ui(color: Ui.ink),
-        ),
-        content: Text(
-          'Everything in the decoy vault is erased. This cannot be undone.',
-          style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Remove',
-              style: TextStyle(color: Ui.alert),
-            ),
-          ),
-        ],
-      ),
+    final ok = await confirmByHolding(
+      context,
+      title: 'Remove the decoy vault?',
+      message: 'Everything in it is erased, along with any vault it holds. This cannot be undone.',
+      action: 'Hold to remove',
     );
     final session = _session;
     if (ok != true || session == null) return;
@@ -575,13 +549,11 @@ class _NewPinDialogState extends State<_NewPinDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: Ui.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Text(
         widget.title,
         style: AppFonts.ui(
           color: Ui.ink,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w500,
         ),
       ),
       content: SingleChildScrollView(
@@ -628,7 +600,7 @@ class _NewPinDialogState extends State<_NewPinDialog> {
           onPressed: _submit,
           child: Text(
             'Save',
-            style: AppFonts.ui(fontWeight: FontWeight.bold),
+            style: AppFonts.ui(fontWeight: FontWeight.w500),
           ),
         ),
       ],

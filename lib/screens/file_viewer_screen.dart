@@ -112,13 +112,11 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Ui.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           'Rename File',
           style: AppFonts.ui(
             color: Ui.ink,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w500,
           ),
         ),
         content: TextField(
@@ -151,7 +149,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
             child: Text(
               'Rename',
-              style: AppFonts.ui(fontWeight: FontWeight.bold),
+              style: AppFonts.ui(fontWeight: FontWeight.w500),
             ),
           ),
         ],
@@ -180,73 +178,44 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: Ui.surface,
-        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
+          onPressed: () => Navigator.maybePop(context),
+        ),
+        titleSpacing: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(_currentItem.title, style: Ui.body(), maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 2),
+            // The narrow title bar holds the actions too: keep it to one line.
             Text(
-              _currentItem.title,
-              style: AppFonts.ui(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: Ui.ink,
-              ),
+              '${formatBytes(_currentItem.fileSizeBytes)} · no screenshots',
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
-            ),
-            Row(
-              children: [
-                const Icon(
-                  Icons.shield_rounded,
-                  color: Ui.ink,
-                  size: 12,
-                ),
-                const SizedBox(width: 4),
-                // Flexible + ellipsis: the title bar is narrow once the
-                // action buttons take their space (overflowed on a 1080p phone).
-                Flexible(
-                  child: Text(
-                    'Protected view · no screenshots',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppFonts.ui(
-                      fontSize: 10,
-                      color: Ui.ink,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
+              style: Ui.data(size: 11),
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.drive_file_rename_outline_rounded,
-              color: Ui.ink2,
-            ),
+            icon: const Icon(Icons.drive_file_rename_outline_rounded, size: 21),
             tooltip: 'Rename',
             onPressed: _renameFile,
           ),
           IconButton(
-            icon: const Icon(
-              Icons.file_download_outlined,
-              color: Ui.ink2,
-            ),
+            icon: const Icon(Icons.file_download_outlined, size: 21),
             tooltip: 'Export File',
             onPressed: _exportFile,
           ),
           IconButton(
-            icon: const Icon(
-              Icons.delete_outline_rounded,
-              color: Ui.alert,
-            ),
+            icon: const Icon(Icons.delete_outline_rounded, size: 21),
             tooltip: 'Shred',
             onPressed: _deleteAndExit,
           ),
+          const SizedBox(width: 4),
         ],
       ),
       // Keep pages and controls above the system navigation bar (the app
@@ -328,7 +297,7 @@ class _FileViewerScreenState extends State<FileViewerScreen> {
             Text(
               _currentItem.title,
               textAlign: TextAlign.center,
-              style: AppFonts.ui(fontSize: 16, fontWeight: FontWeight.bold, color: Ui.ink),
+              style: AppFonts.ui(fontSize: 16, fontWeight: FontWeight.w500, color: Ui.ink),
             ),
             const SizedBox(height: 6),
             Text(

@@ -238,6 +238,9 @@ class UiRow extends StatelessWidget {
   final bool destructive;
   final bool chevron;
 
+  /// Optional key on the detail text (for tests that read a status line).
+  final Key? detailKey;
+
   const UiRow({
     super.key,
     this.icon,
@@ -248,6 +251,7 @@ class UiRow extends StatelessWidget {
     this.onTap,
     this.destructive = false,
     this.chevron = true,
+    this.detailKey,
   });
 
   @override
@@ -280,7 +284,7 @@ class UiRow extends StatelessWidget {
                   Text(title, style: Ui.body(color: fg)),
                   if (detail != null) ...[
                     const SizedBox(height: 3),
-                    Text(detail!, style: Ui.detail()),
+                    Text(detail!, key: detailKey, style: Ui.detail()),
                   ],
                 ],
               ),
@@ -301,17 +305,29 @@ class UiSwitchRow extends StatelessWidget {
   final String? detail;
   final bool value;
   final ValueChanged<bool>? onChanged;
+  final Key? switchKey;
+  final Key? detailKey;
 
-  const UiSwitchRow({super.key, this.icon, required this.title, this.detail, required this.value, this.onChanged});
+  const UiSwitchRow({
+    super.key,
+    this.icon,
+    required this.title,
+    this.detail,
+    required this.value,
+    this.onChanged,
+    this.switchKey,
+    this.detailKey,
+  });
 
   @override
   Widget build(BuildContext context) => UiRow(
         icon: icon,
         title: title,
         detail: detail,
+        detailKey: detailKey,
         chevron: false,
         onTap: onChanged == null ? null : () => onChanged!(!value),
-        trailing: Switch(value: value, onChanged: onChanged),
+        trailing: Switch(key: switchKey, value: value, onChanged: onChanged),
       );
 }
 
@@ -407,6 +423,175 @@ class UiEnter extends StatelessWidget {
       curve: Interval(delay / (0.26 + delay), 1, curve: Curves.easeOutCubic),
       builder: (_, t, c) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: c)),
       child: child,
+    );
+  }
+}
+
+/// A destructive action that has to be held: the bar fills in red while the
+/// finger stays down and fires when it's full; letting go early cancels.
+/// A slip under pressure can't destroy anything. A long press (also what
+/// screen readers send) confirms at once.
+class UiHoldButton extends StatefulWidget {
+  final String label;
+  final VoidCallback onConfirmed;
+  final Duration duration;
+  const UiHoldButton({
+    super.key,
+    required this.label,
+    required this.onConfirmed,
+    this.duration = const Duration(milliseconds: 1100),
+  });
+
+  @override
+  State<UiHoldButton> createState() => _UiHoldButtonState();
+}
+
+class _UiHoldButtonState extends State<UiHoldButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: widget.duration)
+    ..addStatusListener((s) {
+      if (s == AnimationStatus.completed && !_done) _fire();
+    });
+  bool _done = false;
+
+  void _fire() {
+    _done = true;
+    HapticFeedback.heavyImpact();
+    widget.onConfirmed();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: widget.label,
+      onLongPress: () {
+        if (!_done) _fire();
+      },
+      child: GestureDetector(
+        onTapDown: (_) {
+          Ui.tick();
+          _c.forward();
+        },
+        onTapUp: (_) {
+          if (!_done) _c.reverse();
+        },
+        onTapCancel: () {
+          if (!_done) _c.reverse();
+        },
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, _) => ClipRRect(
+            borderRadius: BorderRadius.circular(Ui.control),
+            child: SizedBox(
+              height: 52,
+              child: Stack(fit: StackFit.expand, children: [
+                const ColoredBox(color: Ui.raised),
+                FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: _c.value,
+                  child: const ColoredBox(color: Ui.alert),
+                ),
+                Center(
+                  child: Text(
+                    widget.label,
+                    style: Ui.button(color: _c.value > 0.5 ? Ui.canvas : Ui.alert),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Asks to confirm something that destroys data: a short sheet with what
+/// happens and a [UiHoldButton]. True if it was held to the end.
+Future<bool> confirmByHolding(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String action,
+}) async {
+  final ok = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(Ui.gutter, 0, Ui.gutter, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Ui.heading()),
+            const SizedBox(height: 10),
+            Text(message, style: Ui.body(color: Ui.ink2, size: 15)),
+            const SizedBox(height: 24),
+            UiHoldButton(key: const Key('hold-confirm'), label: action, onConfirmed: () => Navigator.pop(ctx, true)),
+            const SizedBox(height: 6),
+            Center(
+              child: TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel', style: TextStyle(color: Ui.ink2)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  return ok == true;
+}
+
+/// A row of equal segments, like a hardware selector: the chosen one is
+/// filled. [keyOf] (optional) keys each segment for tests.
+class UiSegmented<T> extends StatelessWidget {
+  final List<(T, String)> options;
+  final T selected;
+  final ValueChanged<T>? onChanged;
+  final String Function(T)? keyOf;
+  const UiSegmented({super.key, required this.options, required this.selected, this.onChanged, this.keyOf});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: Ui.raised, borderRadius: BorderRadius.circular(11)),
+      child: Row(children: [
+        for (final (value, label) in options)
+          Expanded(
+            child: GestureDetector(
+              key: keyOf == null ? null : Key(keyOf!(value)),
+              behavior: HitTestBehavior.opaque,
+              onTap: onChanged == null
+                  ? null
+                  : () {
+                      Ui.tick();
+                      onChanged!(value);
+                    },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: value == selected ? Ui.ink : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  label,
+                  style: Ui.body(size: 14, color: value == selected ? Ui.canvas : (onChanged == null ? Ui.ink3 : Ui.ink2)),
+                ),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 }

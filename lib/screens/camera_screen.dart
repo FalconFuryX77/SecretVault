@@ -250,7 +250,7 @@ class _CameraScreenState extends State<CameraScreen> {
         label,
         style: AppFonts.ui(
           fontSize: 13,
-          fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+          fontWeight: selected ? FontWeight.w500 : FontWeight.w500,
           color: selected ? _accent : Ui.ink2,
           letterSpacing: 1.2,
         ),

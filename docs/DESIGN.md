@@ -89,7 +89,12 @@ Designeer's hold-to-confirm.
   and a mono count; no chips.
 - **Primary button** — full width at the bottom of a flow, or the single
   floating "Add" in the vault.
-- **Confirm by holding** — destructive actions fill in `alert` while held;
-  letting go early cancels.
+- **Segmented choice** — equal segments on `raised`, the chosen one filled
+  in `ink` like a hardware selector (the recorder's button and presses).
+- **Confirm by holding** — shredding a file and removing the decoy fill in
+  `alert` while held (about a second); letting go early cancels. Screen
+  readers confirm with a long press.
+- **Record button** — a plain button with a red dot; while recording it
+  turns red with a stop square, and a slowly blinking light reads REC.
 - **Toasts** — `raised` surface, `ink` text, an icon for kind; never a
   coloured background.

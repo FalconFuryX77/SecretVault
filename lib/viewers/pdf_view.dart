@@ -266,7 +266,7 @@ class _PdfViewState extends State<PdfView> {
               Text(
                 'Page ${_current + 1} of ${pages.length}',
                 key: const Key('pdf-page-label'),
-                style: AppFonts.ui(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
+                style: AppFonts.ui(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500),
               ),
               const Spacer(),
               if (!_searching)
@@ -498,7 +498,7 @@ class _ZoomedPageState extends State<_ZoomedPage> {
         backgroundColor: Ui.surface,
         title: Text(
           'Page ${widget.page + 1} of ${widget.total}',
-          style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+          style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.white),
         ),
       ),
       body: _failed

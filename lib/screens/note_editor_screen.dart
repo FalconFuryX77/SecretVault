@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/vault_clipboard.dart';
-import '../theme/app_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../models/vault_item.dart';
@@ -112,101 +111,70 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         if (didPop) _flush();
       },
       child: Scaffold(
-      backgroundColor: Ui.canvas,
-      appBar: AppBar(
-        backgroundColor: Ui.surface,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_rounded,
-            color: Ui.ink2,
-            size: 18,
-          ),
-          onPressed: _saveAndPop,
-        ),
-        title: Row(
-          children: [
-            Icon(
-              isSeed ? Icons.key_rounded : Icons.description_rounded,
-              color: isSeed ? Ui.ink2 : Ui.signal,
-              size: 20,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              isSeed ? 'Crypto Seed' : 'Encrypted Note',
-              style: AppFonts.ui(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Ui.ink,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.check_rounded, color: Ui.ink),
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, size: 22),
+            tooltip: 'Back',
             onPressed: _saveAndPop,
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          child: Column(
-            children: [
-              TextField(
-                enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
-                contextMenuBuilder: vaultContextMenu,
-                controller: _titleController,
-                onChanged: (_) => _onChanged(),
-                style: AppFonts.ui(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Ui.ink,
-                ),
-                decoration: InputDecoration(
-                  hintText: isSeed
-                      ? 'Wallet / Key Label (e.g. Ledger Main)'
-                      : 'Note Title...',
-                  hintStyle: AppFonts.ui(
-                    fontSize: 22,
-                    color: Ui.ink3,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  border: InputBorder.none,
-                ),
-              ),
-              const Divider(color: Colors.white12, height: 24),
-              Expanded(
-                child: TextField(
+          title: Text(isSeed ? 'Recovery words' : 'Note'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.check_rounded, color: Ui.signal),
+              tooltip: 'Save',
+              onPressed: _saveAndPop,
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Ui.gutter, 4, Ui.gutter, 12),
+            child: Column(
+              children: [
+                TextField(
                   enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
                   contextMenuBuilder: vaultContextMenu,
-                  controller: _contentController,
+                  controller: _titleController,
                   onChanged: (_) => _onChanged(),
-                  maxLines: null,
-                  expands: true,
-                  style: AppFonts.firaCode(
-                    fontSize: 14,
-                    color: Ui.ink.withValues(alpha: 0.85),
-                    height: 1.6,
-                  ),
+                  style: Ui.title(),
                   decoration: InputDecoration(
-                    hintText: isSeed
-                        ? 'Enter 12/24 recovery words (e.g. abandon ability able about...)'
-                        : 'Type confidential note here...',
-                    hintStyle: AppFonts.ui(
-                      fontSize: 14,
-                      color: Ui.ink3,
-                    ),
+                    hintText: isSeed ? 'Label (e.g. Ledger main)' : 'Title',
+                    hintStyle: Ui.title(color: Ui.ink3),
+                    filled: false,
                     border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
-              ),
-            ],
+                const Divider(),
+                Expanded(
+                  child: TextField(
+                    enableIMEPersonalizedLearning: false, // keep vault text out of keyboard learning
+                    contextMenuBuilder: vaultContextMenu,
+                    controller: _contentController,
+                    onChanged: (_) => _onChanged(),
+                    maxLines: null,
+                    expands: true,
+                    textAlignVertical: TextAlignVertical.top,
+                    style: isSeed ? Ui.data(size: 15, color: Ui.ink).copyWith(height: 1.7) : Ui.body(size: 17).copyWith(height: 1.5),
+                    decoration: InputDecoration(
+                      hintText: isSeed ? 'The 12 or 24 words, in order' : 'Write something',
+                      hintStyle: Ui.body(size: 17, color: Ui.ink3),
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
     );
   }
 }

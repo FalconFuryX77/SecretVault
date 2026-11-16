@@ -230,7 +230,7 @@ class _OfficeViewState extends State<OfficeView> {
                   SelectableText(
                     s.paragraphs.first,
                     contextMenuBuilder: vaultContextMenu,
-                    style: AppFonts.ui(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: AppFonts.ui(fontSize: 17, fontWeight: FontWeight.w500, color: Colors.white),
                   ),
                   for (final p in s.paragraphs.skip(1))
                     Padding(

@@ -18,9 +18,7 @@ Future<void> exportWithConfirmation(BuildContext context, VaultItem item) async 
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: Ui.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Export a decrypted copy?', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
+      title: Text('Export a decrypted copy?'),
       content: Text(
         'An unencrypted copy of "${item.title}" will be saved to:\n\n${dir!.path}\n\n'
         'It stays there until you delete it, and anyone who gets the phone, or connects it to a '
@@ -35,7 +33,7 @@ Future<void> exportWithConfirmation(BuildContext context, VaultItem item) async 
         TextButton(
           key: const Key('export-confirm'),
           onPressed: () => Navigator.pop(ctx, true),
-          child: Text('Export', style: AppFonts.ui(color: Ui.ink2, fontWeight: FontWeight.bold)),
+          child: Text('Export', style: AppFonts.ui(color: Ui.ink2, fontWeight: FontWeight.w500)),
         ),
       ],
     ),
@@ -46,43 +44,21 @@ Future<void> exportWithConfirmation(BuildContext context, VaultItem item) async 
     final res = await context.read<VaultProvider>().exportFile(item, dir);
     if (res != null) {
       messenger.showSnackBar(SnackBar(
-        backgroundColor: Ui.raised,
-        content: Text('Exported to ${res.path}', style: AppFonts.ui(color: Ui.ink)),
+        content: Text('Exported to ${res.path}'),
       ));
     }
   } catch (e) {
     messenger.showSnackBar(SnackBar(
-      backgroundColor: Ui.alert,
-      content: Text('Export failed: $e', style: AppFonts.ui(color: Ui.ink)),
+      content: Text('Export failed: $e'),
     ));
   }
 }
 
-/// Deleting from the vault shreds the file: ask once, the same way from
-/// everywhere, so a mis-tap under pressure can't destroy material.
-Future<bool> confirmShred(BuildContext context, String title) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: Ui.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Shred & Delete File', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
-      content: Text(
-        'Permanently wipe "$title" from encrypted storage? This action cannot be undone.',
-        style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: Text('Cancel', style: AppFonts.ui(color: Ui.ink2)),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: Ui.alert),
-          onPressed: () => Navigator.pop(ctx, true),
-          child: Text('Shred Permanently', style: AppFonts.ui(color: Ui.ink, fontWeight: FontWeight.bold)),
-        ),
-      ],
-    ),
-  );
-  return ok == true;
-}
+/// Deleting from the vault shreds the file: it has to be held, the same way
+/// from everywhere, so a mis-tap under pressure can't destroy material.
+Future<bool> confirmShred(BuildContext context, String title) => confirmByHolding(
+      context,
+      title: 'Shred "$title"?',
+      message: 'Its key is destroyed and its data overwritten. It cannot be recovered from this phone.',
+      action: 'Hold to shred',
+    );

@@ -190,174 +190,140 @@ class _SetupScreenState extends State<SetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final title = _restore ? 'Restore from a backup' : 'Set your vault PIN';
     return Scaffold(
-      backgroundColor: Ui.canvas,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Ui.signal.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.shield_rounded, color: Ui.signal, size: 20),
-            ),
-            const SizedBox(width: 10),
-            Text('Vault Setup', style: AppFonts.ui(fontWeight: FontWeight.bold, fontSize: 18)),
-          ],
-        ),
-      ),
+      appBar: AppBar(),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          padding: const EdgeInsets.fromLTRB(Ui.gutter, 8, Ui.gutter, 24),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _restore ? 'Restore From a Backup' : 'Set Your Vault PIN',
-                textAlign: TextAlign.center,
-                style: AppFonts.ui(fontSize: 22, fontWeight: FontWeight.bold, color: Ui.ink),
-              ),
-              const SizedBox(height: 8),
+              Row(children: [
+                Icon(_restore ? Icons.cloud_download_outlined : Icons.lock_outline_rounded, size: 20, color: Ui.ink2),
+                const SizedBox(width: 8),
+                Text(_restore ? 'Restore' : 'New vault', style: Ui.label()),
+              ]),
+              const SizedBox(height: 14),
+              Text(title, style: Ui.title()),
+              const SizedBox(height: 10),
               Text(
                 _restore
                     ? 'Enter the backup server and your recovery code, then a PIN for the vault on this phone '
                         '(it can differ from the old one).'
                     : 'This PIN encrypts your files, so there is no reset if you forget it. '
                         'Use $_minPinLen or more characters. A passphrase is best.',
-                textAlign: TextAlign.center,
-                style: AppFonts.ui(fontSize: 14, color: Ui.ink2),
+                style: Ui.body(color: Ui.ink2, size: 15),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 28),
               if (_restore) ...[
                 _plainField(_server, 'Server address (https://…)', 'restore-server', TextInputType.url),
                 const SizedBox(height: 12),
                 _plainField(_code, 'Recovery code', 'restore-code', TextInputType.visiblePassword, lines: 2),
+                const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   value: _tor,
                   onChanged: _busy ? null : (v) => setState(() => _tor = v),
-                  activeThumbColor: Ui.signal,
-                  title: Text('Connect through Tor (Orbot)', style: AppFonts.ui(fontSize: 14, color: Ui.ink)),
+                  title: Text('Connect through Tor (Orbot)', style: Ui.body(size: 15)),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
               ],
               if (_restoreInto == null) ...[
-              _pinField(_pinController, '$_minPinLen+ digits or a passphrase', TextInputAction.next),
-              const SizedBox(height: 12),
-              _pinField(_pinConfirmController, 'Confirm PIN', TextInputAction.done, onSubmitted: (_) => _submit()),
+                _pinField(_pinController, '$_minPinLen+ digits or a passphrase', TextInputAction.next),
+                const SizedBox(height: 12),
+                _pinField(_pinConfirmController, 'Confirm PIN', TextInputAction.done, onSubmitted: (_) => _submit()),
               ],
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: _busy ? null : () => setState(() => _showPin = !_showPin),
-                  icon: Icon(
-                    _showPin ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                    size: 16,
-                    color: Ui.ink2,
-                  ),
-                  label: Text(
-                    _showPin ? 'Hide' : 'Show',
-                    style: AppFonts.ui(color: Ui.ink2, fontSize: 13),
-                  ),
+                  style: TextButton.styleFrom(foregroundColor: Ui.ink2),
+                  icon: Icon(_showPin ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
+                  label: Text(_showPin ? 'Hide' : 'Show', style: Ui.detail()),
                 ),
               ),
               if (_busy) ...[
-                const SizedBox(height: 12),
-                LinearProgressIndicator(value: _progress, color: Ui.signal),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(value: _progress, minHeight: 3),
+                ),
                 const SizedBox(height: 8),
                 Text(
                   _progressText,
                   key: const Key('setup-progress'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppFonts.ui(color: Ui.ink2, fontSize: 12),
+                  style: Ui.data(),
                 ),
               ],
               if (_errorMessage != null) ...[
                 const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Ui.alert.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Ui.alert.withValues(alpha: 0.4)),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: Icon(Icons.error_outline_rounded, color: Ui.alert, size: 18),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error_outline_rounded, color: Ui.alert, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: AppFonts.ui(color: Ui.alert, fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_errorMessage!, style: Ui.detail(color: Ui.alert))),
+                ]),
               ],
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _busy ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Ui.signal,
-                    foregroundColor: Ui.canvas,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
                   child: Text(
-                    _restoreInto != null ? 'Try Again' : (_restore ? 'Restore Vault' : 'Create Vault'),
+                    _restoreInto != null ? 'Try again' : (_restore ? 'Restore vault' : 'Create vault'),
                     key: const Key('setup-submit'),
-                    style: AppFonts.ui(fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
               if (_restoreInto != null)
-                TextButton(
-                  onPressed: _busy ? null : () => _open(_restoreInto!),
-                  child: Text('Open the vault and restore later', style: AppFonts.ui(color: Ui.ink2, fontSize: 13)),
-                )
+                _link(Icons.lock_open_outlined, 'Open the vault and restore later', () => _open(_restoreInto!))
               else
-                TextButton(
-                  key: const Key('setup-restore-toggle'),
-                  onPressed: _busy ? null : () => setState(() {
+                _link(
+                  _restore ? Icons.add_rounded : Icons.cloud_download_outlined,
+                  _restore ? 'Start an empty vault instead' : 'Restore from a backup instead',
+                  () => setState(() {
                     _restore = !_restore;
                     _errorMessage = null;
                   }),
-                  child: Text(
-                    _restore ? 'Start an empty vault instead' : 'Restore from a backup instead',
-                    style: AppFonts.ui(color: Ui.signal, fontSize: 13),
-                  ),
+                  key: const Key('setup-restore-toggle'),
                 ),
               if (_restoreInto == null && !_restore)
-                TextButton(
+                _link(
+                  Icons.drive_file_move_outline,
+                  'Move a vault here from another phone or app',
+                  () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoveInScreen())),
                   key: const Key('setup-move-in'),
-                  onPressed: _busy
-                      ? null
-                      : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoveInScreen())),
-                  child: Text('Move a vault here from another phone or app',
-                      style: AppFonts.ui(color: Ui.signal, fontSize: 13)),
                 ),
-              Text(
-                'You can add a decoy vault with its own PIN later, in Settings.',
-                textAlign: TextAlign.center,
-                style: AppFonts.ui(fontSize: 12, color: Ui.ink3),
-              ),
+              const SizedBox(height: 18),
+              Text('You can add a decoy vault with its own PIN later, in Settings.', style: Ui.detail(color: Ui.ink3)),
             ],
           ),
         ),
       ),
     );
   }
+
+  /// A secondary way through setup: plain text, not another button.
+  Widget _link(IconData icon, String label, VoidCallback onTap, {Key? key}) => InkWell(
+        key: key,
+        borderRadius: BorderRadius.circular(8),
+        onTap: _busy ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(children: [
+            Icon(icon, size: 19, color: Ui.ink2),
+            const SizedBox(width: 12),
+            Expanded(child: Text(label, style: Ui.body(size: 15))),
+            const Icon(Icons.chevron_right_rounded, size: 20, color: Ui.ink3),
+          ]),
+        ),
+      );
 
   Widget _plainField(TextEditingController c, String hint, String key, TextInputType type, {int lines = 1}) {
     return TextField(
@@ -373,10 +339,6 @@ class _SetupScreenState extends State<SetupScreen> {
       style: AppFonts.firaCode(fontSize: 14, color: Ui.ink),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: AppFonts.ui(fontSize: 14, color: Ui.ink3),
-        filled: true,
-        fillColor: Ui.surface,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
       ),
     );
   }
@@ -398,15 +360,11 @@ class _SetupScreenState extends State<SetupScreen> {
       maxLength: 64,
       textInputAction: action,
       onSubmitted: onSubmitted,
-      style: AppFonts.ui(fontSize: 20, letterSpacing: _showPin ? 1 : 6, color: Ui.ink),
-      textAlign: TextAlign.center,
+      style: Ui.body(size: 20).copyWith(letterSpacing: _showPin ? 0.5 : 4),
       decoration: InputDecoration(
         counterText: '',
         hintText: hint,
-        hintStyle: AppFonts.ui(fontSize: 14, letterSpacing: 0, color: Ui.ink3),
-        filled: true,
-        fillColor: Ui.surface,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+        hintStyle: Ui.body(color: Ui.ink3, size: 15).copyWith(letterSpacing: 0),
       ),
     );
   }

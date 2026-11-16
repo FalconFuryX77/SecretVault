@@ -8,12 +8,9 @@ import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
 import '../recorder/vault_recorder.dart';
 import '../services/vault_service.dart';
-import '../theme/app_fonts.dart';
 import 'hidden_recorder_screen.dart';
 import '../theme/ui.dart';
 
-const _accent = Ui.signal;
-const _red = Ui.alert;
 
 /// Asks for the microphone, without the vault locking while the system
 /// dialog is up. Returns whether it was granted.
@@ -145,109 +142,156 @@ class _RecorderScreenState extends State<RecorderScreen> {
   Widget build(BuildContext context) {
     final started = _status.startedAt;
     final elapsed = _recordingHere && started != null ? DateTime.now().difference(started) : Duration.zero;
+    final rec = _recordingHere;
     return Scaffold(
-      backgroundColor: Ui.canvas,
       appBar: AppBar(
-        backgroundColor: Ui.surface,
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Ui.ink2, size: 18),
+          icon: const Icon(Icons.arrow_back_rounded, size: 22),
+          tooltip: 'Back',
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Record audio', style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.bold, color: Ui.ink)),
+        title: const Text('Record audio'),
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 28),
+          padding: const EdgeInsets.only(top: 24, bottom: 24),
           children: [
+            Center(
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _RecLight(on: rec),
+                const SizedBox(width: 8),
+                Text(rec ? 'REC' : 'READY', style: Ui.data(size: 12, color: rec ? Ui.alert : Ui.ink3)),
+              ]),
+            ),
+            const SizedBox(height: 10),
             Center(
               child: Text(
                 _clock(elapsed),
                 key: const Key('rec-clock'),
-                style: AppFonts.firaCode(fontSize: 44, color: _recordingHere ? Ui.ink : Ui.ink3),
+                style: Ui.figure(size: 56, color: rec ? Ui.ink : Ui.ink3),
+              ),
+            ),
+            const SizedBox(height: 36),
+            Center(
+              child: Semantics(
+                button: true,
+                label: rec ? 'Stop recording' : 'Start recording',
+                child: GestureDetector(
+                  key: const Key('rec-button'),
+                  onTap: _busy
+                      ? null
+                      : () {
+                          Ui.tick();
+                          rec ? _stop() : _start();
+                        },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: rec ? Ui.alert : Ui.raised,
+                      border: Border.all(color: rec ? Ui.alert : Ui.hairline, width: 1.5),
+                    ),
+                    child: Center(
+                      child: _busy
+                          ? const SizedBox(
+                              width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.5, color: Ui.ink2))
+                          : AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: rec ? 28 : 34,
+                              height: rec ? 28 : 34,
+                              decoration: BoxDecoration(
+                                color: rec ? Ui.canvas : Ui.alert,
+                                borderRadius: BorderRadius.circular(rec ? 6 : 17),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 28),
-            Center(
-              child: GestureDetector(
-                key: const Key('rec-button'),
-                onTap: _busy ? null : (_recordingHere ? _stop : _start),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 112,
-                  height: 112,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _recordingHere ? _red : _accent,
-                    boxShadow: [
-                      BoxShadow(
-                        color: (_recordingHere ? _red : _accent).withValues(alpha: 0.35),
-                        blurRadius: 30,
-                        spreadRadius: _recordingHere ? 6 : 1,
-                      ),
-                    ],
-                  ),
-                  child: _busy
-                      ? const Padding(
-                          padding: EdgeInsets.all(40),
-                          child: CircularProgressIndicator(strokeWidth: 3, color: Ui.canvas),
-                        )
-                      : Icon(
-                          _recordingHere ? Icons.stop_rounded : Icons.mic_rounded,
-                          size: 52,
-                          color: Ui.canvas,
-                        ),
-                ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 36),
+              child: Text(
+                rec
+                    ? "Recording. Leaving the app or locking the phone doesn't stop it."
+                    : "Tap to record. The audio is encrypted as it's captured and goes straight into the vault.",
+                key: const Key('rec-state'),
+                textAlign: TextAlign.center,
+                style: Ui.body(color: Ui.ink2, size: 15),
               ),
             ),
-            const SizedBox(height: 22),
-            Text(
-              _recordingHere
-                      ? 'Recording. Leaving the app or locking the phone doesn\'t stop it.'
-                      : 'Tap to record. The audio is encrypted as it\'s captured and goes straight into the vault.',
-              key: const Key('rec-state'),
-              textAlign: TextAlign.center,
-              style: AppFonts.ui(fontSize: 14, color: Ui.ink2, height: 1.4),
-            ),
             if (_message != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                _message!,
-                key: const Key('rec-message'),
-                textAlign: TextAlign.center,
-                style: AppFonts.ui(
-                  fontSize: 13,
-                  color: _messageIsError ? Ui.alert : Ui.ink,
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 36),
+                child: Text(
+                  _message!,
+                  key: const Key('rec-message'),
+                  textAlign: TextAlign.center,
+                  style: Ui.detail(color: _messageIsError ? Ui.alert : Ui.ink),
                 ),
               ),
             ],
-            const SizedBox(height: 40),
-            Container(
-              decoration: BoxDecoration(
-                color: Ui.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Ui.ink.withValues(alpha: 0.08)),
+            const SizedBox(height: 44),
+            UiGroup(children: [
+              UiRow(
+                icon: Icons.screen_lock_portrait_outlined,
+                title: 'Record with the screen off',
+                detail: 'A volume button or the assistant button starts and stops it, without unlocking.',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HiddenRecorderScreen())),
               ),
-              child: ListTile(
-                leading: const Icon(Icons.screen_lock_portrait_rounded, color: _accent),
-                title: Text(
-                  'Record with the screen off',
-                  style: AppFonts.ui(fontSize: 14, fontWeight: FontWeight.w600, color: Ui.ink),
-                ),
-                subtitle: Text(
-                  'Press a volume button a few times, or the assistant button, to start or stop without unlocking.',
-                  style: AppFonts.ui(fontSize: 12, color: Ui.ink2),
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded, color: Ui.ink3),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const HiddenRecorderScreen()),
-                ),
-              ),
-            ),
+            ]),
           ],
         ),
       ),
     );
   }
+}
+
+/// The recording light: red and slowly blinking while recording.
+class _RecLight extends StatefulWidget {
+  final bool on;
+  const _RecLight({required this.on});
+
+  @override
+  State<_RecLight> createState() => _RecLightState();
+}
+
+class _RecLightState extends State<_RecLight> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.on) _c.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_RecLight old) {
+    super.didUpdateWidget(old);
+    if (widget.on && !_c.isAnimating) _c.repeat(reverse: true);
+    if (!widget.on) _c.stop();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: _c,
+        builder: (_, _) => Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: widget.on ? Ui.alert.withValues(alpha: 0.35 + 0.65 * (1 - _c.value)) : Ui.ink3,
+          ),
+        ),
+      );
 }

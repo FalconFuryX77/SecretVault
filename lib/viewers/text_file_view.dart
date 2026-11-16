@@ -91,7 +91,6 @@ class _TextFileViewState extends State<TextFileView> {
       widget.onSaved(item);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: Ui.raised,
           content: Text('Saved', style: AppFonts.ui(color: Colors.white)),
         ),
       );
@@ -99,7 +98,6 @@ class _TextFileViewState extends State<TextFileView> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: Ui.alert,
           content: Text('Could not save: $e', style: AppFonts.ui(color: Colors.white)),
         ),
       );
@@ -112,8 +110,7 @@ class _TextFileViewState extends State<TextFileView> {
     final discard = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Ui.surface,
-        title: Text('Discard changes?', style: AppFonts.ui(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text('Discard changes?'),
         content: Text('Your edits to this file have not been saved.',
             style: AppFonts.ui(color: Colors.white70, fontSize: 13)),
         actions: [
@@ -183,7 +180,7 @@ class _TextFileViewState extends State<TextFileView> {
               key: const Key('text-edit'),
               onPressed: () => setState(() => _editing = true),
               icon: const Icon(Icons.edit_rounded, size: 16, color: Ui.signal),
-              label: Text('Edit', style: AppFonts.ui(color: Ui.signal, fontWeight: FontWeight.w600)),
+              label: Text('Edit', style: AppFonts.ui(color: Ui.signal, fontWeight: FontWeight.w500)),
             ),
           ] else ...[
             TextButton(
@@ -207,7 +204,7 @@ class _TextFileViewState extends State<TextFileView> {
                 foregroundColor: Ui.canvas,
               ),
               onPressed: _saving || !_dirty ? null : _save,
-              child: Text(_saving ? 'Saving…' : 'Save', style: AppFonts.ui(fontWeight: FontWeight.bold)),
+              child: Text(_saving ? 'Saving…' : 'Save', style: AppFonts.ui(fontWeight: FontWeight.w500)),
             ),
           ],
         ],

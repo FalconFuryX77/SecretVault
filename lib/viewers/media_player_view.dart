@@ -283,7 +283,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
                   Text(
                     widget.item.title,
                     textAlign: TextAlign.center,
-                    style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: AppFonts.ui(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.white),
                   ),
                 ],
               ),
@@ -383,7 +383,7 @@ class _MediaPlayerViewState extends State<MediaPlayerView> {
                   onPressed: _cycleSpeed,
                   child: Text(
                     '${_speed}x'.replaceAll('.0x', 'x'),
-                    style: AppFonts.firaCode(color: _accent, fontWeight: FontWeight.bold, fontSize: 13),
+                    style: AppFonts.firaCode(color: _accent, fontWeight: FontWeight.w500, fontSize: 13),
                   ),
                 ),
                 if (widget.isVideo)
