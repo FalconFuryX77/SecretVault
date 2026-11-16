@@ -63,7 +63,7 @@ Settings → Backup sends the open vault to a server you run ([server/README.md]
 * [Container format](docs/CONTAINER_FORMAT.md): the on-device storage format, byte by byte.
 * [Sync design](docs/SYNC_DESIGN.md): end-to-end encrypted, resumable backup for slow and intermittent connections, with [measurements](docs/SYNC_DESIGN.md#measured-2026-11-16).
 * [Audit brief](docs/AUDIT_BRIEF.md): what to check, and where.
-* [Roadmap](docs/ROADMAP.md) and [Releasing](docs/RELEASING.md).
+* [Changelog](CHANGELOG.md), [Roadmap](docs/ROADMAP.md) and [Releasing](docs/RELEASING.md).
 
 ## How to run it 🚀
 You'll need a standard Flutter development environment and an Android device or emulator.

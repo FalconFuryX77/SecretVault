@@ -1,4 +1,4 @@
-# Sync server (M1)
+# Undertow backup server
 
 Reference implementation of the server in [docs/SYNC_DESIGN.md](../docs/SYNC_DESIGN.md) §7.
 It stores opaque, content-named encrypted pieces and an append-only log of
