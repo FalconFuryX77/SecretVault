@@ -20,8 +20,8 @@ machine to do it for real.
 ## Steps
 
 ```bash
-git clone https://github.com/FalconFuryX77/SecretVault.git
-cd SecretVault/server
+git clone https://github.com/FalconFuryX77/Undertow.git
+cd Undertow/server
 cp deploy/env.example .env
 ```
 

@@ -1,6 +1,6 @@
-<title>SecretVault</title>
+<title>Undertow</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="A file manager on the outside. An encrypted vault, a decoy and hardware-bound keys on the inside. Built for people whose phones get searched.">
+<meta name="description" content="A video trimmer on the outside. An encrypted vault, decoys, a duress PIN and hardware-bound keys on the inside. Built for people whose phones may be searched or seized.">
 <!-- Fonts are served from this site (the app's own typefaces, SIL OFL), so
      a visit doesn't tell a font service who is reading about this app. -->
 <style>
@@ -298,7 +298,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
 <div class="wrap">
   <header class="top">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>SecretVault</div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Undertow</div>
     <nav aria-label="Sections">
       <a href="#layers">How it works</a>
       <a href="#specs">Specs</a>
@@ -309,16 +309,16 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
   <div class="hero">
     <div class="hero-copy">
-      <div class="eyebrow">For journalists, fixers and documenters · Android · v2.1.0 beta</div>
+      <div class="eyebrow">For journalists, fixers and documenters · Android · v3.0.0 beta</div>
       <h1>Hand over your phone.<br>Keep your <span class="redacted">sources.</span></h1>
-      <p class="lede">SecretVault looks and works like an ordinary file manager. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware.</p>
+      <p class="lede">Undertow looks and works like an ordinary video trimmer. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware. It records straight into the vault and backs up to a server you trust.</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/SecretVault/releases/latest">Download v2.1.0 for Android</a>
-        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault">See the source</a>
-        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
+        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.0.0 for Android</a>
+        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow">See the source</a>
+        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
       </div>
       <div class="facts">
-        <span>AES-256-GCM</span><span>Argon2id + hardware keystore</span><span>Decoy PIN</span><span>Backs up only to your server</span><span>Screen-off recorder</span>
+        <span>AES-256-GCM</span><span>Argon2id + hardware keystore</span><span>Decoy and duress PINs</span><span>Backs up only to your server</span><span>Screen-off recorder</span>
       </div>
     </div>
 
@@ -330,33 +330,32 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
           <div class="view" id="v-files">
             <div class="app-bar">
               <div class="folder-ic" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
               </div>
-              <button class="title-btn" id="files-title" aria-label="Files (triple-tap to open the hidden lock screen)">
-                <span class="app-title">Files</span>
-                <span class="app-sub">Internal Storage</span>
+              <button class="title-btn" id="files-title" aria-label="Video Trimmer (triple-tap to open the hidden lock screen)">
+                <span class="app-title">Video Trimmer</span>
+                <span class="app-sub">Cut clips, keep the good part</span>
               </button>
             </div>
             <div class="storage">
-              <div style="display:flex;justify-content:space-between"><span>78.4 GB used</span><span style="color:var(--app-dim)">128 GB</span></div>
-              <div class="bar"><i></i></div>
+              <div style="display:flex;justify-content:space-between"><span>Pick a video to trim</span><span style="color:var(--app-dim)">＋</span></div>
             </div>
             <div class="cats">
-              <div><span class="dot" style="background:#38bdf8"></span>Images</div>
-              <div><span class="dot" style="background:#f472b6"></span>Videos</div>
-              <div><span class="dot" style="background:#fbbf24"></span>Docs</div>
-              <div><span class="dot" style="background:#34d399"></span>Audio</div>
+              <div><span class="dot" style="background:#f472b6"></span>Trim</div>
+              <div><span class="dot" style="background:#38bdf8"></span>Mute</div>
+              <div><span class="dot" style="background:#fbbf24"></span>Save</div>
+              <div><span class="dot" style="background:#34d399"></span>Share</div>
             </div>
             <div class="rows">
-              <div class="row"><span class="ric" style="background:#1c2533;color:#58a6ff">D</span><div>DCIM<small>3 items</small></div></div>
-              <div class="row"><span class="ric" style="background:#1c2533;color:#58a6ff">D</span><div>Download<small>27 items</small></div></div>
-              <div class="row"><span class="ric" style="background:#1c2533;color:#58a6ff">D</span><div>Documents<small>12 items</small></div></div>
-              <div class="row"><span class="ric" style="background:#1c2533;color:#58a6ff">M</span><div>Music<small>40 items</small></div></div>
+              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0412.mp4<small>0:14 · 9.2 MB</small></div></div>
+              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0409.mp4<small>0:31 · 21 MB</small></div></div>
+              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0402.mp4<small>0:08 · 5.4 MB</small></div></div>
+              <div class="row"><span class="ric" style="background:#2a1c2c;color:#f472b6">▶</span><div>Trim_0328.mp4<small>1:02 · 44 MB</small></div></div>
             </div>
           </div>
 
           <div class="view lockview" id="v-lock" hidden>
-            <button class="back-btn" id="lock-back" aria-label="Back to Files">‹</button>
+            <button class="back-btn" id="lock-back" aria-label="Back to Video Trimmer">‹</button>
             <div class="lock-top">
               <div class="lock-ring" id="lock-ring" aria-hidden="true">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
@@ -394,7 +393,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="demo-guide">
         <div class="seen" aria-live="polite"><span>Showing:</span><b id="seen">what an inspector sees</b></div>
         <ol>
-          <li>Triple-tap <code>Files</code>. Nothing on screen tells you that works.</li>
+          <li>Triple-tap <code>Video Trimmer</code>. Nothing on screen tells you that works.</li>
           <li>Enter <code>2580</code> for your vault, or <code>1111</code> for the decoy you hand over.</li>
           <li>Inside, lock it, or hit panic to wipe the keys from memory at once.</li>
         </ol>
@@ -414,9 +413,9 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
     <ol class="layers">
       <li class="layer">
         <div class="layer-tag">Quick look</div>
-        <h3>A file manager that really is one</h3>
+        <h3>A video trimmer that really is one</h3>
         <ul>
-          <li><b>Browse, open, rename and delete</b> your phone's files like any file manager.</li>
+          <li><b>Pick a video, cut it, save the clip</b>, with or without sound. It explains the camera, the microphone and gigabytes of "project cache".</li>
           <li><b>No vault button, menu or wording</b> anywhere in it. The way in is a triple-tap only you know about.</li>
           <li><b>It never reacts to being picked up or shaken</b> while locked, so handling it gives nothing away.</li>
         </ul>
@@ -427,7 +426,8 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
         <ul>
           <li><b>A second PIN</b> opens a separate, ordinary-looking vault. Both PINs go into the same field.</li>
           <li><b>Nothing in the decoy shows that another vault exists.</b> The storage always has four key slots, used or not.</li>
-          <li><b>The real vault never overwrites the decoy,</b> and the decoy never touches the real vault's space.</li>
+          <li><b>No vault knows whether it's the real one.</b> A decoy can even have a decoy of its own, and none ever overwrites another.</li>
+          <li><b>A duress PIN, if you want one,</b> erases the real vault for good and opens the decoy as if it were the only one.</li>
         </ul>
       </li>
       <li class="layer layer-vault">
@@ -456,11 +456,12 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="feature"><span class="k">Tamper-evident</span><h3>Refuses altered files</h3><p>Every 64 KB of every file is authenticated. A changed, swapped or cut-short file won't open.</p></div>
       <div class="feature"><span class="k">Lockouts</span><h3>Guessing gets slower</h3><p>Five wrong tries lock it for 30 seconds, then a minute, then two, doubling up to an hour.</p></div>
       <div class="feature"><span class="k">Quiet</span><h3>Connects to one place</h3><p>The app makes no connections until you set up backup, and then only to the server you entered. It's excluded from phone cloud backups.</p></div>
-      <div class="feature"><span class="k">Opens inside</span><h3>No other app sees it</h3><p>Photos, video, audio, PDFs, Word documents and text open right in the vault, and text files can be edited there. Nothing decrypted is saved to the phone.</p></div>
-      <div class="feature"><span class="k">Sealed-off reader</span><h3>PDFs can't reach the vault</h3><p>PDFs are drawn in a separate, locked-down process with no access to your files, the vault or the internet. A booby-trapped document gets nothing.</p></div>
+      <div class="feature"><span class="k">Opens inside</span><h3>No other app sees it</h3><p>Photos, video, audio, PDFs, Word files, spreadsheets, slides and text open right in the vault, and text files can be edited there. Nothing decrypted is saved to the phone.</p></div>
+      <div class="feature"><span class="k">Sealed-off reader</span><h3>Files can't reach the vault</h3><p>PDFs and pictures are decoded in a separate, locked-down process with no access to your files, the vault or the internet. A booby-trapped file gets nothing.</p></div>
       <div class="feature"><span class="k">Private typing</span><h3>Your keyboard forgets</h3><p>What you type in the vault isn't learned by the keyboard, so it won't turn up later as a suggestion somewhere else.</p></div>
-      <div class="feature"><span class="k">Hidden recorder</span><h3>Record without looking</h3><p>With the screen off and the phone in your pocket, press volume-down three times to start recording, three more to stop. No unlocking, no screen.</p></div>
+      <div class="feature"><span class="k">Hidden recorder</span><h3>Record without looking</h3><p>With the screen off and the phone in your pocket, press volume-down or volume-up the number of times you chose to start recording, and again to stop. Or use the assistant button. No unlocking, no screen.</p></div>
       <div class="feature"><span class="k">Locked recording</span><h3>Even your phone can't play it</h3><p>Audio is encrypted as it's recorded, to a key only your vault holds. It moves into the vault the next time you unlock it; the decoy never sees it.</p></div>
+      <div class="feature"><span class="k">Camera</span><h3>Photos and video, straight in</h3><p>Take photos and record video from inside the vault. They never touch the gallery, and photos lose their location and device details.</p></div>
       <div class="feature"><span class="k">Crash-safe</span><h3>Keeps what it caught</h3><p>Recordings are saved every second. If the phone dies or is switched off mid-recording, everything up to the last second is kept.</p></div>
     </div>
   </div>
@@ -472,7 +473,7 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <div class="eyebrow">Specs</div>
       <h2>Standard parts, documented</h2>
       <p>No home-made ciphers. Every piece is a well-studied building block, and the way they fit together is written down byte by byte so anyone can check it.</p>
-      <p><a href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/CONTAINER_FORMAT.md">Read the container format</a></p>
+      <p><a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/CONTAINER_FORMAT.md">Read the container format</a></p>
     </div>
     <div class="table-scroll">
       <table>
@@ -493,17 +494,17 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 <section id="sync">
   <div class="wrap sync">
     <div class="sync-copy">
-      <span class="status-chip">Early · manual backup works, automatic is next</span>
+      <span class="status-chip">Automatic backup · previews first · restore in the app</span>
       <h2>Getting your work out on a bad signal</h2>
-      <p>The safest file is one that has already left the phone. SecretVault's encrypted sync sends files in small pieces that resume where they stopped, so even a few seconds of signal count.</p>
+      <p>The safest file is one that has already left the phone. Undertow backs up by itself while the vault is open, in small encrypted pieces that resume where they stopped, so even a few seconds of signal count. New photos and videos go first as small copies, so something gets out even on a bad line.</p>
       <p>The server only ever holds ciphertext. A news desk or NGO can run its own. And a phone taken from you can't delete what already got out.</p>
     </div>
     <div class="signal" aria-label="Test results for uploads over intermittent signal">
       <div class="eyebrow">From our test rig</div>
       <div class="signal-row"><span>Signal</span><div class="track"><div class="pockets"></div></div></div>
       <div class="signal-row"><span>Whole files</span><div class="track"><div class="fill never"></div></div></div>
-      <div class="signal-row"><span>SecretVault</span><div class="track"><div class="fill"></div></div></div>
-      <small>Signal up for 2 seconds, then gone for 3, at 64 kB/s. Sending whole pieces never finished. Resumable pieces got a 1 MB file through in 62 seconds, against a best possible 41. A 3 MB file also survived a link that dropped 30% of connections, intact.</small>
+      <div class="signal-row"><span>Undertow</span><div class="track"><div class="fill"></div></div></div>
+      <small>Signal up for 2 seconds, then gone for 3, at 64 kB/s. Sending whole pieces never finished. Resumable pieces got a 1 MB file through in 66 seconds, against a best possible 41. A 3 MB file also survived a link that dropped 30% of connections, intact.</small>
     </div>
   </div>
 </section>
@@ -521,9 +522,9 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <li><b>A lab can tell there's encrypted data.</b><span>It can't tell how much, or how many vaults.</span></li>
       <li><b>It can't beat spyware.</b><span>If your phone is already compromised, it can watch you unlock.</span></li>
       <li><b>Use a real passphrase.</b><span>A 6-digit PIN can be worked through on the phone itself in a few weeks. Longer is much safer.</span></li>
-      <li><b>Pictures aren't sealed off yet.</b><span>Images open inside the app itself. So far only PDFs get the separate locked-down reader.</span></li>
+      <li><b>A lab with the decoy's PIN can see hints.</b><span>Not proof, but numbers in the decoy's own data that suggest something else shares the phone.</span></li>
       <li><b>The recorder can be noticed.</b><span>Android shows a green microphone dot while it records and lists the app as running while it's armed. If music is playing, the volume keys control the music instead.</span></li>
-      <li><b>Uninstalling erases the vault.</b><span>The vault lives inside the app. Back it up to your server before removing or reinstalling.</span></li>
+      <li><b>Uninstalling erases the vault.</b><span>The vault lives inside the app. Back it up, or move it out from Settings, before removing or reinstalling.</span></li>
       <li><b>Android only, and in beta.</b><span>It hasn't had an independent security review yet.</span></li>
     </ul>
   </div>
@@ -531,12 +532,12 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
 
 <footer>
   <div class="wrap foot">
-    <div>SecretVault v2.1.0 · Android beta · Built in the open</div>
+    <div>Undertow v3.0.0 · Android beta · Built in the open</div>
     <nav aria-label="Documents">
-      <a href="https://github.com/FalconFuryX77/SecretVault/releases/latest">Download</a>
-      <a href="https://github.com/FalconFuryX77/SecretVault">Source</a>
-      <a href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/THREAT_MODEL.md">Threat model</a>
-      <a href="https://github.com/FalconFuryX77/SecretVault/blob/master/docs/SYNC_DESIGN.md">Sync design</a>
+      <a href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download</a>
+      <a href="https://github.com/FalconFuryX77/Undertow">Source</a>
+      <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Threat model</a>
+      <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/SYNC_DESIGN.md">Sync design</a>
     </nav>
   </div>
 </footer>
