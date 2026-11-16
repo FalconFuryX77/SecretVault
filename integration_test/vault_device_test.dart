@@ -66,6 +66,12 @@ void main() {
     // ignore: avoid_print
   });
 
+  testWidgets('passphrases are NFC-normalised by the platform', (tester) async {
+    expect(await platformNormalize('café née'), 'café née');
+    expect(await platformNormalize('plain-123'), 'plain-123');
+    expect(await platformNormalize('क्ष'), 'क्ष', reason: 'already NFC');
+  });
+
   testWidgets('native batch crypto is byte-compatible with the Dart implementation', (tester) async {
     const native = AndroidBulkCrypto();
     const dart = DartBulkCrypto();

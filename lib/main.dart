@@ -7,6 +7,7 @@ import 'providers/device_files_provider.dart';
 import 'providers/unlock_provider.dart';
 import 'providers/vault_provider.dart';
 import 'models/vault_state.dart';
+import 'services/vault_clipboard.dart';
 import 'services/vault_service.dart';
 import 'screens/normal_files_screen.dart';
 import 'screens/setup_screen.dart';
@@ -106,6 +107,7 @@ class _AppLifecycleScopeState extends State<AppLifecycleScope>
       vaultRoutes.removeAllAboveFirst();
       PaintingBinding.instance.imageCache.clear();
       PaintingBinding.instance.imageCache.clearLiveImages();
+      unawaited(VaultClipboard.clear());
     });
   }
 

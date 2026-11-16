@@ -74,6 +74,9 @@ class MainActivity : FlutterActivity() {
     private val pdfSandbox by lazy { PdfSandbox(this) }
     private var camera: VaultCamera? = null
 
+    /** Whether vault text was copied since the clipboard was last cleared. */
+    private var copiedSensitive = false
+
     /** Videos being streamed into the vault, by handle. */
     private val exports = HashMap<Int, Mp4Exporter>()
     private var nextExport = 1
@@ -116,6 +119,33 @@ class MainActivity : FlutterActivity() {
                         ),
                     ),
                 )
+                "copySensitive" -> {
+                    // Marked sensitive: keyboards keep it out of their
+                    // clipboard history, and Android hides its preview.
+                    val cm = getSystemService(android.content.ClipboardManager::class.java)
+                    val clip = android.content.ClipData.newPlainText("", call.argument<String>("text") ?: "")
+                    clip.description.extras = android.os.PersistableBundle().apply {
+                        putBoolean("android.content.extra.IS_SENSITIVE", true)
+                    }
+                    cm.setPrimaryClip(clip)
+                    copiedSensitive = true
+                    result.success(true)
+                }
+                "clearSensitive" -> {
+                    if (copiedSensitive) {
+                        val cm = getSystemService(android.content.ClipboardManager::class.java)
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                cm.clearPrimaryClip()
+                            } else {
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                            }
+                        } catch (_: Exception) {
+                        }
+                        copiedSensitive = false
+                    }
+                    result.success(true)
+                }
                 "setKeepScreenOn" -> {
                     if (call.argument<Boolean>("on") == true) {
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

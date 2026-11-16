@@ -20,10 +20,44 @@ import 'package:gesture_unlock/recorder/vault_recorder.dart';
 import 'package:gesture_unlock/screens/camera_screen.dart';
 import 'package:gesture_unlock/screens/file_viewer_screen.dart';
 import 'package:gesture_unlock/services/vault_service.dart';
+import 'package:gesture_unlock/viewers/image_view.dart';
+import 'package:gesture_unlock/viewers/pdf_sandbox.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+
+/// [jpeg] with every APP1 segment replaced by a minimal EXIF block that
+/// says [orientation].
+Uint8List withOrientation(Uint8List jpeg, int orientation) {
+  final out = BytesBuilder()..add([0xFF, 0xD8]);
+  final tiff = [0x4D, 0x4D, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0];
+  final body = [...'Exif'.codeUnits, 0, 0, ...tiff];
+  out.add([0xFF, 0xE1, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body]);
+  var i = 2;
+  while (i + 4 <= jpeg.length) {
+    final marker = jpeg[i + 1];
+    if (marker == 0xDA) {
+      out.add(jpeg.sublist(i));
+      break;
+    }
+    final len = (jpeg[i + 2] << 8) | jpeg[i + 3];
+    if (marker != 0xE1) out.add(jpeg.sublist(i, i + 2 + len));
+    i += 2 + len;
+  }
+  return out.toBytes();
+}
+
+Future<Uint8List> bigPng(int w, int h) async {
+  final rec = ui.PictureRecorder();
+  final c = Canvas(rec);
+  c.drawRect(Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), Paint()..color = const Color(0xFF3366CC));
+  c.drawCircle(Offset(w / 2, h / 2), h / 3, Paint()..color = const Color(0xFFFFCC00));
+  final img = await rec.endRecording().toImage(w, h);
+  final png = (await img.toByteData(format: ui.ImageByteFormat.png))!;
+  img.dispose();
+  return png.buffer.asUint8List();
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -107,7 +141,38 @@ void main() {
     // ignore: avoid_print
     print('[cam] photo ${frame.image.width}x${frame.image.height}, ${jpeg.length} bytes');
     expect(frame.image.width, greaterThan(100));
+
+    // ── 1b. The same photo decoded in the isolated process ──
+    final sandboxed = await ImageSandbox.decode(Uint8List.fromList(jpeg));
+    expect([sandboxed.width, sandboxed.height], [frame.image.width, frame.image.height],
+        reason: 'same size and orientation as Flutter\'s own decoder');
+    sandboxed.dispose();
     frame.image.dispose();
+    final upright = await ImageSandbox.decode(withOrientation(jpeg, 1));
+    final turned = await ImageSandbox.decode(withOrientation(jpeg, 6));
+    expect([turned.width, turned.height], [upright.height, upright.width], reason: 'EXIF orientation is applied');
+    upright.dispose();
+    turned.dispose();
+    final big = await ImageSandbox.decode(await bigPng(6000, 2600));
+    // ignore: avoid_print
+    print('[cam] 6000x2600 PNG decoded as ${big.width}x${big.height}');
+    expect(big.width, lessThanOrEqualTo(ImageSandbox.maxSide));
+    expect(big.width * big.height, lessThanOrEqualTo(ImageSandbox.maxPixels));
+    expect((big.width / big.height - 6000 / 2600).abs(), lessThan(0.01), reason: 'shape kept');
+    big.dispose();
+    await expectLater(ImageSandbox.decode(Uint8List.fromList(List.filled(5000, 7))),
+        throwsA(isA<PdfSandboxException>().having((e) => e.problem, 'problem', PdfProblem.broken)));
+    // Truncated JPEG: refused or decoded partially, never a crash of the app.
+    try {
+      (await ImageSandbox.decode(Uint8List.fromList(jpeg.sublist(0, jpeg.length ~/ 3)))).dispose();
+    } on PdfSandboxException catch (e) {
+      expect(e.problem, isIn([PdfProblem.broken, PdfProblem.crashed]));
+    }
+    // The viewer uses it.
+    await t.pumpWidget(app(FileViewerScreen(item: photo)));
+    await waitFor(() => find.byKey(const Key('image-sandboxed')).evaluate().isNotEmpty, 'the sandboxed image in the viewer');
+    await t.pumpWidget(app(const CameraScreen()));
+    await waitFor(() => find.byType(Texture).evaluate().isNotEmpty, 'the preview after the viewer');
 
     // ── 2. A video ──
     await t.tap(find.byKey(const Key('camera-mode-video')));

@@ -364,6 +364,24 @@ class VaultSession {
 
   bool get isOpen => !_closed && _root != null;
 
+  /// Called with the new commit number after each commit of this vault
+  /// (the rollback guard records it).
+  void Function(int generation)? onCommitted;
+
+  /// Set at unlock when the container is older than the last commit this
+  /// phone recorded for this vault (see RollbackGuard).
+  bool rolledBack = false;
+
+  /// This vault's commit number. Internal: not for display.
+  int get generation => _r.gen;
+
+  /// Which of the four records this vault is. Internal: not for display.
+  int get recordIndex => _r.record;
+
+  /// A key for the rollback guard's slot, derived from this vault's key.
+  Future<Uint8List> rollbackKey() =>
+      CryptoPrimitives.hkdf(_r.vk, salt: utf8.encode('sv/vault'), info: 'rollback');
+
   /// The real vault allocates top-down; a decoy bottom-up. Callers must not
   /// show this anywhere in the UI.
   VaultType get type => _r.index.topDown ? VaultType.primary : VaultType.decoy;
@@ -1110,6 +1128,11 @@ class VaultSession {
   /// that didn't reach the disk.
   Future<void> _commit(_OpenVault v) async {
     await _writeIndex(v);
+    if (identical(v, _root)) {
+      try {
+        onCommitted?.call(v.gen);
+      } catch (_) {}
+    }
     if (v.index.topDown) {
       try {
         await _syncChildCeilings(v);

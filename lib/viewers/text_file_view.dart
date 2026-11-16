@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../models/vault_item.dart';
 import '../providers/unlock_provider.dart';
 import '../providers/vault_provider.dart';
+import '../services/vault_clipboard.dart';
 import '../theme/app_fonts.dart';
 
 /// Reads and edits a plain-text file stored in the vault. Saving writes a
@@ -220,6 +221,7 @@ class _TextFileViewState extends State<TextFileView> {
       child: TextField(
         key: const Key('text-editor'),
         controller: _edit,
+        contextMenuBuilder: vaultContextMenu,
         autofocus: true,
         readOnly: _saving,
         maxLines: null,
