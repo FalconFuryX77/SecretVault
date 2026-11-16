@@ -692,7 +692,7 @@ class _BackupScreenState extends State<BackupScreen> {
       UiGroup(label: 'Restore', children: [
         UiRow(
           key: const Key('restore-missing'),
-          icon: Icons.restore_rounded,
+          icon: Icons.download_for_offline_outlined,
           title: 'Restore files from the backup',
           onTap: _busy ? null : _restoreMissing,
         ),
@@ -775,8 +775,7 @@ class _BackupScreenState extends State<BackupScreen> {
         } else if (q != null && q.count > 0) {
           line = 'On: ${formatBytes(q.bytes)} waiting for a signal.';
         } else {
-          line = 'On: with no connection, what\'s left waits in a queue that the phone sends when a network '
-              'appears, even locked. The phone keeps only a login that can add to the backup, never read it.';
+          line = 'On. With no signal, new things wait in a sealed queue and go up as soon as there is one, even locked.';
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
