@@ -1,41 +1,51 @@
-<title>Undertow</title>
+<title>Undertow: an encrypted vault inside a working video trimmer</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="A video trimmer on the outside. An encrypted vault, decoys, a duress PIN and hardware-bound keys on the inside. Built for people whose phones may be searched or seized.">
-<!-- Fonts are served from this site (SIL OFL), so a visit doesn't tell a
-     font service who is reading about this app. The phone uses the system
-     font, as the app does. -->
+<meta name="theme-color" content="#0b0b0a">
+<meta name="color-scheme" content="dark">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Undertow: hand over your phone, keep your sources">
+<meta property="og:description" content="A video trimmer on the outside. An encrypted vault, decoys, a duress PIN and hardware-bound keys on the inside. Built for people whose phones may be searched or seized.">
+<meta property="og:url" content="https://falconfuryx77.github.io/Undertow/">
+<meta property="og:image" content="https://falconfuryx77.github.io/Undertow/demo-poster.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0b0a'/%3E%3Crect x='7' y='7' width='18' height='18' rx='5' fill='none' stroke='%23edeae3' stroke-width='2.2'/%3E%3Crect x='11' y='16.5' width='10' height='4.6' rx='1.2' fill='%23e8a33d'/%3E%3C/svg%3E">
+<!-- Nothing on this page is fetched from anyone else: the text uses the
+     reader's own system typeface, and the one web font (Fira Code, SIL OFL,
+     for labels and data) is served from this site. -->
 <style>
-@font-face { font-family: "Outfit"; src: url("fonts/Outfit-Variable.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: "Fira Code"; src: url("fonts/FiraCode-Variable.ttf") format("truetype"); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: "Fira Code"; src: url("fonts/FiraCode-Latin.woff") format("woff"); font-weight: 300 700; font-display: swap; }
 </style>
 <style>
-/* Layout: a dossier. The hero holds a phone you can actually unlock; below it the layers peel from outside in, then specs, then limits. */
+/* The page speaks the app's language (docs/DESIGN.md): a warm black canvas,
+   warm greys, one amber signal colour, the reader's own system typeface for
+   text and Fira Code for labels and data. Dark only, like the app. */
 :root {
-  --paper: #f2f3ef;
-  --paper-2: #e8eae4;
-  --ink: #14181e;
-  --muted: #59626d;
-  --line: #d3d7cf;
-  --signal: #2147c7;
-  --signal-ink: #ffffff;
-  --decoy: #9a6411;
-  --redact: #14181e;
+  color-scheme: dark;
+  --bg: #0b0b0a;
+  --bg-1: #111110;
+  --bg-2: #181816;
+  --line: #22211e;
+  --line-2: #35342f;
+  --ink: #edeae3;
+  --ink-2: #a8a49a;
+  --ink-3: #847f76;
+  --signal: #e8a33d;
+  --signal-hi: #f2b65e;
+  --on-signal: #14110b;
+  --alert: #e5574f;
 
-  --font-display: "Outfit", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Outfit", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Fira Code", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-sans: "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-display: "Segoe UI Variable Display", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 
-  --step--1: 0.8125rem;
-  --step-0: 1rem;
-  --step-1: 1.1875rem;
-  --step-2: 1.5rem;
-  --step-3: clamp(1.75rem, 1.2rem + 2vw, 2.4rem);
-  --step-4: clamp(2.4rem, 1.4rem + 4.2vw, 4.4rem);
+  --step-1: 1.125rem;
+  --step-2: 1.375rem;
+  --step-3: clamp(1.75rem, 1.15rem + 2.3vw, 2.625rem);
+  --step-4: clamp(2.5rem, 1rem + 5vw, 4.125rem);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
-  --measure: 64ch;
-  --radius: 10px;
-
-  /* The app is dark; the phone mock keeps its real colours in both page themes. */
+  /* The phone in the hero is the app itself, in its own colours. */
   --app-font: Roboto, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   --app-canvas: #0f0f0e;
   --app-surface: #191917;
@@ -51,99 +61,230 @@
   --cover-card: #161b22;
   --cover-accent: #22d3ee;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0f1216;
-    --paper-2: #161a20;
-    --ink: #e7e9ec;
-    --muted: #9aa3ae;
-    --line: #262c34;
-    --signal: #86a6ff;
-    --signal-ink: #0b0e14;
-    --decoy: #e4aa52;
-    --redact: #e7e9ec;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --paper: #0f1216;
-  --paper-2: #161a20;
-  --ink: #e7e9ec;
-  --muted: #9aa3ae;
-  --line: #262c34;
-  --signal: #86a6ff;
-  --signal-ink: #0b0e14;
-  --decoy: #e4aa52;
-  --redact: #e7e9ec;
-  color-scheme: dark;
-}
 
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scroll-padding-top: 88px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 body {
-  background: var(--paper);
+  margin: 0;
+  background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-body);
-  font-size: var(--step-0);
-  line-height: 1.6;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
-a { color: var(--signal); text-underline-offset: 3px; }
-a:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 4px; }
+::selection { background: rgba(232, 163, 61, 0.32); }
+a { color: var(--ink); text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: var(--ink-3); }
+a:hover { text-decoration-color: currentColor; }
+a:focus-visible, .btn:focus-visible, .chapters button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 8px; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; }
+h1 { font-size: var(--step-4); line-height: 1.02; letter-spacing: -0.035em; }
+h2 { font-size: var(--step-3); line-height: 1.08; letter-spacing: -0.028em; }
+h3 { font-size: var(--step-2); line-height: 1.2; letter-spacing: -0.018em; }
+p { margin: 0; }
+.mono { font-family: var(--font-mono); font-variant-ligatures: none; font-feature-settings: "calt" 0; }
 
 .wrap {
-  max-width: 1120px;
+  max-width: 1160px;
   margin-inline: auto;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
-section { padding-block: clamp(56px, 8vw, 104px); border-top: 1px solid var(--line); }
+.skip { position: absolute; left: 12px; top: -64px; z-index: 50; padding: 10px 14px; border-radius: 10px; background: var(--signal); color: var(--on-signal); font-weight: 600; text-decoration: none; }
+.skip:focus { top: 12px; }
 
-h1, h2, h3 { font-family: var(--font-display); line-height: 1.05; margin: 0; text-wrap: balance; letter-spacing: -0.02em; }
-h1 { font-size: var(--step-4); font-weight: 800; }
-h2 { font-size: var(--step-3); font-weight: 700; }
-h3 { font-size: var(--step-1); font-weight: 700; letter-spacing: -0.01em; }
-p { margin: 0; max-width: var(--measure); }
-
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: var(--step--1);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  height: 44px; padding: 0 16px; border-radius: 10px;
+  border: 1px solid var(--line-2); background: var(--bg-2); color: var(--ink);
+  font: 500 0.9375rem/1 var(--font-sans); text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
 }
+.btn:hover { background: #1f1f1c; border-color: #4b4942; }
+.btn:active { transform: translateY(1px); }
+.btn svg { width: 17px; height: 17px; flex: none; fill: currentColor; }
+.btn-primary { background: var(--signal); border-color: var(--signal); color: var(--on-signal); font-weight: 600; }
+.btn-primary:hover { background: var(--signal-hi); border-color: var(--signal-hi); }
+.btn-lg { height: 52px; padding: 0 20px; border-radius: 12px; font-size: 1rem; }
+.btn-sm { height: 36px; padding: 0 14px; font-size: 0.875rem; }
+.btn .note { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; font-weight: 400; padding-left: 11px; border-left: 1px solid rgba(20, 17, 11, 0.28); opacity: 0.82; }
+.btn:not(.btn-primary) .note { border-left-color: var(--line-2); color: var(--ink-3); opacity: 1; }
 
 /* ── Top bar ── */
-.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 20px; }
-.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 800; font-size: var(--step-1); letter-spacing: -0.02em; }
-.brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--ink); position: relative; }
-.brand-mark::after { content: ""; position: absolute; inset: 7px 5px; background: var(--paper); border-radius: 2px; }
-.top nav { display: flex; gap: 20px; flex-wrap: wrap; font-size: var(--step--1); }
-.top nav a { color: var(--muted); text-decoration: none; }
-.top nav a:hover { color: var(--ink); }
+.top {
+  position: sticky; top: 0; z-index: 30;
+  background: rgba(11, 11, 10, 0.8);
+  -webkit-backdrop-filter: saturate(160%) blur(16px); backdrop-filter: saturate(160%) blur(16px);
+  border-bottom: 1px solid transparent; transition: border-color 0.2s;
+}
+.top.stuck { border-bottom-color: var(--line); }
+.top-in { display: flex; align-items: center; gap: 24px; height: 64px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font: 600 1.0625rem/1 var(--font-display); letter-spacing: -0.01em; color: var(--ink); text-decoration: none; }
+.brand svg { width: 22px; height: 22px; }
+.top nav { display: flex; gap: 2px; margin-inline: auto; }
+.top nav a { padding: 8px 12px; border-radius: 8px; font-size: 0.875rem; line-height: 1; color: var(--ink-2); text-decoration: none; transition: color 0.15s, background 0.15s; }
+.top nav a:hover { color: var(--ink); background: var(--bg-2); }
+.top nav a[aria-current="true"] { color: var(--ink); }
+.top-actions { display: flex; align-items: center; gap: 6px; }
+.icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; color: var(--ink-2); transition: color 0.15s, background 0.15s; }
+.icon-btn:hover { color: var(--ink); background: var(--bg-2); }
+.icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
 
 /* ── Hero ── */
-.hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: clamp(32px, 5vw, 72px); align-items: center; padding-block: clamp(24px, 5vw, 56px) clamp(56px, 7vw, 88px); }
-.hero-copy { display: grid; gap: 24px; min-width: 0; }
-.hero-copy .lede { font-size: var(--step-1); color: var(--muted); line-height: 1.55; }
+.hero { padding-block: clamp(24px, 3.4vw, 52px) clamp(64px, 8vw, 112px); }
+.hero-in { display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(0, 0.78fr); gap: clamp(32px, 5vw, 72px); align-items: center; }
+.hero-copy { display: grid; gap: 26px; justify-items: start; min-width: 0; }
+.kicker { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
+.kicker i { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 4px rgba(232, 163, 61, 0.16); flex: none; }
 .redacted { position: relative; white-space: nowrap; }
 .redacted::after {
-  content: ""; position: absolute; left: -0.06em; right: -0.06em; top: 0.12em; bottom: 0.06em;
-  background: var(--redact); border-radius: 3px; transform-origin: left center;
-  animation: unredact 1.1s 0.6s cubic-bezier(.7, 0, .2, 1) forwards;
+  content: ""; position: absolute; left: -0.05em; right: -0.05em; top: 0.14em; bottom: 0.04em;
+  background: var(--ink); border-radius: 4px; transform-origin: left center;
+  animation: unredact 1.1s 0.7s cubic-bezier(0.7, 0, 0.2, 1) forwards;
 }
 @keyframes unredact { to { transform: scaleX(0); } }
+.lede { font-size: 1.1875rem; line-height: 1.55; color: var(--ink-2); max-width: 36rem; }
 .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
-.btn {
-  display: inline-flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 999px;
-  font-weight: 600; font-size: var(--step-0); text-decoration: none; border: 1px solid transparent; cursor: pointer;
-  font-family: var(--font-body);
-}
-.btn-primary { background: var(--ink); color: var(--paper); }
-.btn-primary:hover { background: var(--signal); color: var(--signal-ink); }
-.btn-ghost { border-color: var(--line); color: var(--ink); background: transparent; }
-.btn-ghost:hover { border-color: var(--ink); }
-.facts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--font-mono); font-size: var(--step--1); color: var(--muted); }
-.facts span::before { content: "■ "; color: var(--signal); }
+.hero-links { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.875rem; color: var(--ink-3); }
+.hero-links a { color: var(--ink-2); }
+.hero-links a:hover { color: var(--ink); }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 28px; width: 100%; margin: 14px 0 0; padding-top: 24px; border-top: 1px solid var(--line); }
+.facts div { display: grid; gap: 5px; align-content: start; }
+.facts dt { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.6875rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
+.facts dd { margin: 0; font-size: 0.9375rem; line-height: 1.35; color: var(--ink); }
+
+/* ── Sections ── */
+.sec { padding-block: clamp(72px, 9vw, 128px); border-top: 1px solid var(--line); }
+.sec-head { display: grid; gap: 16px; max-width: 46rem; margin-bottom: clamp(36px, 5vw, 60px); }
+.sec-tag { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.sec-tag span { color: var(--signal); }
+.sec-tag::before { content: ""; width: 20px; height: 1px; background: var(--line-2); order: 1; }
+.sec-tag span { order: 0; }
+.sec-tag b { order: 2; font-weight: 400; }
+.sec-lede { font-size: var(--step-1); line-height: 1.55; color: var(--ink-2); max-width: 40rem; }
+.js .rv { opacity: 0; transform: translateY(14px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
+.js .rv.in { opacity: 1; transform: none; }
+
+/* ── Demo film ── */
+.film-grid { display: grid; grid-template-columns: minmax(0, 1fr) 286px; gap: 16px; }
+.film { margin: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #0f0f0e; aspect-ratio: 16 / 9; }
+.film video { display: block; width: 100%; height: 100%; background: #0f0f0e; }
+.chap-wrap { position: relative; min-height: 0; }
+.chapters { position: absolute; inset: 0; overflow-y: auto; margin: 0; padding: 6px; list-style: none; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-1); scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.chapters button { all: unset; box-sizing: border-box; display: flex; align-items: baseline; gap: 12px; width: 100%; padding: 9px 10px; border-radius: 10px; cursor: pointer; font-size: 0.875rem; line-height: 1.35; color: var(--ink-2); transition: background 0.15s, color 0.15s; }
+.chapters button:hover { background: var(--bg-2); color: var(--ink); }
+.chapters .t { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; color: var(--ink-3); min-width: 34px; }
+.chapters button[aria-current="true"] { background: var(--bg-2); color: var(--ink); }
+.chapters button[aria-current="true"] .t { color: var(--signal); }
+.film-note { margin-top: 16px; font-size: 0.875rem; color: var(--ink-3); max-width: 46rem; }
+
+/* ── Layers ── */
+.layers-grid { display: grid; grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr); gap: clamp(32px, 6vw, 96px); align-items: start; }
+.nest { position: sticky; top: 104px; margin: 0; }
+.nest svg { display: block; width: 100%; max-width: 440px; height: auto; }
+.ring rect.frame { stroke: var(--line-2); stroke-width: 1.5; transition: stroke 0.35s; }
+.ring .rl { font: 500 11px var(--font-mono); letter-spacing: 0.09em; fill: var(--ink-3); transition: fill 0.35s; }
+.ring .rs { font: 400 15px var(--font-sans); fill: var(--ink-2); transition: fill 0.35s; }
+.ring .blocks { fill: url(#blk); transition: opacity 0.35s; }
+.ring .blocks.lit { fill: url(#blk-on); opacity: 0; }
+.ring.on rect.frame { stroke: var(--signal); }
+.ring.on .rl { fill: var(--signal); }
+.ring.on .rs { fill: var(--ink); }
+.ring.on .blocks.lit { opacity: 1; }
+.layers { list-style: none; margin: 0; padding: 0; }
+.layer { display: grid; gap: 14px; padding-block: 36px; border-top: 1px solid var(--line); }
+.layer:first-child { border-top: 0; padding-top: 0; }
+.layer:last-child { padding-bottom: 0; }
+.layer-tag { display: flex; gap: 12px; font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
+.layer-tag span { color: var(--ink-2); transition: color 0.35s; }
+.layer.on .layer-tag span { color: var(--signal); }
+.layer ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 12px; color: var(--ink-2); }
+.layer li { position: relative; padding-left: 24px; }
+.layer li::before { content: ""; position: absolute; left: 2px; top: 0.78em; width: 10px; height: 1px; background: var(--ink-3); }
+.layer li b { color: var(--ink); font-weight: 600; }
+
+/* ── Features ── */
+.fgroup { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 24px 56px; padding-block: 44px; border-top: 1px solid var(--line); }
+.fgroup:last-child { padding-bottom: 0; }
+.fgroup-h { position: sticky; top: 104px; align-self: start; display: grid; gap: 8px; }
+.fgroup-h p { font-size: 0.875rem; line-height: 1.5; color: var(--ink-3); }
+.fitems { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 48px; }
+.fitem { display: grid; gap: 7px; align-content: start; }
+.fitem .k { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; letter-spacing: 0.03em; color: var(--signal); }
+.fitem h4 { margin: 0; font: 600 1.0625rem/1.3 var(--font-display); letter-spacing: -0.012em; }
+.fitem p { font-size: 0.9375rem; line-height: 1.6; color: var(--ink-2); }
+
+/* ── Backup ── */
+.sync-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 72px); align-items: center; }
+.sync-copy { display: grid; gap: 18px; }
+.sync-copy .sec-head { margin-bottom: 6px; }
+.sync-copy > p { color: var(--ink-2); max-width: 36rem; }
+.rig { display: grid; gap: 16px; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-1); }
+.rig-h { display: flex; justify-content: space-between; gap: 12px; font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.6875rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
+.signal-row { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 14px; align-items: center; font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; color: var(--ink-2); }
+.signal-row em { grid-column: 2; font-style: normal; color: var(--ink-3); }
+.signal-row.ours em { color: var(--signal); }
+.track { height: 18px; border-radius: 5px; background: var(--bg-2); position: relative; overflow: hidden; }
+.pockets { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, var(--ink-3) 0 40%, transparent 40% 100%); background-size: 40px 100%; opacity: 0.75; }
+.fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--signal); }
+.rig.run .fill:not(.never) { animation: fill 5.5s 0.3s steps(33, end) forwards; }
+.fill.never { width: 7%; background: repeating-linear-gradient(45deg, var(--ink-3) 0 5px, transparent 5px 10px); }
+@keyframes fill { to { width: 100%; } }
+.rig small { font-size: 0.8125rem; line-height: 1.6; color: var(--ink-3); padding-top: 14px; border-top: 1px solid var(--line); }
+
+/* ── Specs ── */
+.specs-grid { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: clamp(32px, 5vw, 72px); align-items: start; }
+.specs-grid .sec-head { margin-bottom: 0; }
+.spec { border: 1px solid var(--line); border-radius: 16px; background: var(--bg-1); overflow: hidden; }
+.spec table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; line-height: 1.5; }
+.spec th, .spec td { text-align: left; vertical-align: top; padding: 15px 20px; border-bottom: 1px solid var(--line); }
+.spec tr:last-child th, .spec tr:last-child td { border-bottom: 0; }
+.spec th { width: 31%; padding-top: 18px; white-space: nowrap; font: 500 0.6875rem/1.5 var(--font-mono); font-variant-ligatures: none; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
+.spec td { font-variant-numeric: tabular-nums; }
+.spec code { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.92em; color: var(--signal); white-space: nowrap; }
+
+/* ── Limits ── */
+.limits-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 56px; counter-reset: lim; }
+.limits-list li { position: relative; display: grid; gap: 4px; align-content: start; padding: 18px 0 18px 44px; border-top: 1px solid var(--line); counter-increment: lim; }
+.limits-list li::before { content: counter(lim, decimal-leading-zero); position: absolute; left: 0; top: 21px; font: 400 0.75rem/1.4 var(--font-mono); color: var(--ink-3); }
+.limits-list b { font-weight: 600; }
+.limits-list span { font-size: 0.9375rem; line-height: 1.6; color: var(--ink-2); }
+
+/* ── Install ── */
+.install { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: clamp(28px, 5vw, 64px); align-items: start; padding: clamp(24px, 4.5vw, 56px); border: 1px solid var(--line); border-radius: 22px; background: var(--bg-1); }
+.install .sec-head { margin-bottom: 28px; }
+.install-more { display: grid; gap: 8px; margin-top: 28px; font-size: 0.9375rem; color: var(--ink-3); }
+.install-more a { color: var(--ink-2); }
+.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+.steps > li { position: relative; display: grid; gap: 8px; padding: 22px 0 22px 48px; border-top: 1px solid var(--line); counter-increment: step; }
+.steps > li:first-child { border-top: 0; padding-top: 4px; }
+.steps > li:last-child { padding-bottom: 4px; }
+.steps > li::before { content: counter(step); position: absolute; left: 0; top: 20px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line-2); font: 500 0.75rem/1 var(--font-mono); color: var(--ink-2); }
+.steps > li:first-child::before { top: 2px; }
+.steps h3 { font-size: 1.0625rem; letter-spacing: -0.012em; }
+.steps p { font-size: 0.9375rem; line-height: 1.6; color: var(--ink-2); }
+.steps code { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.86em; color: var(--ink); background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.fp { display: flex; align-items: center; gap: 14px; margin-top: 4px; padding: 12px 12px 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.fp code { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 3px 12px; padding: 0; border: 0; background: none; white-space: normal; font-size: 0.8125rem; line-height: 1.5; color: var(--ink); }
+.fp .btn { flex: none; min-width: 74px; }
+
+/* ── Footer ── */
+footer { border-top: 1px solid var(--line); padding-block: 36px 40px; color: var(--ink-3); }
+.foot-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; padding-bottom: 30px; }
+.made { font-size: 1rem; }
+.made b { color: var(--ink); font-weight: 600; }
+.pills { display: flex; flex-wrap: wrap; gap: 10px; }
+.pill { height: 42px; padding: 0 16px 0 14px; color: var(--ink-2); background: var(--bg-1); border-color: var(--line); }
+.pill:hover { color: var(--ink); }
+.foot-bottom { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 28px; padding-top: 26px; border-top: 1px solid var(--line); font-size: 0.9375rem; }
+.foot-bottom a { color: var(--ink-2); }
+.foot-bottom a:hover { color: var(--ink); }
+.foot-bottom nav { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.foot-bottom nav a { text-decoration: none; }
+.foot-bottom nav a:hover { text-decoration: underline; }
 
 /* ── Phone demo: the app's real screens, in its own colours in both page themes ── */
 .demo { display: grid; justify-items: center; gap: 18px; min-width: 0; }
@@ -306,138 +447,138 @@ p { margin: 0; max-width: var(--measure); }
 .sw.on { background: var(--app-signal); border-color: var(--app-signal); }
 .sw.on::after { left: 14px; background: var(--app-on-signal); }
 
-.demo-guide { width: min(360px, 100%); display: grid; gap: 10px; font-size: var(--step--1); }
-.demo-guide ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; color: var(--muted); }
-.demo-guide code { font-family: var(--font-mono); color: var(--ink); background: var(--paper-2); padding: 1px 6px; border-radius: 5px; }
-.seen {
-  font-family: var(--font-mono); font-size: var(--step--1); display: flex; justify-content: space-between; gap: 12px;
-  border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px;
+/* ── The phone on its stage, and the readout under it ── */
+.demo { gap: 20px; }
+.stage { position: relative; display: grid; place-items: center; width: min(372px, 100%); margin: 0; padding: 26px 0; }
+.stage::before { content: ""; position: absolute; inset: -6% -18%; background: radial-gradient(50% 46% at 50% 46%, rgba(237, 234, 227, 0.055), transparent 72%); pointer-events: none; }
+.stage::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  --m: var(--line-2);
+  background:
+    linear-gradient(var(--m), var(--m)) left top / 14px 1px, linear-gradient(var(--m), var(--m)) left top / 1px 14px,
+    linear-gradient(var(--m), var(--m)) right top / 14px 1px, linear-gradient(var(--m), var(--m)) right top / 1px 14px,
+    linear-gradient(var(--m), var(--m)) left bottom / 14px 1px, linear-gradient(var(--m), var(--m)) left bottom / 1px 14px,
+    linear-gradient(var(--m), var(--m)) right bottom / 14px 1px, linear-gradient(var(--m), var(--m)) right bottom / 1px 14px;
+  background-repeat: no-repeat;
 }
-.seen b { font-weight: 500; }
-.seen .who-real { color: var(--signal); }
-.seen .who-decoy { color: var(--decoy); }
-.panic { justify-self: start; }
+.fit { display: grid; justify-items: center; width: 100%; transform-origin: 50% 0; }
+/* Clip, not hidden: the screen must never scroll, even when focus moves to
+   something near its edge or the parked toast sits below it. */
+.phone, .screen { overflow: clip; }
+.phone { z-index: 1; box-shadow: 0 0 0 1.5px #3b3934, 0 0 0 9px #151514, 0 0 0 10px #2a2925, 0 40px 80px -28px rgba(0, 0, 0, 0.85); }
+.readout { width: min(372px, 100%); border: 1px solid var(--line); border-radius: 14px; background: var(--bg-1); overflow: hidden; }
+.seen { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; line-height: 1.4; }
+.seen .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--ink-3); flex: none; transition: background 0.2s, border-color 0.2s; }
+.seen:has(.who-real) .led { background: var(--signal); border-color: var(--signal); }
+.seen span { letter-spacing: 0.09em; text-transform: uppercase; font-size: 0.6875rem; color: var(--ink-3); }
+.seen b { margin-left: auto; text-align: right; font-weight: 500; color: var(--ink); }
+.seen b.who-real { color: var(--signal); }
+.seen b.who-decoy { color: var(--ink-2); }
+.hint { padding: 12px 14px 4px; min-height: 4.4em; font-size: 0.875rem; line-height: 1.5; color: var(--ink-2); }
+.hint code { font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.86em; color: var(--ink); background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.readout-actions { display: flex; gap: 8px; padding: 10px 14px 14px; }
 
-/* ── Layers ── */
-.layers-head { display: grid; gap: 14px; margin-bottom: 40px; }
-.film-head { display: grid; gap: 14px; margin-bottom: 32px; max-width: 64ch; }
-.film { margin: 0; border: 1px solid var(--line); border-radius: calc(var(--radius) * 1.6); overflow: hidden; background: #0b0f17; aspect-ratio: 16 / 9; }
-.film video { display: block; width: 100%; height: 100%; background: #0b0f17; }
-.layers { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: layer; }
-.layer {
-  display: grid; grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1fr); gap: 24px 40px;
-  padding-block: 28px; border-top: 1px solid var(--line); counter-increment: layer;
-}
-.layer:last-child { border-bottom: 1px solid var(--line); }
-.layer-tag { font-family: var(--font-mono); font-size: var(--step--1); color: var(--muted); display: grid; align-content: start; gap: 6px; }
-.layer-tag::before { content: "Layer " counter(layer); color: var(--ink); }
-.layer h3 { font-size: var(--step-2); }
-.layer ul { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; color: var(--muted); min-width: 0; }
-.layer ul b { color: var(--ink); font-weight: 600; }
-.layer-decoy h3 { color: var(--decoy); }
-.layer-vault h3 { color: var(--signal); }
+/* On a short laptop screen the whole phone still fits above the fold. */
+@media (min-width: 1021px) and (max-height: 840px) { .fit { transform: scale(0.9); margin-bottom: -62px; } }
+@media (min-width: 1021px) and (max-height: 690px) { .fit { transform: scale(0.82); margin-bottom: -111px; } }
 
-/* ── Feature grid ── */
-.grid-head { display: grid; gap: 14px; margin-bottom: 36px; }
-.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 40px; }
-.feature { display: grid; gap: 8px; align-content: start; }
-.feature .k { font-family: var(--font-mono); font-size: var(--step--1); color: var(--signal); }
-.feature p { color: var(--muted); }
-
-/* ── Specs ── */
-.specs-wrap { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 48px; align-items: start; }
-.specs-intro { display: grid; gap: 14px; }
-.specs-intro p { color: var(--muted); }
-.table-scroll { overflow-x: auto; min-width: 0; }
-table { width: 100%; border-collapse: collapse; font-size: var(--step--1); }
-th, td { text-align: left; vertical-align: top; padding: 12px 10px 12px 0; border-bottom: 1px solid var(--line); }
-th { font-family: var(--font-mono); font-weight: 500; color: var(--muted); width: 34%; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11.5px; padding-top: 14px; }
-td { font-variant-numeric: tabular-nums; }
-td code { font-family: var(--font-mono); font-size: 0.95em; }
-
-/* ── Sync ── */
-.sync { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
-.status-chip { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: var(--step--1); color: var(--decoy); border: 1px solid currentColor; border-radius: 999px; padding: 3px 12px; justify-self: start; }
-.status-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.sync-copy { display: grid; gap: 16px; }
-.sync-copy p { color: var(--muted); }
-.signal { display: grid; gap: 14px; }
-.signal-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: center; font-size: var(--step--1); }
-.signal-row span { font-family: var(--font-mono); color: var(--muted); }
-.track { height: 22px; border-radius: 6px; background: var(--paper-2); position: relative; overflow: hidden; }
-.pockets { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, var(--signal) 0 40%, transparent 40% 100%); background-size: 50px 100%; opacity: 0.85; }
-.fill { position: absolute; inset: 0 auto 0 0; background: var(--ink); width: 0; animation: fill 6s 1s steps(30, end) forwards; }
-.fill.never { animation: none; width: 7%; background: repeating-linear-gradient(45deg, var(--muted) 0 6px, transparent 6px 12px); }
-@keyframes fill { to { width: 100%; } }
-.signal small { color: var(--muted); font-size: var(--step--1); }
-
-/* ── Limits ── */
-.limits { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 48px; align-items: start; }
-.limits ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-.limits li { padding: 16px 0; border-bottom: 1px solid var(--line); display: grid; gap: 4px; }
-.limits li:first-child { border-top: 1px solid var(--line); }
-.limits li b { font-weight: 600; }
-.limits li span { color: var(--muted); }
-
-/* ── Footer ── */
-footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size: var(--step--1); color: var(--muted); }
-.foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 24px; }
-.foot nav { display: flex; flex-wrap: wrap; gap: 18px; }
-.foot nav a { color: var(--ink); }
-.foot-left { display: grid; gap: 12px; align-content: start; }
-.made { display: flex; align-items: center; gap: 8px; }
-.made b { font-weight: 600; color: var(--ink); }
-.made .social { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--ink); }
-.made .social:first-of-type { margin-left: 4px; }
-.made .social:hover { background: var(--paper-2); }
-.made .social svg { width: 16px; height: 16px; fill: currentColor; }
-
-@media (max-width: 900px) {
-  .hero, .specs-wrap, .sync, .limits { grid-template-columns: minmax(0, 1fr); }
-  .layer { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 560px) {
-  .features { grid-template-columns: minmax(0, 1fr); }
+/* ── Smaller screens ── */
+@media (max-width: 1020px) {
   .top nav { display: none; }
-  .signal-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .top-actions { margin-left: auto; }
+  .hero-in, .layers-grid, .sync-grid, .specs-grid, .install { grid-template-columns: minmax(0, 1fr); }
+  .hero-in { gap: 48px; }
+  .demo { justify-self: center; width: 100%; }
+  .nest { position: static; }
+  .nest svg { max-width: 380px; }
+  .film-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .chap-wrap { position: static; }
+  .chapters { position: relative; inset: auto; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; padding: 6px; scrollbar-width: none; }
+  .chapters::-webkit-scrollbar { display: none; }
+  .chapters li { flex: none; }
+  .chapters button { white-space: nowrap; gap: 8px; }
+  .chapters .t { min-width: 0; }
+  .fgroup { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .fgroup-h { position: static; }
+  .specs-grid .sec-head { margin-bottom: 8px; }
 }
+@media (max-width: 720px) {
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fitems { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .limits-list { grid-template-columns: minmax(0, 1fr); }
+  .spec th, .spec td { display: block; width: auto; padding: 0 18px; border-bottom: 0; white-space: normal; }
+  .spec th { padding-top: 16px; }
+  .spec td { padding-top: 4px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+  .fp { flex-direction: column; align-items: stretch; padding: 14px; }
+  .ctas .btn { flex: 1 1 100%; }
+  .foot-bottom { flex-direction: column; }
+}
+@media (max-width: 400px) {
+  .steps > li { padding-left: 40px; }
+  .pill { flex: 1 1 auto; }
+}
+@media (max-width: 330px) { .brand span { display: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .redacted::after { animation: none; transform: scaleX(0); }
-  .fill { animation: none; width: 100%; }
+  .rig .fill:not(.never) { animation: none; width: 100%; }
   .phone.shake, .pin-field.bad, .pin-field .caret, .list.fresh .v-row, .sheet, .scrim, .pop, .spin { animation: none; }
-  .toast, .tab::after, .sw, .sw::after { transition: none; }
+  .toast, .tab::after, .sw, .sw::after, .btn, .ring *, .layer-tag span { transition: none; }
 }
 </style>
 
-<div class="wrap">
-  <header class="top">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Undertow</div>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="#" aria-label="Undertow, back to the top">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="7" y="12.5" width="10" height="4.5" rx="1.2" fill="#e8a33d"/></svg>
+      <span>Undertow</span>
+    </a>
     <nav aria-label="Sections">
       <a href="#video">Demo</a>
       <a href="#layers">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#sync">Backup</a>
       <a href="#specs">Specs</a>
-      <a href="#sync">Sync</a>
       <a href="#limits">Limits</a>
     </nav>
-  </header>
+    <div class="top-actions">
+      <a class="icon-btn" href="https://github.com/FalconFuryX77/Undertow" aria-label="Source on GitHub" title="Source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <a class="btn btn-primary btn-sm" href="#install">Download</a>
+    </div>
+  </div>
+</header>
 
-  <div class="hero">
+<main id="main">
+
+<div class="hero" id="hero">
+  <div class="wrap hero-in">
     <div class="hero-copy">
-      <div class="eyebrow">For journalists, fixers and documenters · Android · v3.2.1 beta</div>
+      <p class="kicker"><i aria-hidden="true"></i>For journalists, fixers and documenters</p>
       <h1>Hand over your phone.<br>Keep your <span class="redacted">sources.</span></h1>
       <p class="lede">Undertow looks and works like an ordinary video trimmer. Behind it is an encrypted vault, a decoy you can open when someone makes you, and keys that never leave your phone's secure hardware. It records straight into the vault and backs up to a server you trust.</p>
       <div class="ctas">
-        <a class="btn btn-primary" href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download v3.2.1 for Android</a>
-        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow">See the source</a>
-        <a class="btn btn-ghost" href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Read the threat model</a>
+        <a class="btn btn-primary btn-lg" href="https://github.com/FalconFuryX77/Undertow/releases/latest">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download for Android<span class="note">v3.2.1</span>
+        </a>
+        <a class="btn btn-lg" href="#video">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.2v13.6L19.5 12z"/></svg>
+          Watch the demo<span class="note">4 min</span>
+        </a>
       </div>
-      <div class="facts">
-        <span>AES-256-GCM</span><span>Argon2id + hardware keystore</span><span>Decoy and duress PINs</span><span>Backs up only to your server</span><span>Screen-off recorder</span>
-      </div>
+      <p class="hero-links"><a href="https://github.com/FalconFuryX77/Undertow">Source on GitHub</a><a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Threat model</a><span>Free, MIT licensed, in beta</span></p>
+      <dl class="facts">
+        <div><dt>Encryption</dt><dd>AES-256-GCM</dd></div>
+        <div><dt>Keys</dt><dd>Argon2id and your phone's secure hardware</dd></div>
+        <div><dt>Under pressure</dt><dd>Decoy and duress PINs</dd></div>
+        <div><dt>Backup</dt><dd>Only to a server you run</dd></div>
+      </dl>
     </div>
 
     <div class="demo" aria-label="Interactive demo of the app">
+      <div class="stage"><div class="fit">
       <div class="phone" id="phone">
         <div class="screen on-cover" id="screen">
           <div class="statusbar" aria-hidden="true"><span>9:41</span><span class="sb">
@@ -504,111 +645,202 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
           <div class="toast" id="toast" role="status"></div>
         </div>
       </div>
-
-      <div class="demo-guide">
-        <div class="seen" aria-live="polite"><span>Showing:</span><b id="seen">what an inspector sees</b></div>
-        <ol>
-          <li>Triple-tap <code>Video Trimmer</code>. Nothing on screen tells you that works.</li>
-          <li>Type <code>2580</code> for your vault, or <code>1111</code> for the decoy you hand over, then Unlock.</li>
-          <li>Inside, filter and search, hold to shred a file, look through Settings, or tap the power icon to wipe the keys from memory at once.</li>
-          <li>On the trimmer, <code>⋮ → Clear cache</code> is the quiet stop for anything waiting to upload.</li>
-        </ol>
-        <button class="btn btn-ghost panic" id="panic">Simulate a panic shake</button>
+      </div></div>
+      <div class="readout">
+        <div class="seen" aria-live="polite"><i class="led" aria-hidden="true"></i><span>Showing</span><b id="seen">what an inspector sees</b></div>
+        <p class="hint" id="hint">Triple-tap the title, <code>Video Trimmer</code>. Nothing on screen says that works.</p>
+        <div class="readout-actions">
+          <button class="btn btn-sm" id="panic">Simulate a panic shake</button>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<section id="video" aria-labelledby="video-title">
+<section class="sec" id="video" aria-labelledby="video-title">
   <div class="wrap">
-    <div class="film-head">
-      <div class="eyebrow">See it work</div>
+    <header class="sec-head rv">
+      <p class="sec-tag"><span>01</span><b>Demo</b></p>
       <h2 id="video-title">Every feature, start to finish</h2>
-      <p style="color:var(--muted)">Filmed in the real app (v3.2) on an Android emulator, with made-up notes and documents and stock photos and video. The captions beside the phone explain each step; it plays muted here, and the player's sound button turns the music on.</p>
+      <p class="sec-lede">Four minutes in the real app. Jump to any part from the list.</p>
+    </header>
+    <div class="film-grid rv">
+      <figure class="film">
+        <video id="film" controls muted playsinline loop preload="none" poster="demo-poster.jpg"
+               aria-label="Demo of Undertow: the video trimmer cover, the hidden vault, viewers, shredding, decoys, the duress PIN, capture, backup, moving and restoring">
+          <source src="demo.mp4" type="video/mp4">
+        </video>
+      </figure>
+      <div class="chap-wrap">
+        <ol class="chapters" aria-label="Parts of the demo">
+          <li><button data-t="5"><span class="t">0:05</span>The cover app</button></li>
+          <li><button data-t="14.5"><span class="t">0:14</span>Three taps to get in</button></li>
+          <li><button data-t="23.1"><span class="t">0:23</span>Notes and imports</button></li>
+          <li><button data-t="37.2"><span class="t">0:37</span>Finding things</button></li>
+          <li><button data-t="46.7"><span class="t">0:46</span>Opening files inside</button></li>
+          <li><button data-t="69.3"><span class="t">1:09</span>Rename and shred</button></li>
+          <li><button data-t="85.8"><span class="t">1:25</span>Camera and recorders</button></li>
+          <li><button data-t="115.5"><span class="t">1:55</span>The decoy vault</button></li>
+          <li><button data-t="136.1"><span class="t">2:16</span>Panic and auto-lock</button></li>
+          <li><button data-t="146.2"><span class="t">2:26</span>Backup and history</button></li>
+          <li><button data-t="175.3"><span class="t">2:55</span>Uploading while locked</button></li>
+          <li><button data-t="202.9"><span class="t">3:22</span>Moving to another phone</button></li>
+          <li><button data-t="212.4"><span class="t">3:32</span>The duress PIN</button></li>
+          <li><button data-t="233"><span class="t">3:53</span>Moving in and restoring</button></li>
+        </ol>
+      </div>
     </div>
-    <figure class="film">
-      <video id="film" controls muted playsinline loop preload="none" poster="demo-poster.jpg"
-             aria-label="Demo of Undertow: the video trimmer cover, the hidden vault, viewers, shredding, decoys, the duress PIN, capture, backup, moving and restoring">
-        <source src="demo.mp4" type="video/mp4">
-      </video>
-    </figure>
+    <p class="film-note">Filmed in v3.2 on an Android emulator, with made-up notes and documents and stock photos and video. It plays muted; the player's sound button turns the music on.</p>
   </div>
 </section>
 
-<section id="layers">
+<section class="sec" id="layers" aria-labelledby="layers-title">
   <div class="wrap">
-    <div class="layers-head">
-      <div class="eyebrow">How it works</div>
-      <h2>Three layers, from the outside in</h2>
-      <p style="color:var(--muted)">Each layer covers a different moment: a quick look through your phone, being forced to unlock it, and a lab with your phone and time.</p>
+    <header class="sec-head rv">
+      <p class="sec-tag"><span>02</span><b>How it works</b></p>
+      <h2 id="layers-title">Three layers, from the outside in</h2>
+      <p class="sec-lede">Each layer covers a different moment: a quick look through your phone, being forced to unlock it, and a lab with your phone and time.</p>
+    </header>
+    <div class="layers-grid">
+      <figure class="nest">
+        <svg viewBox="0 0 400 452" role="img" aria-labelledby="nest-t nest-d">
+          <title id="nest-t">The three layers, one inside the other</title>
+          <desc id="nest-d">The video trimmer is the outside. Inside it is the decoy vault. Inside that is your vault.</desc>
+          <defs>
+            <pattern id="blk" x="80" y="288" width="22" height="15" patternUnits="userSpaceOnUse"><rect width="16" height="7" rx="2" fill="#2b2a26"/></pattern>
+            <pattern id="blk-on" x="80" y="288" width="22" height="15" patternUnits="userSpaceOnUse"><rect width="16" height="7" rx="2" fill="#e8a33d" fill-opacity="0.6"/></pattern>
+          </defs>
+          <g class="ring on" data-layer="1">
+            <rect class="frame" x="1" y="1" width="398" height="450" rx="30" fill="#0e0e0d"/>
+            <text class="rl" x="30" y="46">LAYER 1 · VIDEO TRIMMER</text>
+            <text class="rs" x="30" y="70">What a quick look finds</text>
+          </g>
+          <g class="ring" data-layer="2">
+            <rect class="frame" x="30" y="100" width="340" height="322" rx="22" fill="#121211"/>
+            <text class="rl" x="56" y="142">LAYER 2 · DECOY VAULT</text>
+            <text class="rs" x="56" y="166">What a forced unlock opens</text>
+          </g>
+          <g class="ring" data-layer="3">
+            <rect class="frame" x="56" y="196" width="288" height="200" rx="16" fill="#171715"/>
+            <text class="rl" x="80" y="236">LAYER 3 · YOUR VAULT</text>
+            <text class="rs" x="80" y="260">What a seized phone can't give up</text>
+            <rect class="blocks" x="80" y="288" width="236" height="82"/>
+            <rect class="blocks lit" x="80" y="288" width="236" height="82"/>
+          </g>
+        </svg>
+      </figure>
+      <ol class="layers">
+        <li class="layer on rv" data-layer="1">
+          <p class="layer-tag"><span>Layer 1</span>A quick look</p>
+          <h3>A video trimmer that really is one</h3>
+          <ul>
+            <li><b>Pick a video, cut it, save the clip</b>, with or without sound. It explains the camera, the microphone and gigabytes of "project cache".</li>
+            <li><b>No vault button, menu or wording</b> anywhere in it. The way in is a triple-tap only you know about.</li>
+            <li><b>It never reacts to being picked up or shaken</b> while locked, so handling it gives nothing away.</li>
+          </ul>
+        </li>
+        <li class="layer rv" data-layer="2">
+          <p class="layer-tag"><span>Layer 2</span>Forced to unlock</p>
+          <h3>A decoy you can hand over</h3>
+          <ul>
+            <li><b>A second PIN</b> opens a separate, ordinary-looking vault. Both PINs go into the same field.</li>
+            <li><b>Nothing in the decoy shows that another vault exists.</b> The storage always has four key slots, used or not.</li>
+            <li><b>No vault knows whether it's the real one.</b> A decoy can even have a decoy of its own, and none ever overwrites another.</li>
+            <li><b>A duress PIN, if you want one,</b> erases the real vault for good and opens the decoy as if it were the only one.</li>
+          </ul>
+        </li>
+        <li class="layer rv" data-layer="3">
+          <p class="layer-tag"><span>Layer 3</span>A seized phone</p>
+          <h3>Encryption tied to your phone</h3>
+          <ul>
+            <li><b>Your PIN is never stored.</b> It's stretched with Argon2id and mixed with a key locked inside your phone's secure hardware.</li>
+            <li><b>A copied vault can't be cracked on another computer,</b> because every guess has to run on your phone.</li>
+            <li><b>No fingerprint unlock, on purpose.</b> A finger can be pressed to a sensor by force. A PIN can't be taken that way, and only a PIN can choose the decoy.</li>
+          </ul>
+        </li>
+      </ol>
     </div>
-    <ol class="layers">
-      <li class="layer">
-        <div class="layer-tag">Quick look</div>
-        <h3>A video trimmer that really is one</h3>
-        <ul>
-          <li><b>Pick a video, cut it, save the clip</b>, with or without sound. It explains the camera, the microphone and gigabytes of "project cache".</li>
-          <li><b>No vault button, menu or wording</b> anywhere in it. The way in is a triple-tap only you know about.</li>
-          <li><b>It never reacts to being picked up or shaken</b> while locked, so handling it gives nothing away.</li>
-        </ul>
-      </li>
-      <li class="layer layer-decoy">
-        <div class="layer-tag">Forced to unlock</div>
-        <h3>A decoy you can hand over</h3>
-        <ul>
-          <li><b>A second PIN</b> opens a separate, ordinary-looking vault. Both PINs go into the same field.</li>
-          <li><b>Nothing in the decoy shows that another vault exists.</b> The storage always has four key slots, used or not.</li>
-          <li><b>No vault knows whether it's the real one.</b> A decoy can even have a decoy of its own, and none ever overwrites another.</li>
-          <li><b>A duress PIN, if you want one,</b> erases the real vault for good and opens the decoy as if it were the only one.</li>
-        </ul>
-      </li>
-      <li class="layer layer-vault">
-        <div class="layer-tag">Seized phone</div>
-        <h3>Encryption tied to your phone</h3>
-        <ul>
-          <li><b>Your PIN is never stored.</b> It's stretched with Argon2id and mixed with a key locked inside your phone's secure hardware.</li>
-          <li><b>A copied vault can't be cracked on another computer,</b> because every guess has to run on your phone.</li>
-          <li><b>No fingerprint unlock, on purpose.</b> A finger can be pressed to a sensor by force. A PIN can't be taken that way, and only a PIN can choose the decoy.</li>
-        </ul>
-      </li>
-    </ol>
   </div>
 </section>
 
-<section>
+<section class="sec" id="features" aria-labelledby="features-title">
   <div class="wrap">
-    <div class="grid-head">
-      <div class="eyebrow">When it counts</div>
-      <h2>Built for the bad five minutes</h2>
+    <header class="sec-head rv">
+      <p class="sec-tag"><span>03</span><b>Features</b></p>
+      <h2 id="features-title">Built for the bad five minutes</h2>
+      <p class="sec-lede">And for the ordinary days before them, when the work is getting material in and keeping it readable.</p>
+    </header>
+
+    <div class="fgroup rv">
+      <div class="fgroup-h"><h3>Under pressure</h3><p>When someone is reaching for the phone.</p></div>
+      <div class="fitems">
+        <div class="fitem"><span class="k">Panic shake</span><h4>Lock in one motion</h4><p>Shake the phone hard, or just press the power button, and the open vault locks at once, clearing its keys from memory.</p></div>
+        <div class="fitem"><span class="k">Quiet stop</span><h4>Clear the trail in a tap</h4><p>"Clear cache" in the trimmer's menu, or a stop code typed as if it were a wrong PIN, wipes anything still waiting to upload and the login it would use. The vault and your backup stay as they are.</p></div>
+        <div class="fitem"><span class="k">Auto-lock</span><h4>Locks behind you</h4><p>Leaving the app or putting the phone down locks the vault. Typing a long note keeps it open.</p></div>
+        <div class="fitem"><span class="k">Lockouts</span><h4>Guessing gets slower</h4><p>Five wrong tries lock it for 30 seconds, then a minute, then two, doubling up to an hour.</p></div>
+      </div>
     </div>
-    <div class="features">
-      <div class="feature"><span class="k">Panic shake</span><h3>Lock in one motion</h3><p>Shake the phone hard, or just press the power button, and the open vault locks at once, clearing its keys from memory.</p></div>
-      <div class="feature"><span class="k">Quiet stop</span><h3>Clear the trail in a tap</h3><p>"Clear cache" in the trimmer's menu, or a stop code typed as if it were a wrong PIN, wipes anything still waiting to upload and the login it would use. The vault and your backup stay as they are.</p></div>
-      <div class="feature"><span class="k">Auto-lock</span><h3>Locks behind you</h3><p>Leaving the app or putting the phone down locks the vault. Typing a long note keeps it open.</p></div>
-      <div class="feature"><span class="k">No screenshots</span><h3>Blank in recent apps</h3><p>Vault screens can't be captured and show blank in the app switcher. The cover app behaves normally.</p></div>
-      <div class="feature"><span class="k">Tamper-evident</span><h3>Refuses altered files</h3><p>Every 64 KB of every file is authenticated. A changed, swapped or cut-short file won't open.</p></div>
-      <div class="feature"><span class="k">Lockouts</span><h3>Guessing gets slower</h3><p>Five wrong tries lock it for 30 seconds, then a minute, then two, doubling up to an hour.</p></div>
-      <div class="feature"><span class="k">Quiet</span><h3>Connects to one place</h3><p>The app makes no connections until you set up backup, and then only to the server you entered. It's excluded from phone cloud backups.</p></div>
-      <div class="feature"><span class="k">Opens inside</span><h3>No other app sees it</h3><p>Photos, video, audio, PDFs, Word files, spreadsheets, slides and text open right in the vault, and text files can be edited there. Nothing decrypted is saved to the phone.</p></div>
-      <div class="feature"><span class="k">Sealed-off reader</span><h3>Files can't reach the vault</h3><p>PDFs and pictures are decoded in a separate, locked-down process with no access to your files, the vault or the internet. A booby-trapped file gets nothing.</p></div>
-      <div class="feature"><span class="k">Private typing</span><h3>Your keyboard forgets</h3><p>What you type in the vault isn't learned by the keyboard, so it won't turn up later as a suggestion somewhere else.</p></div>
-      <div class="feature"><span class="k">Hidden recorder</span><h3>Record without looking</h3><p>With the screen off and the phone in your pocket, press volume-down or volume-up the number of times you chose to start recording, and again to stop. Or use the assistant button. No unlocking, no screen.</p></div>
-      <div class="feature"><span class="k">Locked recording</span><h3>Even your phone can't play it</h3><p>Audio is encrypted as it's recorded, to a key only your vault holds. It moves into the vault the next time you unlock it; the decoy never sees it.</p></div>
-      <div class="feature"><span class="k">Camera</span><h3>Photos and video, straight in</h3><p>Take photos and record video from inside the vault. They never touch the gallery, and they keep when, where and with which phone they were taken, as evidence.</p></div>
-      <div class="feature"><span class="k">Crash-safe</span><h3>Keeps what it caught</h3><p>Recordings are saved every second. If the phone dies or is switched off mid-recording, everything up to the last second is kept.</p></div>
+
+    <div class="fgroup rv">
+      <div class="fgroup-h"><h3>Capture</h3><p>Straight into the vault, never the gallery.</p></div>
+      <div class="fitems">
+        <div class="fitem"><span class="k">Camera</span><h4>Photos and video, straight in</h4><p>Take photos and record video from inside the vault. They never touch the gallery, and they keep when, where and with which phone they were taken, as evidence.</p></div>
+        <div class="fitem"><span class="k">Hidden recorder</span><h4>Record without looking</h4><p>With the screen off and the phone in your pocket, press volume-down or volume-up the number of times you chose to start recording, and again to stop. Or use the assistant button. No unlocking, no screen.</p></div>
+        <div class="fitem"><span class="k">Locked recording</span><h4>Even your phone can't play it</h4><p>Audio is encrypted as it's recorded, to a key only your vault holds. It moves into the vault the next time you unlock it; the decoy never sees it.</p></div>
+        <div class="fitem"><span class="k">Crash-safe</span><h4>Keeps what it caught</h4><p>Recordings are saved every second. If the phone dies or is switched off mid-recording, everything up to the last second is kept.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup rv">
+      <div class="fgroup-h"><h3>Inside the vault</h3><p>Open and read without anything leaking out.</p></div>
+      <div class="fitems">
+        <div class="fitem"><span class="k">Opens inside</span><h4>No other app sees it</h4><p>Photos, video, audio, PDFs, Word files, spreadsheets, slides and text open right in the vault, and text files can be edited there. Nothing decrypted is saved to the phone.</p></div>
+        <div class="fitem"><span class="k">Sealed-off reader</span><h4>Files can't reach the vault</h4><p>PDFs and pictures are decoded in a separate, locked-down process with no access to your files, the vault or the internet. A booby-trapped file gets nothing.</p></div>
+        <div class="fitem"><span class="k">Tamper-evident</span><h4>Refuses altered files</h4><p>Every 64 KB of every file is authenticated. A changed, swapped or cut-short file won't open.</p></div>
+      </div>
+    </div>
+
+    <div class="fgroup rv">
+      <div class="fgroup-h"><h3>Leaves no trail</h3><p>What the rest of the phone never learns.</p></div>
+      <div class="fitems">
+        <div class="fitem"><span class="k">No screenshots</span><h4>Blank in recent apps</h4><p>Vault screens can't be captured and show blank in the app switcher. The cover app behaves normally.</p></div>
+        <div class="fitem"><span class="k">Private typing</span><h4>Your keyboard forgets</h4><p>What you type in the vault isn't learned by the keyboard, so it won't turn up later as a suggestion somewhere else.</p></div>
+        <div class="fitem"><span class="k">Quiet</span><h4>Connects to one place</h4><p>The app makes no connections until you set up backup, and then only to the server you entered. It's excluded from phone cloud backups.</p></div>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="specs">
-  <div class="wrap specs-wrap">
-    <div class="specs-intro">
-      <div class="eyebrow">Specs</div>
-      <h2>Standard parts, documented</h2>
-      <p>No home-made ciphers. Every piece is a well-studied building block, and the way they fit together is written down byte by byte so anyone can check it.</p>
+<section class="sec" id="sync" aria-labelledby="sync-title">
+  <div class="wrap sync-grid">
+    <div class="sync-copy rv">
+      <header class="sec-head">
+        <p class="sec-tag"><span>04</span><b>Backup</b></p>
+        <h2 id="sync-title">Getting your work out on a bad signal</h2>
+      </header>
+      <p>The safest file is one that has already left the phone. Undertow backs up by itself, in small encrypted pieces that resume where they stopped, so even a few seconds of signal count. With no signal, what's left waits in a sealed queue that goes out the moment a network appears, even with the vault locked and the phone in your pocket. New photos and videos go first as small copies, so something gets out even on a bad line.</p>
+      <p>The server only ever holds ciphertext. A news desk or NGO can run its own. A phone taken from you can't delete what already got out: the login it keeps for uploading can add to the backup, never read or remove it.</p>
+      <p><a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/DEPLOY.md">Run your own backup server</a></p>
+    </div>
+    <div class="rig rv" role="img" aria-label="Test results for uploads over a signal that comes and goes: sending whole files never finished, Undertow got a 1 megabyte file through in 66 seconds.">
+      <div class="rig-h"><span>From our test rig</span><span>64 kB/s</span></div>
+      <div class="signal-row"><span>Signal</span><div class="track"><div class="pockets"></div></div><em>up for 2 s, gone for 3 s</em></div>
+      <div class="signal-row"><span>Whole files</span><div class="track"><div class="fill never"></div></div><em>never finished</em></div>
+      <div class="signal-row ours"><span>Undertow</span><div class="track"><div class="fill"></div></div><em>1 MB through in 66 s</em></div>
+      <small>The best possible on that line was 41 seconds. A 3 MB file also survived a link that dropped 30% of connections, intact.</small>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="specs" aria-labelledby="specs-title">
+  <div class="wrap specs-grid">
+    <header class="sec-head rv">
+      <p class="sec-tag"><span>05</span><b>Specs</b></p>
+      <h2 id="specs-title">Standard parts, documented</h2>
+      <p class="sec-lede">No home-made ciphers. Every piece is a well-studied building block, and the way they fit together is written down byte by byte so anyone can check it.</p>
       <p><a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/CONTAINER_FORMAT.md">Read the container format</a></p>
-    </div>
-    <div class="table-scroll">
+    </header>
+    <div class="spec rv">
       <table>
         <tbody>
           <tr><th scope="row">Encryption</th><td>AES-256-GCM, in 64 KB chunks bound to the file, position and length</td></tr>
@@ -624,32 +856,14 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
   </div>
 </section>
 
-<section id="sync">
-  <div class="wrap sync">
-    <div class="sync-copy">
-      <span class="status-chip">Automatic · keeps going while locked · previews first</span>
-      <h2>Getting your work out on a bad signal</h2>
-      <p>The safest file is one that has already left the phone. Undertow backs up by itself, in small encrypted pieces that resume where they stopped, so even a few seconds of signal count. With no signal, what's left waits in a sealed queue that goes out the moment a network appears, even with the vault locked and the phone in your pocket. New photos and videos go first as small copies, so something gets out even on a bad line.</p>
-      <p>The server only ever holds ciphertext. A news desk or NGO can run its own. A phone taken from you can't delete what already got out: the login it keeps for uploading can add to the backup, never read or remove it.</p>
-    </div>
-    <div class="signal" aria-label="Test results for uploads over intermittent signal">
-      <div class="eyebrow">From our test rig</div>
-      <div class="signal-row"><span>Signal</span><div class="track"><div class="pockets"></div></div></div>
-      <div class="signal-row"><span>Whole files</span><div class="track"><div class="fill never"></div></div></div>
-      <div class="signal-row"><span>Undertow</span><div class="track"><div class="fill"></div></div></div>
-      <small>Signal up for 2 seconds, then gone for 3, at 64 kB/s. Sending whole pieces never finished. Resumable pieces got a 1 MB file through in 66 seconds, against a best possible 41. A 3 MB file also survived a link that dropped 30% of connections, intact.</small>
-    </div>
-  </div>
-</section>
-
-<section id="limits">
-  <div class="wrap limits">
-    <div style="display:grid;gap:14px">
-      <div class="eyebrow">Limits</div>
-      <h2>What it can't do</h2>
-      <p style="color:var(--muted)">If your safety depends on this, you should know where it stops.</p>
-    </div>
-    <ul>
+<section class="sec" id="limits" aria-labelledby="limits-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <p class="sec-tag"><span>06</span><b>Limits</b></p>
+      <h2 id="limits-title">What it can't do</h2>
+      <p class="sec-lede">If your safety depends on this, you should know where it stops.</p>
+    </header>
+    <ol class="limits-list rv">
       <li><b>It can't protect what you're made to unlock.</b><span>If someone gets the real PIN out of you, they see the real vault. Give them the decoy instead.</span></li>
       <li><b>The disguise fools a quick look, not an expert.</b><span>Someone who knows this app can recognise it. The decoy is what holds up then.</span></li>
       <li><b>A lab can tell there's encrypted data.</b><span>It can't tell how much, or how many vaults.</span></li>
@@ -661,31 +875,68 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       <li><b>A lab can see an upload queue.</b><span>If something is still waiting to upload, a rooted examination shows that a queue exists and how big it is. The quiet stop removes it.</span></li>
       <li><b>Uninstalling erases the vault.</b><span>The vault lives inside the app. Back it up, or move it out from Settings, before removing or reinstalling.</span></li>
       <li><b>Android only, and in beta.</b><span>It hasn't had an independent security review yet.</span></li>
-    </ul>
+    </ol>
   </div>
 </section>
 
+<section class="sec" id="install" aria-labelledby="install-title">
+  <div class="wrap">
+    <div class="install rv">
+      <div>
+        <header class="sec-head">
+          <p class="sec-tag"><span>07</span><b>Install</b></p>
+          <h2 id="install-title">Put it on your phone</h2>
+          <p class="sec-lede">Undertow isn't in an app store. You download the app file from GitHub and install it yourself.</p>
+        </header>
+        <a class="btn btn-primary btn-lg" href="https://github.com/FalconFuryX77/Undertow/releases/latest">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download v3.2.1 for Android
+        </a>
+        <div class="install-more">
+          <p>Coming from the earlier app, shown as "Files"? <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/RELEASING.md">Move your vault across</a>.</p>
+          <p>Every version and what changed: <a href="https://github.com/FalconFuryX77/Undertow/blob/master/CHANGELOG.md">the changelog</a>.</p>
+        </div>
+      </div>
+      <ol class="steps">
+        <li>
+          <h3>Download the app file</h3>
+          <p>Most phones from the last eight years want the <code>arm64-v8a</code> file. The release page lists the others. Android will ask you to allow installs from your browser; that's expected.</p>
+        </li>
+        <li>
+          <h3>Check it's really ours</h3>
+          <p>Every release is signed with one key. Its certificate's SHA-256 is below; <code>apksigner verify --print-certs</code> shows it for the file you downloaded, and <code>SHA256SUMS.txt</code> lists each file's checksum.</p>
+          <div class="fp"><code id="fp" aria-label="Signing certificate SHA-256"><span>120bc489</span><span>10582d88</span><span>bca8bd30</span><span>68b72697</span><span>4672d2b6</span><span>78ee24d4</span><span>fa252b64</span><span>a0c51de1</span></code><button class="btn btn-sm" id="copy-fp" data-fp="120bc48910582d88bca8bd3068b726974672d2b678ee24d4fa252b64a0c51de1">Copy</button></div>
+        </li>
+        <li>
+          <h3>Open it and choose a passphrase</h3>
+          <p>It shows up as Video Trimmer. Triple-tap its title, then choose a passphrase you'll remember under stress. There is no reset, by design.</p>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+</main>
+
 <footer>
-  <div class="wrap foot">
-    <div class="foot-left">
-      <div>Undertow v3.2.1 · Android beta · Built in the open</div>
-      <div class="made">
-        <span>Made by <b>FalconFuryX77</b></span>
-        <a class="social" href="https://github.com/FalconFuryX77" aria-label="FalconFuryX77 on GitHub" title="GitHub">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        </a>
-        <a class="social" href="https://x.com/PraneelPaliwal" aria-label="@PraneelPaliwal on X" title="X">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-        </a>
+  <div class="wrap">
+    <div class="foot-top">
+      <p class="made">Made by <b>FalconFuryX77</b></p>
+      <div class="pills">
+        <a class="btn pill" href="https://github.com/FalconFuryX77"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>FalconFuryX77</a>
+        <a class="btn pill" href="https://x.com/PraneelPaliwal"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@PraneelPaliwal</a>
       </div>
     </div>
-    <nav aria-label="Documents">
-      <a href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download</a>
-      <a href="https://github.com/FalconFuryX77/Undertow">Source</a>
-      <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Threat model</a>
-      <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/SYNC_DESIGN.md">Sync design</a>
-      <a href="https://github.com/FalconFuryX77/Undertow/blob/master/LICENSE">MIT license</a>
-    </nav>
+    <div class="foot-bottom">
+      <p>Undertow v3.2.1 · open source under <a href="https://github.com/FalconFuryX77/Undertow/blob/master/LICENSE">MIT</a></p>
+      <nav aria-label="Documents">
+        <a href="https://github.com/FalconFuryX77/Undertow/releases/latest">Download</a>
+        <a href="https://github.com/FalconFuryX77/Undertow">Source</a>
+        <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/THREAT_MODEL.md">Threat model</a>
+        <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/SYNC_DESIGN.md">Sync design</a>
+        <a href="https://github.com/FalconFuryX77/Undertow/blob/master/docs/DESIGN.md">Design</a>
+      </nav>
+    </div>
   </div>
 </footer>
 
@@ -988,8 +1239,9 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
       + '<button class="btn0" role="menuitem" data-act="export">Export</button>'
       + '<button class="btn0" role="menuitem" data-act="rename">Rename</button>'
       + '<button class="btn0 red" role="menuitem" data-act="shred">Shred</button>';
-    pop.style.right = `${Math.max(8, sr.right - br.right + 4)}px`;
-    pop.style.top = `${Math.min(br.top - sr.top + 6, sr.height - 160)}px`;
+    const k = sr.width / screen.offsetWidth || 1; // the phone may be drawn scaled down
+    pop.style.right = `${Math.max(8, (sr.right - br.right) / k + 4)}px`;
+    pop.style.top = `${Math.min((br.top - sr.top) / k + 6, sr.height / k - 160)}px`;
     pop.dataset.id = it.id;
     openFloating(pop);
   }
@@ -1134,5 +1386,131 @@ footer { border-top: 1px solid var(--line); padding-block: 40px 56px; font-size:
   }
   $("vault-panic").addEventListener("click", panic);
   $("panic").addEventListener("click", panic);
+})();
+(() => {
+  // The page around the phone: the top bar, the layer diagram, the film's
+  // chapters, the next-step hint, the fingerprint's copy button.
+  const d = document;
+  const $$ = (s, el = d) => [...el.querySelectorAll(s)];
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const io = "IntersectionObserver" in window;
+
+  const top = d.querySelector(".top");
+  const onScroll = () => top.classList.toggle("stuck", scrollY > 8);
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  // Which section the reader is in, shown in the top bar.
+  if (io) {
+    const links = new Map($$(".top nav a").map((a) => [a.getAttribute("href").slice(1), a]));
+    const spy = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        links.forEach((a) => a.removeAttribute("aria-current"));
+        links.get(e.target.id)?.setAttribute("aria-current", "true");
+      }
+    }, { rootMargin: "-45% 0px -50% 0px" });
+    $$("main > [id]").forEach((s) => spy.observe(s));
+  }
+
+  // Blocks settle in once as they're reached.
+  if (io && !still) {
+    d.documentElement.classList.add("js");
+    const rv = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        e.target.classList.add("in");
+        rv.unobserve(e.target);
+      }
+    }, { rootMargin: "0px 0px -6% 0px", threshold: 0.04 });
+    $$(".rv").forEach((el) => rv.observe(el));
+  }
+
+  // The layer being read lights up in the diagram (and the other way round).
+  const rings = $$(".nest .ring"), layers = $$(".layer");
+  const setLayer = (n) => {
+    rings.forEach((r) => r.classList.toggle("on", r.dataset.layer === n));
+    layers.forEach((l) => l.classList.toggle("on", l.dataset.layer === n));
+  };
+  if (io) {
+    const lspy = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) setLayer(e.target.dataset.layer);
+    }, { rootMargin: "-38% 0px -56% 0px" });
+    layers.forEach((l) => lspy.observe(l));
+  }
+  [...rings, ...layers].forEach((el) => {
+    el.addEventListener("pointerenter", () => setLayer(el.dataset.layer));
+    el.addEventListener("focusin", () => setLayer(el.dataset.layer));
+  });
+
+  // The test rig's bars run when they come into view.
+  const rig = d.querySelector(".rig");
+  if (rig && io) {
+    new IntersectionObserver((entries, o) => {
+      if (!entries[0].isIntersecting) return;
+      rig.classList.add("run");
+      o.disconnect();
+    }, { threshold: 0.6 }).observe(rig);
+  } else if (rig) {
+    rig.classList.add("run");
+  }
+
+  // Under the phone: what to try next, following what the phone shows.
+  const seen = d.getElementById("seen"), hint = d.getElementById("hint");
+  const HINTS = {
+    "what an inspector sees": "Triple-tap the title, <code>Video Trimmer</code>. Nothing on screen says that works.",
+    "the hidden lock screen": "Type <code>2580</code> for your vault, or <code>1111</code> for the decoy you'd hand over. Then Unlock.",
+    "what only you see": "Filter and search, hold to shred a file, open Settings, or tap the power icon to lock and wipe the keys from memory.",
+    "the decoy you hand over": "This is all a forced unlock shows. Lock it, then come back in with <code>2580</code>.",
+  };
+  if (seen && hint) {
+    const say = () => {
+      const h = HINTS[seen.textContent.trim()];
+      if (h) hint.innerHTML = h;
+    };
+    new MutationObserver(say).observe(seen, { childList: true, characterData: true, subtree: true });
+  }
+
+  // The film's chapters: jump to one, and follow along while it plays.
+  const v = d.getElementById("film"), chaps = $$(".chapters button");
+  if (v && chaps.length) {
+    const times = chaps.map((b) => Number(b.dataset.t));
+    chaps.forEach((b, i) => b.addEventListener("click", () => {
+      const go = () => { v.currentTime = times[i]; };
+      if (v.readyState >= 1) go();
+      else v.addEventListener("loadedmetadata", go, { once: true });
+      v.play().catch(() => {});
+    }));
+    let cur = -1;
+    v.addEventListener("timeupdate", () => {
+      let i = -1;
+      for (let k = 0; k < times.length; k++) if (v.currentTime >= times[k] - 0.3) i = k;
+      if (i === cur) return;
+      cur = i;
+      chaps.forEach((b, k) => (k === i ? b.setAttribute("aria-current", "true") : b.removeAttribute("aria-current")));
+      const b = chaps[i], box = b && b.closest(".chapters");
+      if (!box) return;
+      // Scroll the list itself, never the page.
+      box.scrollTo({
+        top: b.offsetTop - (box.clientHeight - b.offsetHeight) / 2,
+        left: b.offsetLeft - (box.clientWidth - b.offsetWidth) / 2,
+      });
+    });
+  }
+
+  const copy = d.getElementById("copy-fp");
+  if (copy) {
+    copy.addEventListener("click", async () => {
+      let done = "Copied";
+      try {
+        await navigator.clipboard.writeText(copy.dataset.fp);
+      } catch {
+        getSelection().selectAllChildren(d.getElementById("fp"));
+        done = "Selected";
+      }
+      copy.textContent = done;
+      setTimeout(() => { copy.textContent = "Copy"; }, 1800);
+    });
+  }
 })();
 </script>

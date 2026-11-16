@@ -98,3 +98,33 @@ Designeer's hold-to-confirm.
   turns red with a stop square, and a slowly blinking light reads REC.
 - **Toasts** — `raised` surface, `ink` text, an icon for kind; never a
   coloured background.
+
+## The website
+
+The landing page (`site/landing.html`) uses the same language as the app, so
+the phone in its hero doesn't look like a visitor from another product.
+
+- **Dark only**, on a canvas one step darker than the app's (`#0B0B0A`), so
+  the phone reads as an object. Panels are `#111110`, hairlines `#22211E`.
+- **One signal colour**: amber for the download button, the section numbers,
+  the live readout and whatever the reader is currently on (the chapter
+  playing, the layer being read). Nothing else is coloured.
+- **Type**: the reader's own system typeface for text, Fira Code for labels,
+  numbers and anything the app would show as data. The only font the page
+  loads is a 21 KB Latin cut of Fira Code, served from the site itself, so
+  opening the page tells no font service who is reading about this app.
+- **Sections are numbered** like a manual (`01 Demo` … `07 Install`), each
+  with a short mono tag, a heading and one line of lede.
+- **The phone is the app's real screens** and can be used. Under it, a
+  readout says what's showing and what to try next. On a short laptop screen
+  the phone is drawn slightly smaller so it still fits above the fold.
+- **The demo film has chapters**: a list beside it jumps to any part and
+  follows along while it plays.
+- **The three layers are drawn nested**, and the one being read lights up.
+- **Install comes last, with the signing certificate's fingerprint** and a
+  copy button, because a sideloaded security app should be checkable from
+  the page that offers it.
+- **Motion**: blocks settle in once as they're reached; nothing loops, and
+  everything is still under "reduce motion".
+- **Footer**: who made it and where to find them, one hairline, then the
+  licence and the documents.
