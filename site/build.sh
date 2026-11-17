@@ -4,7 +4,7 @@
 #
 # site/landing.html is the page itself, without the <!doctype>/<html> lines
 # (the Claude artifact host adds those); this script adds them, and copies
-# the font the page serves itself and the demo video with its poster.
+# the fonts the page serves itself and the demo video with its poster.
 #
 # Usage: site/build.sh [output-dir]   (default: _site)
 set -euo pipefail
@@ -25,9 +25,19 @@ if [ -n "${DEMO_VIDEO:-}" ]; then
 else
   curl -fsSL -o "$OUT/demo.mp4" https://github.com/FalconFuryX77/Undertow/releases/latest/download/Undertow-demo.mp4
 fi
-# The one web font: Fira Code cut down to Latin (21 KB instead of 260), made with
+# The two web fonts, each cut down to Latin and served from the site itself.
+# Fira Code (21 KB instead of 260), made with
 #   python -m fontTools.subset assets/fonts/FiraCode-Variable.ttf --flavor=woff \
 #     --layout-features="" --output-file=site/fonts/FiraCode-Latin.woff \
-#     --unicodes="U+0020-007E,U+00A0-00FF,U+2013,U+2014,U+2018,U+2019,U+201C,U+201D,U+2022,U+2026,U+2190-2193,U+2212,U+00D7"
-cp site/fonts/FiraCode-Latin.woff assets/fonts/FiraCode-OFL.txt "$OUT/fonts/"
+#     --unicodes="$LATIN"
+# Inter (46 KB instead of 880), from InterVariable.ttf of Inter 4.1
+# (https://github.com/rsms/inter, docs/font-files), weights 400 to 700, made with
+#   python -m fontTools.varLib.instancer InterVariable.ttf wght=400:700 -o Inter-400-700.ttf
+#   python -m fontTools.subset Inter-400-700.ttf --flavor=woff \
+#     --layout-features=kern,calt,case,ccmp,locl --output-file=site/fonts/Inter-Latin.woff \
+#     --unicodes="$LATIN"
+# where LATIN is
+#   U+0020-007E,U+00A0-00FF,U+2013,U+2014,U+2018,U+2019,U+201C,U+201D,U+2022,U+2026,U+2190-2193,U+2212,U+00D7
+cp site/fonts/Inter-Latin.woff site/fonts/Inter-OFL.txt \
+   site/fonts/FiraCode-Latin.woff assets/fonts/FiraCode-OFL.txt "$OUT/fonts/"
 echo "built $OUT"

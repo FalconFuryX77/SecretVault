@@ -109,10 +109,14 @@ the phone in its hero doesn't look like a visitor from another product.
 - **One signal colour**: amber for the download button, the section numbers,
   the live readout and whatever the reader is currently on (the chapter
   playing, the layer being read). Nothing else is coloured.
-- **Type**: the reader's own system typeface for text, Fira Code for labels,
-  numbers and anything the app would show as data. The only font the page
-  loads is a 21 KB Latin cut of Fira Code, served from the site itself, so
-  opening the page tells no font service who is reading about this app.
+- **Type**: Inter for text and headings, Fira Code for labels, numbers and
+  anything the app would show as data. Unlike the app, which uses the phone's
+  own typeface, the page carries its own so it reads the same on every
+  device. Both are Latin cuts (Inter 46 KB, Fira Code 21 KB) served from the
+  site itself, so opening the page tells no font service who is reading
+  about this app. Inter keeps its optical-size axis: headings get the
+  display cut from the same file. The phone in the hero keeps the system
+  typeface, as the app does.
 - **Sections are numbered** like a manual (`01 Demo` … `07 Install`), each
   with a short mono tag, a heading and one line of lede.
 - **The phone is the app's real screens** and can be used. Under it, a

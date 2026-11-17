@@ -102,4 +102,4 @@ Core code lives in `lib/vault/` (container format, crypto, platform keys); the v
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The two bundled typefaces, Fira Code and Outfit, are under the SIL Open Font License; their licences sit next to them in `assets/fonts/`.
+MIT, see [LICENSE](LICENSE). The two bundled typefaces, Fira Code and Outfit, are under the SIL Open Font License; their licences sit next to them in `assets/fonts/`. The website also serves a cut of Inter, under the same licence (`site/fonts/Inter-OFL.txt`).

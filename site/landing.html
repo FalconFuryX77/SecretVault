@@ -10,16 +10,20 @@
 <meta property="og:image" content="https://falconfuryx77.github.io/Undertow/demo-poster.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0b0a'/%3E%3Crect x='7' y='7' width='18' height='18' rx='5' fill='none' stroke='%23edeae3' stroke-width='2.2'/%3E%3Crect x='11' y='16.5' width='10' height='4.6' rx='1.2' fill='%23e8a33d'/%3E%3C/svg%3E">
-<!-- Nothing on this page is fetched from anyone else: the text uses the
-     reader's own system typeface, and the one web font (Fira Code, SIL OFL,
-     for labels and data) is served from this site. -->
+<!-- Nothing on this page is fetched from anyone else: its two typefaces
+     (Inter for text, Fira Code for labels and data, both SIL OFL) are small
+     Latin cuts served from this site. -->
+<link rel="preload" href="fonts/Inter-Latin.woff" as="font" type="font/woff" crossorigin>
 <style>
+@font-face { font-family: "Inter"; src: url("fonts/Inter-Latin.woff") format("woff"); font-weight: 400 700; font-display: swap; }
 @font-face { font-family: "Fira Code"; src: url("fonts/FiraCode-Latin.woff") format("woff"); font-weight: 300 700; font-display: swap; }
+/* Until Inter arrives, Arial drawn at Inter's proportions, so nothing moves when it does. */
+@font-face { font-family: "Inter Fallback"; src: local("Arial"); size-adjust: 107.06%; ascent-override: 90.49%; descent-override: 22.56%; line-gap-override: 0%; }
 </style>
 <style>
 /* The page speaks the app's language (docs/DESIGN.md): a warm black canvas,
-   warm greys, one amber signal colour, the reader's own system typeface for
-   text and Fira Code for labels and data. Dark only, like the app. */
+   warm greys, one amber signal colour, Inter for text and Fira Code for
+   labels and data. Dark only, like the app. */
 :root {
   color-scheme: dark;
   --bg: #0b0b0a;
@@ -35,8 +39,10 @@
   --on-signal: #14110b;
   --alert: #e5574f;
 
-  --font-sans: "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
-  --font-display: "Segoe UI Variable Display", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  /* One family for text and headings: Inter carries an optical-size axis, so
+     large type gets its display cut without a second file. */
+  --font-sans: "Inter", "Inter Fallback", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-display: var(--font-sans);
   --font-mono: "Fira Code", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
 
   --step-1: 1.125rem;
@@ -80,9 +86,9 @@ a { color: var(--ink); text-underline-offset: 3px; text-decoration-thickness: 1p
 a:hover { text-decoration-color: currentColor; }
 a:focus-visible, .btn:focus-visible, .chapters button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 8px; }
 h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; text-wrap: balance; }
-h1 { font-size: var(--step-4); line-height: 1.02; letter-spacing: -0.035em; }
-h2 { font-size: var(--step-3); line-height: 1.08; letter-spacing: -0.028em; }
-h3 { font-size: var(--step-2); line-height: 1.2; letter-spacing: -0.018em; }
+h1 { font-size: var(--step-4); line-height: 1.02; letter-spacing: -0.028em; }
+h2 { font-size: var(--step-3); line-height: 1.08; letter-spacing: -0.022em; }
+h3 { font-size: var(--step-2); line-height: 1.2; letter-spacing: -0.014em; }
 p { margin: 0; }
 .mono { font-family: var(--font-mono); font-variant-ligatures: none; font-feature-settings: "calt" 0; }
 
@@ -134,9 +140,16 @@ p { margin: 0; }
 .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
 
 /* ── Hero ── */
-.hero { padding-block: clamp(24px, 3.4vw, 52px) clamp(64px, 8vw, 112px); }
+/* The glow behind the phone is wider than the phone; it must never widen the page. */
+.hero { padding-block: clamp(24px, 3.4vw, 52px) clamp(64px, 8vw, 112px); overflow-x: clip; }
+@supports not (overflow-x: clip) { .hero { overflow-x: hidden; } }
 .hero-in { display: grid; grid-template-columns: minmax(0, 1.22fr) minmax(0, 0.78fr); gap: clamp(32px, 5vw, 72px); align-items: center; }
-.hero-copy { display: grid; gap: 26px; justify-items: start; min-width: 0; }
+.hero-copy { display: grid; gap: 26px; justify-items: start; min-width: 0; container-type: inline-size; }
+/* The headline is two sentences on two lines. It sizes to its column so each
+   sentence stays whole, and the two buttons stay side by side next to the phone. */
+@supports (font-size: 1cqi) { .hero h1 { font-size: clamp(1.75rem, 10cqi, var(--step-4)); } }
+@container (max-width: 600px) { .ctas .btn-lg { padding-inline: 16px; } }
+@container (max-width: 300px) { .ctas .btn .note { display: none; } }
 .kicker { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-variant-ligatures: none; font-size: 0.75rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2); }
 .kicker i { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 4px rgba(232, 163, 61, 0.16); flex: none; }
 .redacted { position: relative; white-space: nowrap; }
@@ -516,6 +529,14 @@ footer { border-top: 1px solid var(--line); padding-block: 36px 40px; color: var
 @media (max-width: 400px) {
   .steps > li { padding-left: 40px; }
   .pill { flex: 1 1 auto; }
+  /* The narrowest phones: nothing in the install panel may be wider than it. */
+  .install { padding: 20px 18px; }
+  .install .btn-lg { width: 100%; height: auto; min-height: 52px; padding: 10px 14px; white-space: normal; line-height: 1.25; text-align: center; }
+  .steps code { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (max-width: 350px) {
+  .install .btn-lg { font-size: 0.9375rem; }
+  .install .btn-lg svg { display: none; }
 }
 @media (max-width: 330px) { .brand span { display: none; } }
 
